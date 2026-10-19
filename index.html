@@ -48,6 +48,9 @@
     .tag { display: inline-block; font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; background: linear-gradient(90deg, #ffd27a, var(--pink)); color: #1a0f2e; vertical-align: middle; margin-left: 6px; }
     .shots { display: flex; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 10px; scrollbar-width: thin; }
     .shots img { flex: none; width: 220px; height: auto; border-radius: 18px; scroll-snap-align: start; border: 1px solid var(--line); }
+    .film { display: grid; grid-template-columns: minmax(0, 1fr) 1fr; gap: 40px; align-items: center; }
+    .film video { display: block; width: 100%; aspect-ratio: 1; height: auto; border-radius: 22px; border: 1px solid var(--line); background: #07061a; box-shadow: 0 30px 80px rgba(0, 0, 0, .5); }
+    .film .sub { margin-bottom: 18px; }
     .plans { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .plan { padding: 22px; border-radius: 18px; border: 1px solid var(--line); background: rgba(255, 255, 255, .04); }
     .plan.premium { border-color: rgba(255, 210, 122, .5); background: linear-gradient(160deg, rgba(255, 210, 122, .12), rgba(240, 106, 155, .08)); }
@@ -60,7 +63,8 @@
       .hero { grid-template-columns: 1fr; gap: 24px; padding-top: 8px; }
       .hero-art { order: -1; }
       nav { display: none; }
-      .features, .plans { grid-template-columns: 1fr; }
+      .features, .plans, .film { grid-template-columns: 1fr; }
+      .film { gap: 18px; }
       .shots img { width: 62vw; }
     }
   </style>
@@ -69,7 +73,7 @@
   <div class="wrap">
     <header class="top">
       <a class="brand" href="./"><img src="site/icon.png" alt="" width="36" height="36">Light Up the Skies</a>
-      <nav><a href="#features">Features</a><a href="#screens">Screens</a><a href="#premium">Premium</a><a href="demo/">Try the demo</a><a href="https://www.facebook.com/profile.php?id=61595789450240">Facebook</a></nav>
+      <nav><a href="#film">Film</a><a href="#features">Features</a><a href="#screens">Screens</a><a href="#premium">Premium</a><a href="demo/">Try the demo</a><a href="https://www.facebook.com/profile.php?id=61595789450240">Facebook</a></nav>
     </header>
 
     <main>
@@ -86,6 +90,17 @@
         </div>
         <div class="hero-art"><img src="site/feature-graphic.png" alt="Fireworks and a golden diya over the Taj Mahal" width="1024" height="500"></div>
       </div>
+
+      <section id="film">
+        <div class="film">
+          <video src="site/film.mp4" poster="site/film-poster.jpg" controls autoplay muted loop playsinline preload="metadata" width="1080" height="1080" aria-label="Light Up the Skies launch film"></video>
+          <div>
+            <h2>Watch the film</h2>
+            <p class="sub">Thirty seconds of Diwali: light the sky, relight a street of crackers, and send a card with their name written in fireworks.</p>
+            <p class="note">Tap the speaker to hear it with sound.</p>
+          </div>
+        </div>
+      </section>
 
       <section id="features">
         <h2>Every way to celebrate</h2>
