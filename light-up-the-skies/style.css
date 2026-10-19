@@ -606,7 +606,7 @@ body.card-mode .meter { visibility: hidden; }
 .more-apps .set-title { margin-bottom: 2px; }
 .more-app { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 14px; background: rgba(255, 255, 255, .04); border: 1px solid var(--line); color: inherit; text-decoration: none; }
 .more-app:active { transform: scale(.98); }
-.more-app img { width: 44px; height: 44px; border-radius: 11px; flex: none; }
+.more-app img, .more-app .fb-logo { width: 44px; height: 44px; border-radius: 11px; flex: none; }
 .more-app span { display: flex; flex-direction: column; min-width: 0; }
 .more-app b { font-size: .9rem; }
 .more-app small { font-size: .74rem; color: var(--ink-2); }
