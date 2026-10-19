@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Light Up the Skies</title>
-  <meta name="description" content="An interactive fireworks show in your browser. Launch hand-crafted shells, trigger grand finales and send a fireworks greeting card with a name written in light.">
+  <meta name="description" content="Choose a cracker, follow its flight, and enjoy fireworks over India's landmarks. Send a greeting card with a name written in light.">
   <meta name="theme-color" content="#04050d">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/icons/favicon-32.png">
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icons/icon-192.png">
@@ -26,16 +26,18 @@
   <canvas id="items"></canvas>
   <canvas id="paint"></canvas>
   <canvas id="gfx"></canvas>
-  <div id="stage" aria-label="Night sky. Tap or click to launch a firework."></div>
+  <canvas id="atmo" aria-hidden="true"></canvas>
+  <div id="stage" aria-label="Night sky"></div>
 
   <!-- HUD -->
   <header class="hud ui">
-    <div class="brand">
+    <button class="brand" id="btnHome" type="button" aria-label="Home">
       <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-name">Light Up the Skies</span>
-    </div>
+      <span class="brand-home" aria-hidden="true">Home</span>
+    </button>
 
-    <div class="meter" id="meter" title="Fill the sky glow to set off a grand finale">
+    <div class="meter" id="meter" title="Sky glow">
       <div class="meter-top">
         <span>Sky glow</span>
         <span><b id="level">Lv 1</b> · <span id="burstCount">0</span> bursts</span>
@@ -44,33 +46,36 @@
     </div>
 
     <div class="actions">
-      <button class="icon-btn accent" id="btnCard" aria-label="Create greeting card" title="Greeting card">
+      <button class="icon-btn accent" id="btnCard" aria-label="Create greeting card" title="Greeting card" data-cap="Card">
         <svg viewBox="0 0 24 24"><path d="M3 8h18v13H3zM12 8v13M3 12h18M12 8c-1.5-3-5-4-6-2s2 2 6 2zm0 0c1.5-3 5-4 6-2s-2 2-6 2z"/></svg>
       </button>
-      <button class="icon-btn ar-btn" id="btnAR" aria-label="AR camera mode" title="AR camera: fireworks over your surroundings">
+      <button class="icon-btn ar-btn" id="btnAR" aria-label="AR camera mode" title="AR camera: fireworks over your surroundings" data-cap="AR">
         <svg viewBox="0 0 24 24"><path d="M3 8V4h4M21 8V4h-4M3 16v4h4M21 16v4h-4"/><path d="M12 7l4.5 2.5v5L12 17l-4.5-2.5v-5zM12 12l4.5-2.5M12 12v5M12 12L7.5 9.5"/></svg>
       </button>
       <button class="icon-btn" id="btnFlip" aria-label="Switch camera" title="Switch camera" hidden>
         <svg viewBox="0 0 24 24"><path d="M4 7h3l2-2h6l2 2h3v11H4z"/><path d="M9 12.5a3 3 0 015-2.2M15 12.5a3 3 0 01-5 2.2M14 8.8v1.6h-1.6M10 16.2v-1.6h1.6"/></svg>
       </button>
-      <button class="icon-btn" id="btnPause" aria-label="Pause" title="Pause (Space)">
+      <button class="icon-btn wide-only" id="btnPause" aria-label="Pause" title="Pause (Space)">
         <svg class="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>
         <svg class="i-play" viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg>
       </button>
-      <button class="icon-btn" id="btnSound" aria-label="Toggle sound" title="Sound (S)">
+      <button class="icon-btn" id="btnSound" aria-label="Toggle sound" title="Sound (S)" data-cap="Sound">
         <svg class="i-on" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM16.5 8.5a5 5 0 010 7M19 6a8.5 8.5 0 010 12"/></svg>
         <svg class="i-off" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4zM17 9l5 6M22 9l-5 6"/></svg>
       </button>
-      <button class="icon-btn wide-only" id="btnPhoto" aria-label="Save photo" title="Save photo">
+      <button class="icon-btn" id="btnPhoto" aria-label="Take a screenshot" title="Screenshot (no buttons)" data-cap="Photo">
         <svg viewBox="0 0 24 24"><path d="M4 7h4l2-2h4l2 2h4v12H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
       </button>
-      <button class="icon-btn" id="btnRec" aria-label="Record video" title="Record video">
+      <button class="icon-btn" id="btnRec" aria-label="Record video" title="Record video" data-cap="Record">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle class="dot" cx="12" cy="12" r="3.5"/></svg>
+      </button>
+      <button class="icon-btn" id="btnShareShow" aria-label="Record and share this show" title="Share a video of this show" data-cap="Share">
+        <svg viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/></svg>
       </button>
       <button class="icon-btn wide-only" id="btnFull" aria-label="Fullscreen" title="Fullscreen">
         <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
       </button>
-      <button class="icon-btn" id="btnSettings" aria-label="Settings" title="Settings">
+      <button class="icon-btn" id="btnSettings" aria-label="Settings" title="Settings" data-cap="Settings">
         <svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
       </button>
     </div>
@@ -95,6 +100,7 @@
     </button>
   </div>
   <div id="shareBar" class="share-bar" hidden>
+    <video id="videoPreview" controls playsinline preload="metadata" aria-label="Your recorded fireworks"></video>
     <span>Your video is ready</span>
     <button class="btn primary small" id="btnShareVideo">Share…</button>
     <button class="btn ghost small" id="btnSaveVideo">Save</button>
@@ -102,18 +108,34 @@
       <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
   </div>
-  <div id="recBadge" class="rec-badge" hidden><span class="rec-dot"></span>REC <span id="recTime">0:00</span></div>
+  <button type="button" id="recBadge" class="rec-badge" aria-label="Stop recording" hidden><span class="rec-dot"></span><span id="recLabel">REC</span> <span id="recTime">0:00</span></button>
   <div id="combo" class="combo" aria-live="polite"></div>
   <div id="toast" class="toast" role="status"></div>
+  <!-- Lantern Rush: time, score and multiplier during a round -->
+  <div class="rush-hud" id="rushHud" hidden>
+    <span class="rush-time"><b id="rushTime">30</b>s</span>
+    <span class="rush-score"><b id="rushScore">0</b> pts <i id="rushCombo"></i></span>
+    <span class="rush-target" id="rushTarget" hidden></span>
+  </div>
   <button id="btnShowUi" class="show-ui" aria-label="Show controls">Show controls</button>
 
   <!-- Shell dock -->
   <div class="bottom-ui">
-  <p class="hint ui" id="hint">Tap anywhere to launch · hold to keep firing</p>
+  <p class="hint ui" id="hint">Choose a cracker. Tap Fire. Follow it into the sky.</p>
+  <p class="launch-status" id="launchStatus" role="status" aria-live="polite"></p>
+  <div class="play-rewards ui">
+    <span class="points-balance"><b id="pointsBalance">0</b> points</span>
+    <button id="btnRewards" type="button">Earn launches</button>
+  </div>
+  <!-- Sparkler shapes: pick one, tap the sky (or the camera picture in AR) to place it, drag to move, then burst -->
+  <section class="world-strip shape-strip ui" id="shapeStrip" aria-label="Sparkler shapes">
+    <div class="shape-list" id="shapeList" role="toolbar" aria-label="Sparkler shapes"></div>
+  </section>
   <section class="world-strip ui" id="worldStrip" aria-label="Choose your world">
     <button class="world-strip-head" id="btnWorldStrip" type="button" aria-haspopup="dialog" aria-controls="worldPanel">
       <svg class="world-strip-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 21h19M6 21v-7h12v7M8 14a4 4 0 018 0M12 10V7.5M4 21V10.5M20 21V10.5M3.2 10.5h1.6M19.2 10.5h1.6M10.5 21v-3a1.5 1.5 0 013 0v3"/></svg>
-      <span>Choose Your World</span>
+      <span class="ws-title">Choose Your World</span>
+      <span class="ws-current" id="worldStripName">Night Sky</span>
       <svg class="world-strip-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
     </button>
     <div class="world-strip-list" id="worldStripList"></div>
@@ -125,37 +147,60 @@
   </div>
   <nav class="dock ui" id="dock" aria-label="Fireworks">
     <div class="shell-list p-sky" id="shellList"></div>
-    <button class="finale-btn p-sky" id="btnFinale" title="Grand finale (F)">
-      <span class="cta-icon finale-glyph" aria-hidden="true"></span><span>Finale</span>
-    </button>
     <div class="shell-list p-ground" id="groundList"></div>
-    <button class="btn ghost small p-ground clear-btn" id="btnClearStreet" title="Remove crackers that are not lit" aria-label="Clear street">
+    <button class="btn ghost small p-ground clear-btn" id="btnClearStreet" title="Clear ground and drawing" aria-label="Clear ground and drawing">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg><span>Clear</span>
     </button>
-    <button class="finale-btn p-ground" id="btnLightAll" title="Light every cracker on the street">
-      <span class="cta-icon cracker-glyph" aria-hidden="true"></span><span>Light all</span>
+    <!-- Premium: tap anywhere in the sky to fire, for a relaxed show (see tapSky in game.js) -->
+    <button class="finale-btn p-sky tap-sky" id="btnTapSky" type="button" aria-pressed="false">
+      <span class="cta-icon firework-glyph" aria-hidden="true"></span><span id="tapSkyLabel">Tap sky</span>
+    </button>
+    <!-- Premium: light every cracker waiting on the street in one go (see burstAll in game.js) -->
+    <button class="finale-btn p-ground burst-all" id="btnBurstAll" type="button" hidden>
+      <span class="cta-icon cracker-glyph" aria-hidden="true"></span><span id="burstAllLabel">Burst all</span>
     </button>
     <div class="spark-tools p-spark">
       <span class="spark-label">Sparkler</span>
       <div class="swatches" id="sparkColors"></div>
     </div>
-    <button class="finale-btn p-spark" id="btnSparkBurst" title="Turn your writing into fireworks">
-      <span class="cta-icon sparkler-glyph" aria-hidden="true"></span><span>Light it up</span>
+    <button class="finale-btn p-spark" id="btnSparkBurst" title="Turn your drawing into a firework burst" disabled>
+      <span class="cta-icon sparkler-glyph" aria-hidden="true"></span><span>Burst my drawing</span>
     </button>
   </nav>
+  <button class="btn primary launch-fire" id="btnFire" type="button">Fire Random</button>
   </div>
 
-  <!-- Intro -->
+  <div class="shot-flash" id="shotFlash" hidden></div>
+
+  <!-- Home: the app's name, one line and two choices; the game's controls wait until the show starts -->
   <section class="overlay intro" id="intro">
     <div class="intro-inner">
-      <p class="eyebrow">An interactive fireworks show</p>
+      <img class="intro-icon" src="assets/icons/icon-192.png" alt="" width="88" height="88">
       <h1 class="title">Light Up<br>the Skies</h1>
-      <p class="lead">Tap the night sky to launch fireworks. Fill the glow meter to set off a grand finale. You can also send someone a greeting card with their name written in fireworks.</p>
+      <p class="lead">Fireworks over India’s landmarks, and wishes written in the sky.</p>
       <div class="intro-actions">
         <button class="btn primary" id="btnStart"><span class="btn-ico firework-glyph" aria-hidden="true"></span>Start the show</button>
         <button class="btn ghost" id="btnIntroCard"><span class="btn-ico card-glyph" aria-hidden="true"></span>Create a greeting card</button>
       </div>
-      <p class="keys">Space pause · F finale · S sound · H hide controls · 1–9 shells</p>
+      <div class="home-tiles">
+        <button class="home-tile" id="btnBirthdays" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/birthdays.webp"><img src="assets/menu/birthdays.jpg" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Birthdays</b><small id="tileBday">Never miss a friend’s day</small></span>
+        </button>
+        <button class="home-tile" id="btnJoy" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/daily-joy.webp"><img src="assets/menu/daily-joy.jpg" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Daily joy</b><small id="tileJoy">Celebrate one good thing</small></span>
+        </button>
+        <button class="home-tile" id="btnDailySky" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/daily-sky.webp"><img src="assets/menu/daily-sky.jpg" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Daily Sky</b><small id="tileDaily">Today’s lanterns</small></span>
+        </button>
+        <button class="home-tile" id="btnRush" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/challenge.webp"><img src="assets/menu/challenge.jpg" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Challenge</b><small id="tileRush">Beat a friend’s score</small></span>
+        </button>
+      </div>
+      <p class="keys">Space pause · S sound · H hide controls</p>
     </div>
   </section>
 
@@ -172,19 +217,36 @@
     </button>
   </section>
 
+  <!-- Room AR: the floor ring that follows the phone, and the spot where the next cracker stands -->
+  <div class="ar-reticle" id="arReticle" hidden aria-hidden="true"></div>
+  <div class="ar-spot" id="arSpot" hidden aria-hidden="true"></div>
+
+  <!-- Happy Diwali, shown in the sky after a cracker's show and before the camera returns to the ground -->
+  <div class="diwali-reveal" id="diwaliReveal" hidden aria-hidden="true">
+    <img src="assets/diwali/happy-diwali.png" alt="" width="1059" height="633" decoding="async">
+  </div>
+
   <!-- Greeting shown during a card show -->
   <section class="greeting" id="greeting" hidden>
     <div class="greeting-card" id="gCard">
       <img class="g-photo" id="gPhoto" alt="" hidden>
-      <p class="g-dear">Dear <span id="gTo"></span>,</p>
+      <p class="g-dear" id="gDear">Dear <span id="gTo"></span>,</p>
+      <p class="g-dear" id="gJoyHead" hidden></p>
       <p class="g-msg" id="gMsg"></p>
       <p class="g-from" id="gFrom"></p>
     </div>
+    <!-- One main action (your show: Save video; a card you received: Send one back), then small tools -->
     <div class="g-actions">
-      <button class="btn ghost small" id="btnReplay"><span class="btn-ico replay-glyph" aria-hidden="true"></span>Replay</button>
-      <button class="btn ghost small" id="btnRecordCard"><span class="btn-ico rec-glyph" aria-hidden="true"></span>Save video</button>
-      <button class="btn primary small" id="btnMakeOwn"><span class="btn-ico firework-glyph" aria-hidden="true"></span>Make your own</button>
-      <button class="btn ghost small" id="btnCloseGreeting">Play fireworks</button>
+      <button class="btn primary g-save" id="btnRecordCard"><span class="btn-ico rec-glyph" aria-hidden="true"></span>Save video</button>
+      <button class="btn primary g-save" id="btnSendBack" hidden><span class="btn-ico card-glyph" aria-hidden="true"></span>Send one back</button>
+      <div class="g-tools">
+        <button class="g-tool" id="btnReplay"><span class="btn-ico replay-glyph" aria-hidden="true"></span>Replay</button>
+        <button class="g-tool" id="btnSaveTool" hidden><span class="btn-ico rec-glyph" aria-hidden="true"></span>Save video</button>
+        <button class="g-tool" id="btnEditCard" hidden><svg class="g-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>Edit</button>
+        <button class="g-tool" id="btnShareJoy" hidden><span class="btn-ico share-glyph" aria-hidden="true"></span>Share</button>
+        <button class="g-tool" id="btnMakeOwn"><span class="btn-ico firework-glyph" aria-hidden="true"></span>Make your own</button>
+        <button class="g-tool" id="btnCloseGreeting"><svg class="g-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>Done</button>
+      </div>
     </div>
   </section>
 
@@ -198,12 +260,39 @@
     </header>
     <div class="drawer-body">
       <div class="set-group">
+        <button class="for-you" id="setBirthdays" type="button">
+          <span class="tile-ico" aria-hidden="true">🎂</span>
+          <span class="tile-text"><b>Birthdays</b><small id="setBdayNote">Never miss a friend’s day</small></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+        <button class="for-you" id="setJoy" type="button">
+          <span class="tile-ico" aria-hidden="true">✨</span>
+          <span class="tile-text"><b>Daily joy</b><small id="setJoyNote">Celebrate one good thing</small></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+
+      <div class="quick-row" role="group" aria-label="Quick actions">
+        <button class="quick" id="setPhoto" type="button"><span aria-hidden="true">📷</span>Photo</button>
+        <button class="quick" id="setRec" type="button"><span aria-hidden="true">⏺</span>Record</button>
+        <button class="quick" id="setAR" type="button"><span aria-hidden="true">🪄</span>AR</button>
+        <button class="quick" id="setPause" type="button"><span aria-hidden="true">⏸</span>Pause</button>
+        <button class="quick" id="setHide" type="button"><span aria-hidden="true">🙈</span>Hide controls</button>
+        <button class="quick wide-only" id="setFull" type="button"><span aria-hidden="true">⛶</span>Full screen</button>
+        <button class="btn ghost small" id="setAdPrivacy" type="button" hidden>Ad privacy choices</button>
+      </div>
+
+      <div class="set-group">
         <div class="premium-row" id="premiumRow">
           <span class="premium-crown" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 18h18l-1.6-10-4.6 4.2L12 5l-2.8 7.2L4.6 8z"/><path d="M4 21h16"/></svg></span>
-          <span class="premium-row-text"><b>Premium</b><small id="premiumRowNote">All 13 landmarks + Celebration Colours</small></span>
+          <span class="premium-row-text"><b>Premium</b><small id="premiumRowNote">All 15 landmarks, AR &amp; Burst all</small></span>
           <button class="btn primary small" id="btnPremiumRow" type="button">Go Premium</button>
           <a class="btn ghost small" id="premiumManage" target="_blank" rel="noopener" hidden>Manage</a>
         </div>
+      </div>
+
+      <div class="set-group">
+        <h3 class="set-title">Scene</h3>
         <button class="world-entry" id="btnWorlds" type="button" aria-haspopup="dialog" aria-controls="worldPanel">
           <img class="world-entry-thumb" id="worldEntryThumb" src="assets/worlds/thumb/default-night-sky.jpg" alt="" width="64" height="44">
           <span class="world-entry-text">
@@ -212,42 +301,33 @@
           </span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
         </button>
-      </div>
-
-      <div class="set-group">
-        <label class="set-row" for="setShell"><span>Shell type</span>
-          <select id="setShell"></select>
-        </label>
-        <label class="set-row col" for="setSize"><span>Shell size <b id="sizeVal"></b></span>
-          <input type="range" id="setSize" min="1" max="6" step="1">
-        </label>
-        <div class="set-row col"><span>Color theme</span>
-          <div class="chips small" id="setTheme"></div>
-        </div>
-      </div>
-
-      <div class="set-group">
-        <label class="set-row" for="setQuality"><span>Quality</span>
-          <select id="setQuality">
-            <option value="low">Low (fast)</option>
-            <option value="normal">Normal</option>
-            <option value="high">High</option>
-          </select>
-        </label>
-        <label class="set-row" for="setSkyLight"><span>Sky lighting</span>
+        <label class="switch"><span>3D view <small>tilt your phone to look around</small></span><input type="checkbox" id="set3d"><i></i></label>
+        <label class="switch"><span>City skyline <small id="skylineNote" hidden>hidden while a landmark is shown</small></span><input type="checkbox" id="setSkyline"><i></i></label>
+        <label class="set-row" for="setSkyLight"><span>Sky glow <small>light from bursts</small></span>
           <select id="setSkyLight">
             <option value="off">Off</option>
-            <option value="dim">Dim</option>
-            <option value="normal">Normal</option>
+            <option value="dim">Soft</option>
+            <option value="normal">Full</option>
           </select>
         </label>
       </div>
 
       <div class="set-group">
-        <label class="switch"><span>Auto launch</span><input type="checkbox" id="setAuto"><i></i></label>
-        <label class="switch"><span>Finale mode <small>busier auto show</small></span><input type="checkbox" id="setFinale"><i></i></label>
-        <label class="switch"><span>Long exposure <small>longer light trails</small></span><input type="checkbox" id="setLong"><i></i></label>
-        <label class="switch"><span>City skyline <small id="skylineNote" hidden>hidden while a landmark is shown</small></span><input type="checkbox" id="setSkyline"><i></i></label>
+        <h3 class="set-title">Fireworks</h3>
+        <label class="set-row" for="setShell"><span>Firework type</span>
+          <select id="setShell"></select>
+        </label>
+        <label class="set-row col" for="setSize"><span>Size <b id="sizeVal"></b></span>
+          <input type="range" id="setSize" min="1" max="6" step="1">
+        </label>
+        <div class="set-row col"><span>Colours</span>
+          <div class="chips small" id="setTheme"></div>
+        </div>
+        <label class="switch"><span>Long light trails</span><input type="checkbox" id="setLong"><i></i></label>
+      </div>
+
+      <div class="set-group">
+        <h3 class="set-title">Sound</h3>
         <label class="switch"><span>Sound</span><input type="checkbox" id="setSound"><i></i></label>
         <label class="set-row col" for="setVolume"><span>Volume</span>
           <input type="range" id="setVolume" min="0" max="1" step="0.05">
@@ -255,17 +335,50 @@
       </div>
 
       <div class="set-group">
+        <h3 class="set-title">Videos</h3>
+        <label class="switch"><span>Sign videos <small>“Made with Light Up the Skies”</small></span><input type="checkbox" id="setSign"><i></i></label>
+      </div>
+
+      <div class="set-group">
+        <h3 class="set-title">Graphics</h3>
+        <label class="set-row" for="setQuality"><span>Detail <small>lower saves battery</small></span>
+          <select id="setQuality">
+            <option value="low">Battery saver</option>
+            <option value="normal">Balanced</option>
+            <option value="high">Best detail</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="set-group" id="bringer">
+        <div class="set-row"><span>Light-bringer <small>cards, videos and challenges you share</small></span><b id="bringerRank">✨ Spark</b></div>
+        <div class="meter-bar bringer-bar"><div id="bringerFill"></div></div>
+        <small class="bringer-note" id="bringerNote"></small>
+      </div>
+
+      <div class="set-group">
         <div class="set-row"><span>Achievements</span><b id="achCount">0/8</b></div>
         <ul class="ach-list" id="achList"></ul>
       </div>
 
+      <!-- Our other games on Google Play (links open the Play Store). Hidden until they are public on Play:
+           Pour Puzzle is in closed testing, Spellbee and Pilgrim in internal testing. Remove "hidden" when they go live. -->
+      <div class="set-group more-apps" hidden>
+        <h3 class="set-title">More apps by GEM CREATORS</h3>
+          <a class="more-app" href="https://play.google.com/store/apps/details?id=com.stalinpusparaj.pourpuzzle" target="_blank" rel="noopener"><img src="assets/apps/pourpuzzle.png" alt="" width="44" height="44" loading="lazy"><span><b>Pour Puzzle</b><small>Sort the colours, glass by glass</small></span></a>
+          <a class="more-app" href="https://play.google.com/store/apps/details?id=com.buzzy.spellbee" target="_blank" rel="noopener"><img src="assets/apps/spellbee.png" alt="" width="44" height="44" loading="lazy"><span><b>Buzzy's Spelling Garden</b><small>Spell with Buzzy the bee</small></span></a>
+          <a class="more-app" href="https://play.google.com/store/apps/details?id=com.pilgrim.narrowway" target="_blank" rel="noopener"><img src="assets/apps/pilgrim.png" alt="" width="44" height="44" loading="lazy"><span><b>Pilgrim: The Narrow Way</b><small>A journey along the narrow path</small></span></a>
+      </div>
+
       <div class="set-group buttons">
-        <button class="btn ghost small" id="setPhoto">Save photo</button>
-        <button class="btn ghost small" id="setRec">Record video</button>
-        <button class="btn ghost small" id="setFull">Fullscreen</button>
-        <button class="btn ghost small" id="setAR">AR camera</button>
-        <button class="btn ghost small" id="setHide">Hide controls</button>
         <button class="btn ghost small" id="setReset">Reset settings</button>
+      </div>
+
+      <!-- For Google Play review only: shown after tapping the Settings title 7 times -->
+      <div class="set-group field" id="reviewerBox" hidden>
+        <label class="set-title" for="reviewerCode">Reviewer code</label>
+        <input id="reviewerCode" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <button class="btn ghost small" type="button" id="btnReviewer">Unlock</button>
       </div>
     </div>
   </aside>
@@ -291,6 +404,26 @@
   </div>
 
   <!-- Premium paywall -->
+  <div class="modal" id="crackerTrial" hidden>
+    <section class="trial-box" role="dialog" aria-modal="true" aria-labelledby="trialTitle">
+      <h2 id="trialTitle">Keep the sky glowing</h2>
+      <p>You’ve tried this cracker. Replay for 50 points, earn more launches, or unlock Premium.</p>
+      <button class="btn primary" id="btnTrialRewards" type="button">Earn more launches</button>
+      <button class="btn primary" id="btnTrialPremium" type="button">Unlock Premium</button>
+      <button class="btn ghost" id="btnTrialAnother" type="button">Choose another</button>
+    </section>
+  </div>
+  <div class="modal" id="rewardsPanel" hidden>
+    <section class="trial-box rewards-box" role="dialog" aria-modal="true" aria-labelledby="rewardsTitle">
+      <header><h2 id="rewardsTitle">More moments of light</h2><button class="icon-btn" id="btnCloseRewards" aria-label="Close rewards" type="button"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+      <p><strong id="rewardPoints">0</strong> points <span class="reward-cost">50 points per replay</span></p>
+      <div class="reward-option"><b>Watch a reward video</b><span>150 points · 3 extra launches</span><button class="btn primary" id="btnRewardVideo" type="button">Watch video · +150 points</button><small id="adAvailability">Reward videos are not available yet.</small></div>
+      <div class="reward-option"><b>Celebrate with friends</b><span id="referralOffer">Invite a friend to join your sky.</span><div class="invite-actions"><button class="btn ghost" id="btnInviteFriends" type="button">Invite friends</button><button class="btn ghost" id="btnInviteFacebook" type="button">Facebook</button></div><button class="btn ghost small" id="btnCheckInvites" type="button" hidden>Check rewards</button><small id="inviteAvailability">Invite rewards are not available yet.</small></div>
+      <p class="reward-earned">Earn 10 points for every completed firework.</p>
+      <p id="rewardStatus" role="status" aria-live="polite"></p>
+      <button class="btn ghost small" id="btnAdPrivacy" type="button" hidden>Ad privacy choices</button>
+    </section>
+  </div>
   <div class="premium-panel" id="premiumPanel" hidden>
     <div class="premium-box" role="dialog" aria-modal="true" aria-labelledby="premiumTitle">
       <button class="icon-btn premium-close" id="btnClosePremium" type="button" aria-label="Close">
@@ -299,15 +432,73 @@
       <div class="premium-hero" id="premiumHero" aria-hidden="true"></div>
       <div class="premium-body">
         <p class="premium-eyebrow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18h18l-1.6-10-4.6 4.2L12 5l-2.8 7.2L4.6 8z"/></svg>Light Up the Skies Premium</p>
-        <h2 id="premiumTitle">Unlock all of India</h2>
-        <ul class="premium-perks">
-          <li><b>11 more landmarks</b> Golden Temple, Hawa Mahal, Mysore Palace, Gateway of India, Charminar and more</li>
-          <li><b>Celebration Colours</b> fireworks that match every landmark</li>
-          <li><b>Switch worlds anytime</b> with one tap, during any show</li>
-        </ul>
+        <h2 id="premiumTitle">Light up all of India this Diwali</h2>
+        <p class="premium-sub" id="premiumSub">Every cracker, every landmark, as often as you like. No ads.</p>
+        <!-- Price and trial sit above the fold, next to the one action -->
         <div class="premium-plans" id="premiumPlans" role="radiogroup" aria-label="Choose a plan"></div>
-        <p class="premium-status" id="premiumStatus" role="status"></p>
         <button class="btn primary premium-cta" id="btnPremiumBuy" type="button">Continue</button>
+        <ul class="premium-trust" id="premiumTrust"></ul>
+        <p class="premium-status" id="premiumStatus" role="status"></p>
+
+        <!-- See it: what Premium unlocks, shown before the comparison table -->
+        <section class="premium-sec" aria-labelledby="premiumShowTitle">
+          <h3 id="premiumShowTitle">See what you unlock</h3>
+          <div class="premium-shots">
+            <figure class="premium-shot"><picture><source type="image/webp" srcset="assets/premium/ar-room.webp"><img src="assets/premium/ar-room.jpg" alt="" width="300" height="400" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>AR fireworks</b><small>Bursts right in your room</small></figcaption></figure>
+            <figure class="premium-shot"><picture><source type="image/webp" srcset="assets/premium/ar-sparkler.webp"><img src="assets/premium/ar-sparkler.jpg" alt="" width="300" height="400" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>AR sparkler</b><small>Draw light around anyone, then blast it</small></figcaption></figure>
+            <figure class="premium-shot"><picture><source type="image/webp" srcset="assets/premium/greeting-card.webp"><img src="assets/premium/greeting-card.jpg" alt="" width="300" height="400" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag free">Free</span><b>Greeting cards</b><small>Their name written in fireworks</small></figcaption></figure>
+          </div>
+          <p class="premium-easy">AR pictures are illustrations; the look on your phone depends on your camera and room.</p>
+        </section>
+
+        <!-- What do I actually get? -->
+        <section class="premium-sec" aria-labelledby="premiumGetTitle">
+          <h3 id="premiumGetTitle">What Premium adds</h3>
+          <table class="premium-compare">
+            <thead><tr><th scope="col"></th><th scope="col">Free</th><th scope="col">Premium</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">41 sky &amp; ground crackers</th><td>1 launch each</td><td><b>Unlimited</b></td></tr>
+              <tr><th scope="row">Landmarks of India</th><td>2</td><td><b>All 15</b></td></tr>
+              <tr><th scope="row">Celebration Colours</th><td aria-label="Not included">–</td><td><b>✓</b></td></tr>
+              <tr><th scope="row">AR camera: fireworks in your room</th><td aria-label="Not included">–</td><td><b>✓</b></td></tr>
+              <tr><th scope="row">Burst all: up to 8 ground crackers at once</th><td aria-label="Not included">–</td><td><b>✓</b></td></tr>
+              <tr><th scope="row">Switch worlds mid-show</th><td aria-label="Not included">–</td><td><b>✓</b></td></tr>
+              <tr><th scope="row">Ads</th><td>Banner &amp; videos</td><td><b>None</b></td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <!-- The whole app comes with every plan (these stay free for everyone too) -->
+        <section class="premium-sec" aria-labelledby="premiumAllTitle">
+          <h3 id="premiumAllTitle">Plus everything in Light Up the Skies</h3>
+          <ul class="premium-stack">
+            <li><span aria-hidden="true">📸</span><b>Screen capture</b><small>Save the sky as a photo, no buttons in the way</small></li>
+            <li><span aria-hidden="true">🎬</span><b>Video recording</b><small>Record a show and share it with your app link</small></li>
+            <li><span aria-hidden="true">💌</span><b>Greeting cards</b><small>A name written in fireworks, sent as a link or video</small></li>
+            <li><span aria-hidden="true">✨</span><b>Daily Joy</b><small>Celebrate one good thing every day</small></li>
+            <li><span aria-hidden="true">🎂</span><b>Birthdays</b><small>Reminders, then a fireworks wish on the day</small></li>
+            <li><span aria-hidden="true">🎯</span><b>Challenge</b><small>Beat a friend’s Lantern Rush score</small></li>
+            <li><span aria-hidden="true">🏮</span><b>Daily Sky</b><small>A new lantern sky to clear every day</small></li>
+          </ul>
+          <p class="premium-easy">Free for everyone and included with every plan. Premium AR crackers on your real floor need a phone that supports Google Play Services for AR.</p>
+        </section>
+
+        <!-- Can it deliver? Real landmarks, shown right here -->
+        <section class="premium-sec" aria-labelledby="premiumSeeTitle">
+          <h3 id="premiumSeeTitle">13 more skylines to celebrate over</h3>
+          <p class="premium-places">Golden Temple · Hawa Mahal · Mysore Palace · Gateway of India · Charminar · Red Fort · Konark Sun Temple · Victoria Memorial · Meenakshi Amman Temple · Brihadeeswarar Temple · Vivekananda Rock · Velankanni Basilica · Cross by the Sea</p>
+        </section>
+
+        <!-- How long, and how much work? -->
+        <section class="premium-sec" aria-labelledby="premiumHowTitle">
+          <h3 id="premiumHowTitle">Ready in seconds</h3>
+          <ol class="premium-steps">
+            <li><b>Tap the button</b> above</li>
+            <li><b>Confirm</b> with your <span class="premium-store">Google Play account</span></li>
+            <li><b>Everything unlocks</b> straight away. Fire your next cracker</li>
+          </ol>
+          <p class="premium-easy">No sign-up · Plays offline · Restore on any phone with the same account</p>
+        </section>
         <p class="premium-fine" id="premiumFine"></p>
         <div class="premium-get" id="premiumGet" hidden>
           <p>Premium is available in the Android and iOS apps.</p>
@@ -325,58 +516,102 @@
     </div>
   </div>
 
-  <!-- Greeting card creator -->
+  <!-- Greeting card creator: four short steps (Wish, Message, Scene, Music) with Back / Next always at the bottom -->
   <div class="modal" id="cardModal" hidden>
-    <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="cardTitle">
-      <header class="modal-head">
-        <div>
-          <h2 id="cardTitle">Fireworks greeting card</h2>
-          <p>Their name is written in fireworks across the sky.</p>
-        </div>
-        <button class="icon-btn" data-close="cardModal" aria-label="Close">
-          <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="cardTitle" data-step="0">
+      <header class="modal-head card-head">
+        <button type="button" class="nav-back" id="btnCardHome" aria-label="Back to home">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Home
         </button>
+        <div>
+          <h2 id="cardTitle">Greeting card</h2>
+          <p id="cardStepHint">Who is it for? Their name is written in fireworks.</p>
+        </div>
       </header>
+      <div class="steps" id="cardSteps" role="tablist" aria-label="Card steps">
+        <button type="button" role="tab" data-step="0" aria-controls="stepWish">Wish</button>
+        <button type="button" role="tab" data-step="1" aria-controls="stepMessage">Message</button>
+        <button type="button" role="tab" data-step="2" aria-controls="stepScene">Scene</button>
+        <button type="button" role="tab" data-step="3" aria-controls="stepMusic">Music</button>
+      </div>
 
       <div class="modal-body">
         <form class="card-form" id="cardForm" autocomplete="off" novalidate>
-          <div class="field">
-            <span class="label">Occasion</span>
-            <div class="chips" id="occasions"></div>
-          </div>
-          <div class="grid2">
+          <section class="step" id="stepWish" role="tabpanel" aria-label="Wish">
+            <div class="field">
+              <span class="label">Occasion</span>
+              <div class="chips scroll" id="occasions"></div>
+            </div>
             <label class="field">
-              <span class="label">Recipient's name <em>*</em></span>
-              <input id="cTo" maxlength="20" placeholder="e.g. Priya" required>
+              <span class="label">Their name <em>*</em></span>
+              <input id="cTo" maxlength="20" placeholder="e.g. Priya" required enterkeyhint="next">
               <small class="err" id="toErr">Enter a name to write in the sky</small>
             </label>
+            <div class="field">
+              <span class="label">Their photo <small>optional</small></span>
+              <div class="photo-pick">
+                <img class="photo-thumb" id="cPhotoPrev" alt="Selected photo" hidden>
+                <label class="btn ghost small" for="cPhoto" id="cPhotoLabel">Add photo</label>
+                <input type="file" id="cPhoto" accept="image/*" hidden>
+                <button type="button" class="btn ghost small" id="cPhotoRemove" hidden>Remove</button>
+              </div>
+              <small class="help">Appears in the sky and on the card, and travels inside the share link.</small>
+            </div>
             <label class="field">
               <span class="label">Your name</span>
-              <input id="cFrom" maxlength="24" placeholder="e.g. Alex">
+              <input id="cFrom" maxlength="24" placeholder="e.g. Alex" enterkeyhint="next">
             </label>
-          </div>
-          <div class="field">
-            <span class="label">Their photo <small>optional</small></span>
-            <div class="photo-pick">
-              <img class="photo-thumb" id="cPhotoPrev" alt="Selected photo" hidden>
-              <label class="btn ghost small" for="cPhoto" id="cPhotoLabel">Add photo</label>
-              <input type="file" id="cPhoto" accept="image/*" hidden>
-              <button type="button" class="btn ghost small" id="cPhotoRemove" hidden>Remove</button>
+          </section>
+
+          <section class="step" id="stepMessage" role="tabpanel" aria-label="Message" hidden>
+            <label class="field">
+              <span class="label">Headline in the sky</span>
+              <input id="cHead" maxlength="24" enterkeyhint="next">
+            </label>
+            <label class="field">
+              <span class="label">Message on the card <small id="msgCount">0/160</small></span>
+              <textarea id="cMsg" maxlength="160" rows="4"></textarea>
+            </label>
+            <button type="button" class="btn ghost small idea-btn" id="btnMsgIdea">✨ Try another message</button>
+          </section>
+
+          <section class="step" id="stepScene" role="tabpanel" aria-label="Scene" hidden>
+            <div class="field">
+              <span class="label">Background</span>
+              <div class="card-worlds" id="cWorlds" role="group" aria-label="Background"></div>
             </div>
-            <small class="help">Appears in the sky and on the card. It is stored inside the share link, so anyone with the link can see it.</small>
-          </div>
-          <label class="field">
-            <span class="label">Headline in the sky</span>
-            <input id="cHead" maxlength="24">
-          </label>
-          <label class="field">
-            <span class="label">Message <small id="msgCount">0/160</small></span>
-            <textarea id="cMsg" maxlength="160" rows="3"></textarea>
-          </label>
-          <div class="field">
-            <span class="label">Firework colors</span>
-            <div class="chips" id="cThemes"></div>
-          </div>
+            <div class="field">
+              <span class="label">Firework colours</span>
+              <div class="chips" id="cThemes"></div>
+            </div>
+          </section>
+
+          <section class="step" id="stepMusic" role="tabpanel" aria-label="Music" hidden>
+            <div class="field">
+              <span class="label">Background music <small>optional</small></span>
+              <label class="music-pick" for="cMusic">
+                <span class="music-ico" aria-hidden="true">♪</span>
+                <span class="music-text"><b id="cMusicLabel">Choose a song</b><small id="cMusicName">From your phone</small></span>
+                <span class="music-chev" aria-hidden="true">›</span>
+              </label>
+              <input type="file" id="cMusic" accept="audio/*" hidden>
+              <div class="music-opts" id="cMusicOpts" hidden>
+                <label class="music-start">Start at <input id="cMusicStart" inputmode="numeric" maxlength="7" value="0:00" aria-describedby="cMusicLen"></label>
+                <small id="cMusicLen"></small>
+                <button type="button" class="btn ghost small" id="cMusicListen">Listen</button>
+                <button type="button" class="btn ghost small" id="cMusicRemove">Remove</button>
+              </div>
+              <small class="help">Plays during your show and is saved in videos you record. It stays on this device and isn’t sent in the card link.</small>
+            </div>
+            <div class="field share-row">
+              <span class="label" id="shareLabel">Or send it as a link</span>
+              <div class="share-btns">
+                <button type="button" class="btn ghost small" id="btnCopyLink"><span class="btn-ico link-glyph" aria-hidden="true"></span>Copy link</button>
+                <button type="button" class="btn ghost small" id="btnShare"><span class="btn-ico share-glyph" aria-hidden="true"></span>Share…</button>
+              </div>
+              <small class="help" id="linkNote">The link contains the whole card, so nothing is uploaded. Anyone who opens it sees the show.</small>
+            </div>
+          </section>
         </form>
 
         <div class="card-preview">
@@ -392,18 +627,177 @@
             <p class="g-msg" id="pvMsg"></p>
             <p class="g-from" id="pvFrom"></p>
           </div>
-          <p class="note" id="linkNote">The link contains the whole card, so nothing is uploaded. Anyone who opens it sees the show.</p>
         </div>
       </div>
 
       <footer class="modal-foot">
-        <button class="btn ghost" id="btnCopyLink"><span class="btn-ico link-glyph" aria-hidden="true"></span>Copy link</button>
-        <button class="btn ghost" id="btnShare"><span class="btn-ico share-glyph" aria-hidden="true"></span>Share…</button>
-        <button class="btn primary" id="btnPreview"><span class="btn-ico firework-glyph" aria-hidden="true"></span>Play the show</button>
+        <button type="button" class="btn ghost" id="btnCardBack" hidden>Back</button>
+        <button type="button" class="btn primary" id="btnCardNext">Next</button>
+        <button type="button" class="btn primary" id="btnPreview" hidden><span class="btn-ico firework-glyph" aria-hidden="true"></span>Play the show</button>
       </footer>
     </div>
   </div>
 
+  <!-- Welcome: shown once, the first time the show starts -->
+  <div class="modal welcome-modal" id="welcomeModal" hidden>
+    <div class="modal-box welcome-box" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
+      <h2 id="welcomeTitle">Three things to try</h2>
+      <ul class="welcome-list">
+        <li><span aria-hidden="true">👆</span><span><b>Your next firework</b><small>A little light, one moment at a time.</small></span></li>
+        <li><span aria-hidden="true">🧨</span><span><b>Ground and Sparkler</b><small>Light crackers on the street or write with a sparkler, from the tabs at the bottom.</small></span></li>
+        <li><span aria-hidden="true">💌</span><span><b>Send a wish</b><small>Tap Card to write their name in fireworks, then save the video for WhatsApp.</small></span></li>
+      </ul>
+      <button type="button" class="btn primary" id="btnWelcome">Let’s go</button>
+    </div>
+  </div>
+
+  <!-- A gentle nudge on the play screen when a saved birthday is today or tomorrow -->
+  <button type="button" class="nudge" id="nudge" hidden><span id="nudgeText"></span><b>Make video ›</b></button>
+
+  <!-- Birthdays: friends' dates, a reminder the day before, and their video one tap away -->
+  <div class="modal sheet-modal" id="bdayModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="bdayTitle">
+      <header class="modal-head card-head">
+        <button type="button" class="nav-back" data-close="bdayModal" aria-label="Back to home">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Home
+        </button>
+        <div>
+          <h2 id="bdayTitle">Birthdays</h2>
+          <p id="bdayHint">We’ll remind you the day before, with their fireworks video one tap away.</p>
+        </div>
+      </header>
+      <div class="modal-body sheet-body">
+        <form class="bday-form" id="bdayForm" autocomplete="off" novalidate hidden>
+          <label class="field">
+            <span class="label">Name <em>*</em></span>
+            <input id="bName" maxlength="20" placeholder="e.g. Priya" enterkeyhint="done">
+            <small class="err">Enter their name</small>
+          </label>
+          <div class="field">
+            <span class="label">Birthday</span>
+            <div class="bday-date">
+              <select id="bDay" aria-label="Day"></select>
+              <select id="bMonth" aria-label="Month"></select>
+            </div>
+          </div>
+          <div class="field">
+            <span class="label">Their photo <small>optional</small></span>
+            <div class="photo-pick">
+              <img class="photo-thumb" id="bPhotoPrev" alt="" hidden>
+              <label class="btn ghost small" for="bPhoto" id="bPhotoLabel">Add photo</label>
+              <input type="file" id="bPhoto" accept="image/*" hidden>
+            </div>
+          </div>
+          <div class="bday-form-btns">
+            <button type="button" class="btn ghost" id="bCancel">Cancel</button>
+            <button type="button" class="btn primary" id="bSave">Save</button>
+          </div>
+        </form>
+        <div class="import-row" id="bdayImport">
+          <button type="button" class="btn ghost small" id="btnImportContacts" hidden>📇 Import from contacts</button>
+          <label class="btn ghost small" for="bVcf" id="bVcfLabel">📇 Import a contacts file</label>
+          <input type="file" id="bVcf" accept=".vcf,text/vcard,text/x-vcard" hidden>
+        </div>
+        <div class="import-panel" id="importConsent" hidden>
+          <b>Find birthdays in your contacts</b>
+          <small>The app reads the names, birthdays and photos of contacts that have a birthday, so it can remind you. They stay on this phone and are never uploaded.</small>
+          <div class="bday-form-btns">
+            <button type="button" class="btn ghost" id="consentNo">Not now</button>
+            <button type="button" class="btn primary" id="consentYes">Continue</button>
+          </div>
+        </div>
+        <div class="import-panel" id="importPick" hidden>
+          <div class="import-head"><b id="importTitle"></b><button type="button" class="row-icon" id="importAll">Select all</button></div>
+          <ul class="sheet-list" id="importList"></ul>
+          <div class="bday-form-btns">
+            <button type="button" class="btn ghost" id="importCancel">Cancel</button>
+            <button type="button" class="btn primary" id="importAdd">Add</button>
+          </div>
+        </div>
+        <ul class="sheet-list" id="bdayList"></ul>
+        <p class="sheet-empty" id="bdayEmpty">Add the people you love. On their big day the app has a fireworks video ready with their name and photo, for you to send.</p>
+      </div>
+      <footer class="modal-foot">
+        <button type="button" class="btn primary" id="btnBdayAdd">Add a birthday</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Daily joy: how happy you are, one thing you're grateful for, celebrated in the sky every day -->
+  <div class="modal sheet-modal" id="joyModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="joyTitle">
+      <header class="modal-head card-head">
+        <button type="button" class="nav-back" data-close="joyModal" aria-label="Back to home">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Home
+        </button>
+        <div>
+          <h2 id="joyTitle">Daily joy</h2>
+          <p>One good thing a day, written in fireworks.</p>
+        </div>
+      </header>
+      <div class="modal-body sheet-body">
+        <div class="streak-card" id="joyStreak"></div>
+        <div class="joy-today" id="joyToday" hidden></div>
+        <form class="joy-form" id="joyForm" autocomplete="off" novalidate>
+          <div class="field">
+            <span class="label">How happy are you today?</span>
+            <div class="moods" id="joyMoods" role="radiogroup" aria-label="How happy are you today?"></div>
+          </div>
+          <label class="field">
+            <span class="label">I’m grateful for <em>*</em></span>
+            <input id="joyText" maxlength="20" placeholder="e.g. my family" enterkeyhint="done">
+            <small class="err">Write one thing, it goes up in the sky</small>
+          </label>
+          <label class="field">
+            <span class="label">A few words <small>optional</small></span>
+            <textarea id="joyNote" maxlength="120" rows="2" placeholder="Why it made today better"></textarea>
+          </label>
+        </form>
+        <div class="field joy-history" id="joyHistoryWrap" hidden>
+          <span class="label">Your joy jar</span>
+          <ul class="sheet-list" id="joyHistory"></ul>
+        </div>
+      </div>
+      <footer class="modal-foot">
+        <button type="button" class="btn primary" id="btnJoyGo"><span class="btn-ico firework-glyph" aria-hidden="true"></span>Celebrate</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- Lantern Rush: the Daily Sky, a friend's challenge, a new round, or a result -->
+  <div class="modal sheet-modal" id="rushModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="rushTitle">
+      <header class="modal-head card-head">
+        <button type="button" class="nav-back" id="btnRushHome" aria-label="Back to home">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Home
+        </button>
+        <div>
+          <h2 id="rushTitle">Lantern Rush</h2>
+          <p id="rushSub"></p>
+        </div>
+      </header>
+      <div class="modal-body sheet-body">
+        <div class="rush-card" id="rushCard"></div>
+        <ul class="rush-rules" id="rushRules">
+          <li><span aria-hidden="true">🏮</span>Tap the sky lanterns to burst them with fireworks</li>
+          <li><span aria-hidden="true">⚡</span>Hits in a row multiply your points, up to ×10. A miss resets it</li>
+          <li><span aria-hidden="true">✨</span>Gold lanterns are worth triple. You have 30 seconds</li>
+        </ul>
+        <label class="field" id="rushNameField" hidden>
+          <span class="label">Your name <small>shown to the friends you challenge</small></span>
+          <input id="rushName" maxlength="20" placeholder="e.g. Arjun" autocomplete="given-name" enterkeyhint="done">
+        </label>
+      </div>
+      <footer class="modal-foot">
+        <button type="button" class="btn ghost" id="btnRushShare" hidden><span class="btn-ico share-glyph" aria-hidden="true"></span>Share result</button>
+        <button type="button" class="btn ghost" id="btnRushChallenge" hidden><span class="btn-ico share-glyph" aria-hidden="true"></span>Challenge a friend</button>
+        <button type="button" class="btn primary" id="btnRushGo"><span class="btn-ico firework-glyph" aria-hidden="true"></span>Play</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="particle-sky.js"></script>
+  <script src="launch-controller.js"></script>
   <script src="game.js"></script>
 </body>
 </html>

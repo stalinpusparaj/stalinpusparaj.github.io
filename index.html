@@ -2,11 +2,144 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Light Up the Skies</title>
-  <meta http-equiv="refresh" content="0; url=light-up-the-skies/">
-  <link rel="canonical" href="https://stalinpusparaj.github.io/light-up-the-skies/">
-  <style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#04050d;color:#f6f2ff;font:16px system-ui,sans-serif}a{color:#ffd27a}</style>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Light Up the Skies: Diwali — fireworks over India's landmarks</title>
+  <meta name="description" content="Diwali fireworks and crackers over the Taj Mahal, India Gate and 13 more landmarks. Write wishes in sparkler light, send greeting cards with their name in fireworks, and set off AR fireworks in your room.">
+  <meta name="theme-color" content="#0b0a24">
+  <meta property="og:title" content="Light Up the Skies: Diwali">
+  <meta property="og:description" content="Fireworks over India's landmarks, and wishes written in the sky.">
+  <meta property="og:image" content="https://stalinpusparaj.github.io/site/feature-graphic.png">
+  <meta property="og:url" content="https://stalinpusparaj.github.io/">
+  <link rel="icon" type="image/png" href="site/icon.png">
+  <link rel="stylesheet" href="light-up-the-skies/assets/fonts/fonts.css">
+  <style>
+    :root { --night: #0b0a24; --night-2: #17133a; --gold: #ffd27a; --pink: #f06a9b; --ink: #f6f2ff; --ink-2: #c9c2e8; --line: rgba(255, 255, 255, .12); }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: radial-gradient(ellipse 120% 60% at 50% 0%, #2c2160 0%, var(--night) 60%) fixed, var(--night); color: var(--ink); font: 400 17px/1.55 Outfit, system-ui, sans-serif; }
+    a { color: var(--gold); }
+    .wrap { width: min(1080px, 100% - 32px); margin: 0 auto; }
+    header.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0; }
+    .brand { display: flex; align-items: center; gap: 10px; color: var(--ink); text-decoration: none; font-weight: 600; }
+    .brand img { width: 36px; height: 36px; border-radius: 9px; }
+    nav a { color: var(--ink-2); text-decoration: none; margin-left: 18px; font-size: .95rem; }
+    nav a:hover { color: var(--gold); }
+    .hero { display: grid; grid-template-columns: 1.05fr 1fr; gap: 40px; align-items: center; padding: 28px 0 56px; }
+    .eyebrow { display: inline-block; font-size: .78rem; font-weight: 600; letter-spacing: .2em; text-transform: uppercase; color: var(--gold); border: 1px solid rgba(255, 210, 122, .4); border-radius: 99px; padding: 6px 14px; }
+    h1, h2 { font-family: Cinzel, Georgia, serif; font-weight: 800; letter-spacing: .01em; line-height: 1.08; margin: 0; }
+    h1 { font-size: clamp(2.4rem, 6vw, 4rem); margin-top: 18px; background: linear-gradient(180deg, #fff6d6, #ffd57a 45%, #f3a93c); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .lead { font-size: 1.15rem; color: var(--ink-2); margin: 18px 0 28px; max-width: 34em; }
+    .ctas { display: flex; flex-wrap: wrap; gap: 12px; }
+    .btn { display: inline-flex; align-items: center; gap: 10px; padding: 14px 24px; border-radius: 99px; font-weight: 600; text-decoration: none; }
+    .btn.primary { background: linear-gradient(90deg, #ffd27a, var(--pink)); color: #1a0f2e; box-shadow: 0 12px 40px rgba(240, 106, 155, .35); }
+    .btn.ghost { color: var(--ink); border: 1px solid var(--line); background: rgba(255, 255, 255, .05); }
+    .btn svg { width: 20px; height: 20px; }
+    .note { font-size: .82rem; color: var(--ink-2); margin-top: 12px; }
+    .hero-art { position: relative; border-radius: 22px; overflow: hidden; box-shadow: 0 30px 80px rgba(0, 0, 0, .5); border: 1px solid var(--line); }
+    .hero-art img { display: block; width: 100%; height: auto; }
+    section { padding: 48px 0; border-top: 1px solid var(--line); }
+    h2 { font-size: clamp(1.7rem, 4vw, 2.4rem); color: var(--gold); }
+    .sub { color: var(--ink-2); margin: 10px 0 28px; }
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .feature { padding: 20px; border-radius: 18px; background: rgba(255, 255, 255, .04); border: 1px solid var(--line); }
+    .feature .ico { font-size: 1.6rem; }
+    .feature h3 { margin: 8px 0 4px; font-size: 1.08rem; }
+    .feature p { margin: 0; color: var(--ink-2); font-size: .95rem; }
+    .tag { display: inline-block; font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 99px; background: linear-gradient(90deg, #ffd27a, var(--pink)); color: #1a0f2e; vertical-align: middle; margin-left: 6px; }
+    .shots { display: flex; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 10px; scrollbar-width: thin; }
+    .shots img { flex: none; width: 220px; height: auto; border-radius: 18px; scroll-snap-align: start; border: 1px solid var(--line); }
+    .plans { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .plan { padding: 22px; border-radius: 18px; border: 1px solid var(--line); background: rgba(255, 255, 255, .04); }
+    .plan.premium { border-color: rgba(255, 210, 122, .5); background: linear-gradient(160deg, rgba(255, 210, 122, .12), rgba(240, 106, 155, .08)); }
+    .plan h3 { margin: 0 0 10px; font-family: Cinzel, serif; }
+    .plan ul { margin: 0; padding-left: 20px; color: var(--ink-2); }
+    .plan li { margin: 4px 0; }
+    footer { padding: 32px 0 48px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: .9rem; display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+    footer a { color: var(--ink-2); }
+    @media (max-width: 760px) {
+      .hero { grid-template-columns: 1fr; gap: 24px; padding-top: 8px; }
+      .hero-art { order: -1; }
+      nav { display: none; }
+      .features, .plans { grid-template-columns: 1fr; }
+      .shots img { width: 62vw; }
+    }
+  </style>
 </head>
-<body><p><a href="light-up-the-skies/">Light Up the Skies</a> · <a href="light-up-the-skies/privacy.html">Privacy Policy</a></p></body>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="./"><img src="site/icon.png" alt="" width="36" height="36">Light Up the Skies</a>
+      <nav><a href="#features">Features</a><a href="#screens">Screens</a><a href="#premium">Premium</a><a href="light-up-the-skies/">Play in browser</a></nav>
+    </header>
+
+    <main>
+      <div class="hero">
+        <div>
+          <span class="eyebrow">Diwali · Android</span>
+          <h1>Light Up the Skies</h1>
+          <p class="lead">Fireworks over the Taj Mahal, India Gate and 13 more landmarks. Light traditional crackers on the street, write wishes in sparkler light, and send greeting cards with their name written in fireworks.</p>
+          <div class="ctas">
+            <a class="btn primary" href="https://play.google.com/store/apps/details?id=com.stalinpusparaj.lightuptheskies"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 2.5v19l10.4-9.5L4 2.5zm11.8 8.2L6.6 3.1l11.6 6.3-2.4 1.3zm0 2.6l2.4 1.3-11.6 6.3 9.2-7.6zM19.6 10.2l2.4 1.3c.6.3.6 1.2 0 1.5l-2.4 1.3-2.7-2 2.7-2.1z"/></svg>Get it on Google Play</a>
+            <a class="btn ghost" href="light-up-the-skies/">Play in your browser</a>
+          </div>
+          <p class="note">Plays offline. Free to play, with an optional Premium subscription.</p>
+        </div>
+        <div class="hero-art"><img src="site/feature-graphic.png" alt="Fireworks and a golden diya over the Taj Mahal" width="1024" height="500"></div>
+      </div>
+
+      <section id="features">
+        <h2>Every way to celebrate</h2>
+        <p class="sub">A Diwali night of patakhe with no smoke, no litter and no burnt fingers.</p>
+        <div class="features">
+          <div class="feature"><div class="ico">🕌</div><h3>India's landmarks</h3><p>Taj Mahal, India Gate, Golden Temple, Hawa Mahal, Charminar and 10 more skylines, or the animated Particle Festival night.</p></div>
+          <div class="feature"><div class="ico">🧨</div><h3>24 Diwali crackers</h3><p>Anar, flower pot, chakri, ladi, rockets, wedding cake and more. Drag them onto the street and light them.</p></div>
+          <div class="feature"><div class="ico">🎆</div><h3>17 aerial shells</h3><p>Peony, willow, palm, crossette, peacock, butterfly, magic wand and a grand finale.</p></div>
+          <div class="feature"><div class="ico">✨</div><h3>Sparkler shapes</h3><p>Draw with your finger or place a crown, face, sunglasses or heart in sparkler light, then burst it into fireworks.</p></div>
+          <div class="feature"><div class="ico">💌</div><h3>Greeting cards</h3><p>Their name written across the sky in fireworks, with a photo and music, saved as a video for WhatsApp.</p></div>
+          <div class="feature"><div class="ico">📱</div><h3>AR fireworks <span class="tag">Premium</span></h3><p>Set off fireworks in your real room through the camera, and draw light around anyone.</p></div>
+        </div>
+      </section>
+
+      <section id="screens">
+        <h2>See it in action</h2>
+        <p class="sub">Swipe through the app.</p>
+        <div class="shots">
+          <img src="site/ls-01.jpg" alt="Fireworks over the Taj Mahal" loading="lazy" width="900" height="1600">
+          <img src="site/ls-02.jpg" alt="AR fireworks in a living room" loading="lazy" width="900" height="1600">
+          <img src="site/ls-03.jpg" alt="Sparkler light drawn around a person" loading="lazy" width="900" height="1600">
+          <img src="site/ls-05.jpg" alt="Diwali crackers on the street" loading="lazy" width="900" height="1600">
+          <img src="site/ls-06.jpg" alt="Peacock, butterfly and magic wand fireworks" loading="lazy" width="900" height="1600">
+          <img src="site/ls-07.jpg" alt="A heart written in sparkler light" loading="lazy" width="900" height="1600">
+          <img src="site/ls-08.jpg" alt="A greeting card with a name in fireworks" loading="lazy" width="900" height="1600">
+          <img src="site/ls-09.jpg" alt="Daily Sky and Lantern Rush" loading="lazy" width="900" height="1600">
+        </div>
+      </section>
+
+      <section id="premium">
+        <h2>Free and Premium</h2>
+        <p class="sub">Start free. Upgrade any time in the app; cancel any time in Google Play.</p>
+        <div class="plans">
+          <div class="plan"><h3>Free</h3><ul>
+            <li>Night sky, Particle Festival, Taj Mahal and India Gate</li>
+            <li>A free launch of every cracker and shell, replays with points you earn</li>
+            <li>Sparkler writing and shapes, greeting cards, photos and videos</li>
+            <li>Banner and optional video ads</li>
+          </ul></div>
+          <div class="plan premium"><h3>Premium</h3><ul>
+            <li>Unlimited launches of every cracker and shell</li>
+            <li>All 15 landmarks and Celebration Colours</li>
+            <li>AR fireworks in your room</li>
+            <li>Burst All: up to 8 ground crackers at once, and Tap Sky</li>
+            <li>No ads</li>
+          </ul></div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>© 2026 GEM CREATORS · <a href="mailto:gemmyapps@gmail.com">gemmyapps@gmail.com</a></span>
+      <span><a href="light-up-the-skies/privacy.html">Privacy policy</a> · <a href="https://gemmyapps.com/">gemmyapps.com</a></span>
+    </footer>
+  </div>
+</body>
 </html>
