@@ -98,6 +98,7 @@
     };
     // Layout: where the skyline, ghat and water sit for this screen shape.
     // The water line sits above the game's bottom controls (opts.horizon, a fraction of the height).
+    let paintedHorizon = -1;
     const L = () => {
       const portrait = H > W * 1.25, horizon = H * (opts.horizon ? opts.horizon(portrait) : portrait ? 0.7 : 0.68);
       const tw = Math.min(W * 0.95, H * (portrait ? 0.46 : 0.62)), th = tw * 0.66;
@@ -119,6 +120,7 @@
       phase = phaseAt(hourNow());
       phaseKey = phase.hour.toFixed(1);
       const p = phase, l = L(), rnd = mulberry(3);
+      paintedHorizon = l.horizon;
       sg.globalCompositeOperation = 'source-over';
       const sky = sg.createLinearGradient(0, 0, 0, l.horizon);
       sky.addColorStop(0, css(p.top)); sky.addColorStop(1, css(p.low));
@@ -240,16 +242,22 @@
     function start() {
       if (running) return;
       if (!W) resize();
+      else if (L().horizon !== paintedHorizon) { paintStatic(); spawn(); } // the game's controls moved: follow the ground
       if (reduce()) { drawNow(); return; }
       running = true; last = performance.now(); raf = requestAnimationFrame(loop);
     }
     function stop() { running = false; cancelAnimationFrame(raf); }
     // One still frame now (the game asks for this when the sky is repainted, e.g. after a resize or a world switch).
     function drawNow() { if (!W || W !== window.innerWidth || H !== window.innerHeight) resize(); draw(0); if (opts.onDraw) opts.onDraw(canvas); }
+    // The game moved its ground line (another play mode, the controls changed size): repaint the ghat there.
+    function refit() { if (W && L().horizon !== paintedHorizon) { paintStatic(); spawn(); if (!running) drawNow(); } }
     function setHour(h) { hourOverride = h == null ? null : ((h % 24) + 24) % 24; if (W) { paintStatic(); spawn(); } }
 
-    // skyTop: the colour at the top of the sky now, for the game to extend the sky above it during a rocket's flight.
-    return { start, stop, drawNow, setHour, canvas, get skyTop() { return phase ? css(phase.top) : '#020309'; }, get tier() { return tier; }, get running() { return running; } };
+    // skyTop: the colour at the top of the sky now, for the game to extend the sky above it during a rocket's flight;
+    // skyTopRgb the same as "r,g,b", and stars how starry it is now (1 at night, 0 by day), so that sky has stars too.
+    return { start, stop, drawNow, setHour, refit, canvas, get skyTop() { return phase ? css(phase.top) : '#020309'; },
+      get skyTopRgb() { return phase ? phase.top.map((v) => v | 0).join(',') : '2,3,9'; }, get stars() { return phase ? phase.stars : 1; },
+      get tier() { return tier; }, get running() { return running; } };
   }
 
   window.LUTSParticleSky = { create, phaseAt };
