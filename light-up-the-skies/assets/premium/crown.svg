@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 56">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff6c8"/>
+      <stop offset=".35" stop-color="#ffd35a"/>
+      <stop offset=".7" stop-color="#e59a1c"/>
+      <stop offset="1" stop-color="#a85c08"/>
+    </linearGradient>
+    <linearGradient id="b" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe9a0"/>
+      <stop offset="1" stop-color="#c47612"/>
+    </linearGradient>
+    <radialGradient id="ruby" cx=".35" cy=".3" r=".8">
+      <stop offset="0" stop-color="#ffd0dc"/>
+      <stop offset=".35" stop-color="#ff2f5e"/>
+      <stop offset="1" stop-color="#7a0322"/>
+    </radialGradient>
+    <radialGradient id="emer" cx=".35" cy=".3" r=".8">
+      <stop offset="0" stop-color="#d4ffe9"/>
+      <stop offset=".4" stop-color="#19c27f"/>
+      <stop offset="1" stop-color="#035536"/>
+    </radialGradient>
+    <radialGradient id="pearl" cx=".35" cy=".3" r=".8">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".6" stop-color="#ffefc2"/>
+      <stop offset="1" stop-color="#c99a3c"/>
+    </radialGradient>
+  </defs>
+  <g stroke="#3a1c02" stroke-width="2.2" stroke-linejoin="round">
+    <path d="M7 42 3 15l15 12L32 7l14 20 15-12-4 27z" fill="url(#g)"/>
+    <rect x="6" y="41" width="52" height="10" rx="3" fill="url(#b)"/>
+  </g>
+  <path d="M10 39 7.5 21l10 8L32 12" fill="none" stroke="#fffbe6" stroke-opacity=".75" stroke-width="1.6" stroke-linecap="round"/>
+  <g stroke="#3a1c02" stroke-width="1.6">
+    <circle cx="3.5" cy="13.5" r="3.4" fill="url(#pearl)"/>
+    <circle cx="32" cy="5.5" r="4" fill="url(#pearl)"/>
+    <circle cx="60.5" cy="13.5" r="3.4" fill="url(#pearl)"/>
+    <path d="M32 26l5 6-5 6-5-6z" fill="url(#ruby)"/>
+    <circle cx="18" cy="34" r="3.2" fill="url(#emer)"/>
+    <circle cx="46" cy="34" r="3.2" fill="url(#emer)"/>
+    <circle cx="16" cy="46" r="2.3" fill="url(#ruby)"/>
+    <circle cx="32" cy="46" r="2.6" fill="url(#emer)"/>
+    <circle cx="48" cy="46" r="2.3" fill="url(#ruby)"/>
+  </g>
+</svg>
