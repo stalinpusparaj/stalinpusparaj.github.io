@@ -1,0 +1,10 @@
+{
+  "premiumAfterShows": 3,
+  "premiumMax": 10,
+  "adGraceShows": 5,
+  "adEvery": 3,
+  "notifyAsk": true,
+  "promptsPerSession": 1,
+  "promptsPerDay": 2,
+  "promptQuietSecs": 90
+}
