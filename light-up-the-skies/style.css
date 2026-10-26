@@ -41,46 +41,21 @@ input, select, textarea { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 /* ---------- Scene layers ---------- */
-#sky, #fx, #glow, #city, #skyGlow, #stage, #atmo {
+#sky, #sky3d, #fx, #city, #skyGlow, #stage, #atmo {
   position: fixed;
   inset: 0;
   width: 100%;
   height: 100%;
 }
-#sky { z-index: 0; }
+#sky, #sky3d { z-index: 0; }
+#sky3d { display: none; }
 /* 3D view: layers move with the camera; the GPU keeps that cheap */
-body.view3d #sky, body.view3d #fx, body.view3d #glow, body.view3d #city, body.view3d #atmo { will-change: transform; }
+body.view3d #sky, body.view3d #fx, body.view3d #city, body.view3d #atmo { will-change: transform; }
 #atmo { z-index: 3; pointer-events: none; }
 #skyGlow { z-index: 1; pointer-events: none; mix-blend-mode: screen; }
 #fx { z-index: 2; pointer-events: none; }
-/* Glowing heads and lights of sky fireworks, over their trails; game.js moves it with #fx and hides it when empty */
-#glow { z-index: 2; pointer-events: none; }
 #city { z-index: 3; pointer-events: none; }
 #stage { z-index: 4; cursor: crosshair; touch-action: none; }
-/* The scene bar: the world chip and the 2D / 3D switch, between the brand and the top buttons, in every play mode */
-.scene-bar { grid-column: 2; grid-row: 1; justify-self: center; display: flex; align-items: center; gap: 8px; }
-body.home .scene-bar, body.card-mode .scene-bar, body.rushing .scene-bar, body.ar .scene-bar, body.room-ar .scene-bar { display: none; }
-.scene-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 46vw; padding: 7px 12px; border-radius: 99px; font-size: .8rem; font-weight: 600; color: var(--ink); background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-.scene-chip svg { flex: none; width: 17px; height: 17px; fill: none; stroke: var(--gold); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.scene-chip span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.view-toggle { display: inline-flex; gap: 2px; padding: 3px; border-radius: 99px; background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-.view-toggle button { min-width: 40px; padding: 5px 11px; border-radius: 99px; font-size: .8rem; font-weight: 800; letter-spacing: .03em; color: var(--ink-2); }
-.view-toggle button[aria-pressed="true"] { color: #1c1004; background: linear-gradient(135deg, #ffe29a, var(--gold-2) 55%, var(--rose)); }
-.view-toggle button:disabled { opacity: .5; }
-.launch-active .scene-bar { opacity: .18; pointer-events: none; }
-@media (max-width: 760px) {
-  .scene-bar { grid-column: 1 / -1; grid-row: 2; }
-  body:not(.home):not(.card-mode):not(.rushing):not(:has(.sheet-modal:not([hidden]))) .toast,
-  body:not(.home):not(.card-mode):not(.rushing) .rec-badge, body:not(.home):not(.card-mode) .nudge { top: calc(124px + var(--safe-t)); }
-}
-/* 3D worlds: one WebGL scene stands in for the sky, moon, skyline and street layers */
-#world3d { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
-body.world3d #sky, body.world3d #moon, body.world3d #city, body.world3d #floor, body.world3d #flightClouds { visibility: hidden; }
-/* On the 3D background, the cities built in 3D carry a small badge (in the main pickers, not the card's) */
-body.bg-3d #worldStripList [data-has3d] .world-mini-thumb::after, body.bg-3d #worldGrid [data-has3d] .world-thumb::after {
-  content: '3D'; position: absolute; inset: auto auto 4px 4px; width: auto; height: auto; z-index: 2; padding: 1px 5px; border-radius: 6px;
-  font-size: 10px; font-weight: 800; letter-spacing: .04em; color: #1c1004; background: linear-gradient(135deg, #ffe29a, #ffb347);
-}
 
 /* ---------- Shared bits ---------- */
 .icon-btn {
@@ -323,7 +298,25 @@ body.native-capture button { visibility: hidden !important; pointer-events: none
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.meter {
+  padding: 8px 14px 10px;
+  border-radius: 14px;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.meter-top { display: flex; justify-content: space-between; font-size: .75rem; color: var(--ink-2); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 6px; }
+.meter-top b { color: var(--gold); font-weight: 600; }
 .meter-bar { height: 6px; border-radius: 99px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+#meterFill {
+  height: 100%; width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--violet), var(--rose), var(--gold), #fff6d8);
+  box-shadow: 0 0 12px rgba(255, 190, 120, .9);
+  transition: width .12s linear;
+}
+.meter.hot { border-color: var(--line-2); box-shadow: 0 0 24px -6px rgba(255, 180, 90, .8); }
 
 .actions { display: flex; gap: 6px; justify-content: flex-end; }
 
@@ -400,14 +393,9 @@ body.native-capture button { visibility: hidden !important; pointer-events: none
 .tap-sky[aria-pressed="false"]:not(.locked) { filter: saturate(.35) brightness(.8); }
 /* Ground: Premium "Burst all"; free players see it with a crown, and it opens Premium */
 /* AR is Premium: a small crown on the AR buttons for free players */
-/* The Premium crown: a jewelled gold crown (assets/premium/crown.svg) on the corner of every Premium control a free player sees */
-:root { --crown-badge: url("assets/premium/crown.svg") center / contain no-repeat; }
-#btnAR.locked, #setAR.locked, .tap-sky.locked, .burst-all.locked, #viewToggle [data-view="3d"].premium-lock { position: relative; overflow: visible; }
-#btnAR.locked::before, #setAR.locked::after, .tap-sky.locked::before, .burst-all.locked::before, #viewToggle [data-view="3d"].premium-lock::after {
-  content: ''; position: absolute; top: -9px; right: -7px; width: 22px; height: 19px; margin: 0;
-  background: var(--crown-badge); filter: drop-shadow(0 0 4px rgba(255, 190, 60, .85)) drop-shadow(0 1px 1px rgba(0, 0, 0, .6));
-  transform: rotate(14deg); pointer-events: none; z-index: 2;
-}
+#btnAR.locked, #setAR.locked { position: relative; }
+#btnAR.locked::after, #setAR.locked::after { content: '\265B'; position: absolute; top: -3px; right: -3px; font-size: 11px; line-height: 1; color: #ffd36b; text-shadow: 0 0 4px rgba(0,0,0,.8); }
+.tap-sky.locked::before, .burst-all.locked::before { content: '\265B'; margin-right: 4px; color: #ffd36b; }
 @keyframes shine { 60%, 100% { transform: translateX(100%); } }
 
 .hint {
@@ -593,6 +581,7 @@ body.home .ui * { pointer-events: none !important; }
 .g-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
 
 body.card-mode .dock, body.card-mode .hint { display: none; }
+body.card-mode .meter { visibility: hidden; }
 
 /* ---------- Drawer ---------- */
 .drawer {
@@ -604,13 +593,10 @@ body.card-mode .dock, body.card-mode .hint { display: none; }
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   transform: translateX(105%);
-  /* Closed, it is hidden once it has slid away: off screen it still held graphics memory (2.7 screens on a phone),
-     enough to tip a low-memory WebView into dropping tiles, which flashed black blocks over the sky. */
-  visibility: hidden;
-  transition: transform .35s cubic-bezier(.2, .8, .2, 1), visibility 0s linear .35s;
+  transition: transform .35s cubic-bezier(.2, .8, .2, 1);
   display: flex; flex-direction: column;
 }
-.drawer.open { transform: none; visibility: visible; transition: transform .35s cubic-bezier(.2, .8, .2, 1), visibility 0s; }
+.drawer.open { transform: none; }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; padding: calc(16px + var(--safe-t)) 18px 12px; }
 .drawer-head h2 { font-family: var(--display); font-size: 1.25rem; letter-spacing: .05em; }
 .drawer-body { overflow-y: auto; padding: 0 18px calc(24px + var(--safe-b)); }
@@ -620,16 +606,10 @@ body.card-mode .dock, body.card-mode .hint { display: none; }
 .more-apps .set-title { margin-bottom: 2px; }
 .more-app { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 14px; background: rgba(255, 255, 255, .04); border: 1px solid var(--line); color: inherit; text-decoration: none; }
 .more-app:active { transform: scale(.98); }
-.more-app img, .more-app .fb-logo, .more-app .all-apps-ico { width: 44px; height: 44px; border-radius: 11px; flex: none; }
+.more-app img, .more-app .fb-logo { width: 44px; height: 44px; border-radius: 11px; flex: none; }
 .more-app span { display: flex; flex-direction: column; min-width: 0; }
 .more-app b { font-size: .9rem; }
 .more-app small { font-size: .74rem; color: var(--ink-2); }
-.more-app[hidden] { display: none; }
-.about-app { flex-direction: row; align-items: center; gap: 12px; }
-.about-app img { width: 44px; height: 44px; border-radius: 11px; flex: none; }
-.about-app span { display: flex; flex-direction: column; }
-.about-app b { font-size: .9rem; }
-.about-app small { font-size: .74rem; color: var(--ink-2); }
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: .95rem; }
 .set-row.col { flex-direction: column; align-items: stretch; gap: 8px; }
 .set-row b { color: var(--gold); font-weight: 600; margin-left: 4px; }
@@ -763,6 +743,7 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border: 0; bord
 @media (max-width: 760px) {
   .hud { grid-template-columns: auto 1fr; row-gap: 10px; padding-left: 12px; padding-right: 12px; }
   .brand-name { display: none; }
+  .meter { grid-column: 1 / -1; grid-row: 2; justify-self: center; width: min(320px, 100%); padding: 6px 12px 8px; }
   .wide-only { display: none; }
   .icon-btn { width: 40px; height: 40px; }
   .toast { top: calc(128px + var(--safe-t)); }
@@ -771,7 +752,7 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border: 0; bord
   .shell-chip .ico { width: 34px; height: 34px; }
   .finale-btn { min-width: 76px; height: 50px; padding: 0 12px; font-size: .74rem; }
   .burst-all, .tap-sky { min-width: 0; padding: 0 10px; flex: none; }
-  .tap-sky .cta-icon { display: none; }
+  .burst-all .cta-icon, .tap-sky .cta-icon { display: none; }
   .hint { bottom: calc(92px + var(--safe-b)); font-size: .78rem; }
   .modal-body { grid-template-columns: 1fr; }
   .card-preview { order: -1; }
@@ -847,53 +828,6 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border: 0; bord
 .chips.scroll { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -2px; padding: 2px; }
 .chips.scroll::-webkit-scrollbar { display: none; }
 .chips.scroll .chip { flex: none; }
-/* From → To: the giver and the receiver side by side, each with an avatar (equal heights, the arrow between) */
-.who-pair { display: grid; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr); gap: 6px; }
-.who-bubble { min-width: 0; gap: 8px; padding: 10px; border-radius: 18px; background: rgba(255, 255, 255, .05); border: 1px solid var(--hair); }
-.who-bubble.invalid { border-color: rgba(255, 107, 133, .55); }
-.who-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.who-head .label { justify-content: flex-start; gap: 3px; }
-.who-av {
-  flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; overflow: hidden;
-  font-weight: 700; font-size: 1rem; color: #1c1004; background: linear-gradient(135deg, #ffe29a, var(--gold-2) 55%, var(--rose));
-  box-shadow: 0 0 0 2px rgba(255, 210, 122, .55), 0 4px 12px rgba(0, 0, 0, .45);
-}
-.who-av img { width: 100%; height: 100%; object-fit: cover; }
-.who-av .rel-emoji { display: grid; place-items: center; width: 100%; height: 100%; font-size: 1.35rem; background: #1d1a4a; }
-.who-arrow { align-self: center; width: 20px; height: 20px; fill: none; stroke: var(--gold); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
-/* Who they are: one sideways row, each group led by a small label; the painted faces are cropped to a circle */
-.rel-group { flex: none; align-self: center; padding: 0 0 0 8px; font-size: .6875rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; white-space: nowrap; color: var(--gold); }
-.chip-art.rel-art { border-radius: 50%; object-fit: cover; }
-.chip-art.rel-emoji { display: grid; place-items: center; border-radius: 50%; font-size: .875rem; line-height: 1; background: #1d1a4a; filter: none; }
-/* Occasions: Upcoming (with how soon), then category tabs over one grouped row; the tabs scroll too in long languages */
-.chip-art.occ-emoji { display: grid; place-items: center; font-size: 1rem; line-height: 1; filter: none; }
-.occ-when { color: var(--gold); font-size: .6875rem; font-weight: 600; white-space: nowrap; }
-.occ-cats { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; margin-bottom: -4px; border-bottom: 1px solid var(--line); }
-.occ-cats::-webkit-scrollbar { display: none; }
-.occ-cat { flex: none; min-height: var(--tap); padding: 0 10px; border: 0; border-bottom: 2px solid transparent; background: none; font-size: .8125rem; font-weight: 600; color: var(--ink-2); white-space: nowrap; transition: color .2s, border-color .2s; }
-.occ-cat[aria-current="true"] { color: #fff; border-bottom-color: var(--gold); }
-.occ-cat:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
-@media (prefers-reduced-motion: reduce) { .occ-cat { transition: none; } }
-/* Who they are: three tabs (Family, Partners, Friends) like the occasions' categories, each a grid of big faces */
-.rel-tabs { display: flex; gap: 2px; margin-bottom: 8px; border-bottom: 1px solid var(--line); }
-.rel-tabs [role="tab"] { flex: 1; min-height: var(--tap); padding: 0 6px; border: 0; border-bottom: 2px solid transparent; background: none; font-size: .875rem; font-weight: 700; color: var(--ink-2); white-space: nowrap; transition: color .2s, border-color .2s; }
-.rel-tabs [role="tab"][aria-selected="true"] { color: #fff; border-bottom-color: var(--gold); }
-.rel-tabs [role="tab"]:focus-visible { outline: 2px solid var(--gold); outline-offset: -2px; }
-@media (prefers-reduced-motion: reduce) { .rel-tabs [role="tab"] { transition: none; } }
-.chips.rel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 8px; }
-.rel-grid .chip { flex-direction: column; justify-content: center; gap: 6px; min-height: 100px; padding: 10px 4px 8px; border-radius: 18px; font-size: .8rem; line-height: 1.15; text-align: center; }
-.rel-grid .chip:has(.chip-art) { display: flex; padding-left: 4px; }
-.rel-grid .chip-art { width: 56px; height: 56px; }
-.rel-grid .chip-art.rel-emoji { font-size: 1.7rem; }
-.rel-grid .chip.active .chip-art { box-shadow: 0 0 0 2px var(--gold), 0 0 14px rgba(255, 200, 110, .55); }
-.rel-grid .rel-group { grid-column: 1 / -1; padding: 6px 2px 0; }
-.rel-grid [hidden] { display: none !important; }
-/* The written card: From → To, with who they are to the sender */
-.g-who { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; padding-right: 18px; font-size: .8125rem; line-height: 1.4; color: var(--ink-2); }
-.g-who b { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
-.g-arrow { color: var(--gold); }
-.g-rel { padding: 1px 8px; border-radius: 999px; white-space: nowrap; font-size: .6875rem; font-weight: 700; color: #2a1404; background: var(--gold); }
-.greeting-card.mini .g-who { font-size: .75rem; }
 /* Background: every landmark visible at once */
 .card-worlds { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
 .card-worlds .world-mini { width: auto; }
@@ -970,83 +904,6 @@ input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border: 0; bord
 .g-tool:hover { background: rgba(40, 34, 80, .7); color: #fff; }
 .g-tool:active { transform: scale(.96); }
 .g-svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.g-tools { flex-wrap: wrap; } /* with My cards there can be one more: wrap rather than spill off a narrow phone */
-
-/* ---------- My Cards: a row per card, its actions on a second line so every tap target stays 44px ---------- */
-/* Made / Received: the Leaderboard's pill tabs (their own class: the board's script drives every .board-tab) */
-.cards-tabs { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; padding: 4px; border-radius: 999px; background: rgba(255, 255, 255, .05); border: 1px solid var(--jn-rim); }
-.cards-tab { min-height: var(--tap); border-radius: 999px; font-weight: 600; font-size: .875rem; color: var(--ink-2); background: none; border: 0; }
-.cards-tab[aria-selected="true"] { color: #2a1404; background: var(--jn-gold); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8), 0 4px 14px -6px rgba(255, 150, 80, .9); }
-.cards-tab:focus-visible { outline: 2px solid var(--gold); outline-offset: 1px; }
-.sheet-row.card-row { flex-wrap: wrap; row-gap: 10px; }
-/* Thumbnail: the card's background, tinted with its firework colours, and their photo or initials */
-.card-thumb {
-  position: relative; flex: none; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 14px; overflow: hidden;
-  background: var(--th-world, none) center / cover no-repeat, #0b0d26; border: 1px solid var(--hair);
-}
-.card-thumb::before { content: ""; position: absolute; inset: 0; background: var(--th-grad, none); opacity: .5; mix-blend-mode: screen; }
-.card-thumb .row-avatar, .card-thumb span.row-avatar:not(:empty) {
-  position: relative; width: 30px; height: 30px; font-size: .75rem; box-shadow: 0 0 0 2px rgba(255, 255, 255, .85), 0 2px 8px rgba(0, 0, 0, .5);
-}
-.card-badge {
-  display: inline-block; padding: 1px 8px; border-radius: 999px; white-space: nowrap; vertical-align: 1px;
-  font-size: .6875rem; font-weight: 700; color: #2a1404; background: var(--gold);
-}
-.card-acts { flex: 1 0 100%; display: flex; align-items: center; gap: 4px; }
-.card-row .card-acts .btn.card-play { flex: 1; min-width: 0; min-height: var(--tap); }
-/* A relationship's face stands in for initials (its emoji until the portrait is there); its word leads the second line */
-.card-thumb span.row-avatar.rel-emoji { font-size: 1.05rem; background: #1d1a4a; }
-.row-rel { color: var(--ink-2); font-weight: 600; }
-.row-pages { color: var(--gold); font-weight: 600; white-space: nowrap; }
-/* Card reminders: the row's date, the sheet's nearest one within a week, and the creator's Remind me */
-.row-remind { white-space: nowrap; }
-.cards-soon { border-color: rgba(255, 210, 122, .45); background: rgba(255, 210, 122, .08); }
-.cards-soon .btn.small { flex: none; min-height: var(--tap); min-width: var(--tap); }
-.remind-field { gap: 10px; }
-.remind-field select { min-width: 0; }
-.remind-field select:disabled { opacity: .5; }
-.remind-field .switch { position: relative; min-height: var(--tap); }
-.remind-field .switch input { inset: 0; width: 100%; height: 100%; margin: 0; } /* the whole row is its target, and stays inside it */
-.remind-field .switch:has(input:disabled) { opacity: .5; cursor: default; }
-.remind-field .btn.small { align-self: flex-start; min-height: var(--tap); }
-
-/* ---------- Reasons I light up for you: the creator's list, then the closing card's pages ---------- */
-.reason-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.reason-list:empty { display: none; }
-.reason-row { display: flex; align-items: center; gap: 6px; }
-.reason-n {
-  flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
-  font-size: .75rem; font-weight: 700; color: #2a1404; background: var(--gold);
-}
-.field .reason-input { flex: 1; min-width: 0; min-height: var(--tap); }
-.reason-del { flex: none; min-width: var(--tap); min-height: var(--tap); }
-.reason-btns { display: flex; gap: 8px; flex-wrap: wrap; }
-.reason-btns .btn:disabled { opacity: .45; }
-/* A free card's 4th reason is Premium: the crown on its corner */
-.reason-add.locked { position: relative; overflow: visible; }
-.reason-add.locked::after {
-  content: ''; position: absolute; top: -9px; right: -7px; width: 22px; height: 19px;
-  background: var(--crown-badge); filter: drop-shadow(0 0 4px rgba(255, 190, 60, .85)) drop-shadow(0 1px 1px rgba(0, 0, 0, .6));
-  transform: rotate(14deg); pointer-events: none;
-}
-/* The closing card as a pager: the reason in place of the letter, a gentle page turn (none with reduced motion) */
-.g-reasons { border-color: var(--line-2); color: var(--gold); }
-.greeting-card.paging { touch-action: pan-y; cursor: pointer; user-select: none; -webkit-user-select: none; }
-.greeting-card.paging > p { display: none; }
-.g-pages { min-height: 96px; display: flex; flex-direction: column; justify-content: center; gap: 8px; transform-origin: left center; }
-.g-page-n { font-size: .75rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--gold); padding-right: 18px; }
-.g-page { font-size: 1.25rem; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
-.g-pages.turn { animation: page-turn .45s cubic-bezier(.2, .8, .2, 1) both; }
-.g-pages.turn-back { animation: page-turn-back .45s cubic-bezier(.2, .8, .2, 1) both; }
-@keyframes page-turn { from { opacity: 0; transform: perspective(700px) rotateY(-24deg) translateX(18px); } }
-@keyframes page-turn-back { from { opacity: 0; transform: perspective(700px) rotateY(24deg) translateX(-18px); } }
-.g-pager { display: flex; gap: 8px; width: min(320px, 100%); }
-.g-pager .btn { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
-.g-pager .btn.primary { flex: 1; }
-.g-pager .g-svg { width: 18px; height: 18px; }
-#greeting.paging:not(.last-page) .g-actions > :not(.g-pager) { display: none; }
-#greeting.last-page #btnPageBack { flex: 1; } /* Next is gone: Back takes the row */
-@media (prefers-reduced-motion: reduce) { .g-pages.turn, .g-pages.turn-back { animation: none; } }
 
 /* ---------- AR camera mode ---------- */
 #cam {
@@ -1213,8 +1070,6 @@ body:not(.mode-spark) .spark-float, body.card-mode .spark-float { display: none;
 }
 
 /* ---------- Achievements ---------- */
-.ach-play-row { display: flex; gap: 8px; margin-bottom: 12px; }
-.ach-play { flex: 1; }
 .ach-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
 .ach-list li { display: flex; align-items: center; gap: 10px; opacity: .45; }
 .ach-list li.done { opacity: 1; }
@@ -1439,17 +1294,6 @@ body.in-app #btnFull, body.in-app #setFull { display: none !important; }
 body.mode-sky:not(.card-mode):not(.ar) .world-strip { display: block; }
 .shape-strip { display: none !important; }
 body.mode-spark:not(.card-mode) .shape-strip { display: block !important; }
-/* The sparkler's shapes bar can be put away with its × (2D and 3D); a small Shapes button brings it back */
-#shapeStrip { position: relative; }
-body.mode-spark.shapes-closed:not(.card-mode) .shape-strip { display: none !important; }
-.shapes-open { display: none; align-self: center; padding: 7px 14px; border-radius: 99px; font-size: .8rem; font-weight: 700; color: var(--ink); background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-body.mode-spark.shapes-closed:not(.card-mode) .shapes-open { display: inline-flex; }
-.spark-close { display: none; position: absolute; top: -12px; right: -6px; z-index: 2; width: 30px; height: 30px; border-radius: 50%; align-items: center; justify-content: center; font-size: 20px; line-height: 1; color: #1c1004; background: linear-gradient(135deg, #ffe29a, var(--gold-2) 60%, var(--rose)); box-shadow: 0 2px 10px rgba(0,0,0,.45); }
-body.mode-spark .spark-close { display: flex; }
-/* Chips drag themselves onto the sky or the ground; their pictures must not start the browser's own image drag */
-.shell-chip img, .shape-chip img { -webkit-user-drag: none; user-select: none; -webkit-user-select: none; }
-/* A shape being dragged from its chip */
-.shape-ghost { position: fixed; left: -26px; top: -26px; width: 52px; height: 52px; z-index: 60; pointer-events: none; opacity: .85; filter: drop-shadow(0 0 8px rgba(255,190,90,.8)); }
 .shape-list { display: flex; gap: 6px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; touch-action: pan-x; scrollbar-width: none; padding: 2px; }
 .shape-list::-webkit-scrollbar { display: none; }
 .shape-chip { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; width: 58px; padding: 4px 2px; border-radius: 12px; border: 1px solid transparent; background: rgba(255,255,255,.04); color: var(--ink-2); font-size: .66rem; scroll-snap-align: start; }
@@ -1512,11 +1356,6 @@ body.mode-spark .spark-close { display: flex; }
   border: 1px solid rgba(255, 255, 255, .14);
 }
 .shell-chip.art .ico img { width: 100%; height: 100%; object-fit: cover; }
-/* Real crackers: the cut-out stands whole in a white tile, like a product shot, so its colours read */
-.shell-chip.real .ico { background: #fff; border-color: rgba(255, 255, 255, .6); }
-.shell-chip.real .ico img { width: 100%; height: 100%; object-fit: contain; padding: 2px; }
-/* The picture fits the tile's height (as a flex item it would otherwise keep its own) */
-.shell-chip.real .ico img { min-height: 0; }
 .shell-chip.active .ico { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold), 0 0 14px rgba(255, 200, 110, .6); }
 @media (max-width: 760px) {
   .shell-chip .ico { width: 50px; height: 42px; }
@@ -1539,10 +1378,6 @@ body.mode-spark .spark-close { display: flex; }
 .premium-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .premium-row-text b { font-size: .95rem; }
 .premium-row-text small { color: var(--ink-2); font-size: .76rem; }
-/* Its button gets a line of its own, full width, its words free to wrap: in Tamil or Malayalam the label is wider than
-   the drawer and, on one line with the text, it ran off the edge and squeezed the description to a word a line. */
-.premium-row { flex-wrap: wrap; }
-.premium-row .btn.small { flex: 1 1 100%; white-space: normal; text-align: center; line-height: 1.2; padding-top: 8px; padding-bottom: 8px; }
 
 /* Crown badge on Premium landmarks */
 .world-lock {
@@ -1581,9 +1416,11 @@ body.mode-spark .spark-close { display: flex; }
 .premium-close { position: absolute; z-index: 3; right: 12px; top: 12px; }
 .premium-hero {
   position: relative;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px;
   height: 168px; overflow: hidden;
   border-radius: 26px 26px 0 0;
 }
+.premium-hero.single { display: block; }
 .premium-hero picture, .premium-hero img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .premium-hero::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(11, 11, 34, .1), rgba(11, 11, 34, .2) 55%, #121032); }
 .premium-body { position: relative; padding: 0 22px 18px; margin-top: -26px; }
@@ -1748,9 +1585,6 @@ span.row-avatar:not(:empty) { font-size: 1rem; }
     margin-top: 3px; font-size: 10.5px; font-weight: 500; color: var(--ink-2); white-space: nowrap; pointer-events: none;
     text-shadow: 0 1px 6px #000;
   }
-  /* other languages run longer: smaller, kept within the button gap, the last one ending at the screen edge */
-  html:not([lang="en"]) .hud .icon-btn[data-cap]::after { font-size: 9.5px; max-width: 54px; overflow: hidden; text-overflow: ellipsis; }
-  .hud .actions .icon-btn[data-cap]:last-child::after { left: auto; right: 0; transform: none; }
   /* the landmark strip becomes one chip naming the scene; it opens the full picker */
   body.mode-sky:not(.card-mode):not(.ar) .world-strip { display: flex; justify-content: center; width: auto; padding: 0; background: none; border: 0; backdrop-filter: none; -webkit-backdrop-filter: none; }
   .world-strip-list { display: none !important; }
@@ -1808,8 +1642,8 @@ span.row-avatar:not(:empty) { font-size: 1rem; }
 body.card-mode .nudge, body.home .nudge { display: none; }
 
 /* ---------- Lantern Rush ---------- */
-/* During a round the sky is the whole game: the world strip, mode tabs, dock and hint step aside. */
-body.rushing #worldStrip, body.rushing #modeTabs, body.rushing #dock, body.rushing #hint { visibility: hidden; }
+/* During a round the sky is the whole game: the meter, world strip, mode tabs, dock and hint step aside. */
+body.rushing #meter, body.rushing #worldStrip, body.rushing #modeTabs, body.rushing #dock, body.rushing #hint { visibility: hidden; }
 .rush-hud {
   position: fixed; z-index: 60; left: 50%; top: calc(76px + var(--safe-t)); transform: translateX(-50%);
   display: flex; align-items: center; gap: 14px; padding: 9px 18px; border-radius: 999px;
@@ -1832,8 +1666,7 @@ body.rushing #worldStrip, body.rushing #modeTabs, body.rushing #dock, body.rushi
 .rush-rules span { font-size: 1.1rem; }
 #rushModal .modal-foot { flex-wrap: wrap; }
 
-/* Light-bringer rank, at the top of Achievements */
-.bringer-card { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; margin-bottom: 14px; border-radius: 18px; background: var(--glass); border: 1px solid var(--hair); }
+/* Light-bringer rank in Settings */
 .bringer-bar { margin-top: -4px; }
 #bringerFill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #ffd36b, #ff9a3c, #ff5fa2); transition: width .4s; }
 .bringer-note { color: var(--ink-3); font-size: .78rem; }
@@ -1855,7 +1688,7 @@ body:has(.sheet-modal:not([hidden])) .toast { top: auto; bottom: calc(96px + var
 .points-balance { color: #b2f3d7; }
 .points-balance b { font-size: .9rem; }
 #btnRewards { color: var(--gold); text-decoration: underline; text-underline-offset: 3px; min-height: 32px; padding: 0 6px; }
-body.home .play-rewards, body.card-mode .play-rewards, body.rushing .play-rewards, body.paid .play-rewards { display: none; }
+body.home .play-rewards, body.card-mode .play-rewards, body.rushing .play-rewards { display: none; }
 .launch-active .play-rewards { opacity: .4; }
 body:not(.mode-spark) #paint { visibility: hidden; }
 .rewards-box { box-sizing: border-box; max-height: calc(var(--app-h) - 40px); overflow-y: auto; }
@@ -1881,8 +1714,7 @@ body:not(.mode-spark) #paint { visibility: hidden; }
 .bottom-ui .hint { white-space: normal; text-align: center; font-size: .76rem; max-width: 100%; }
 .bottom-ui { bottom: calc(12px + var(--safe-b)); }
 .bottom-ui .dock { border-radius: 8px; }
-.bottom-ui .shell-chip, #groundList .shell-chip { width: 112px; min-height: 92px; border-radius: 8px; padding: 7px 4px; justify-content: center; }
-.trial-status[hidden] { display: none; } /* Premium: no launch counts, the picture and name sit centred */
+.bottom-ui .shell-chip, #groundList .shell-chip { width: 112px; min-height: 92px; border-radius: 8px; padding: 7px 4px; }
 .shell-chip > span:nth-child(2) { display: block; font-size: .72rem; line-height: 1.2; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trial-status { font-size: .61rem; line-height: 1.3; color: #8ce9c5; white-space: nowrap; }
 .trial-used .trial-status { color: #ffcf85; }
@@ -1915,9 +1747,6 @@ body.home .launch-fire, body.card-mode .launch-fire, body.rushing .launch-fire, 
 body.home .launch-status, body.card-mode .launch-status, body.rushing .launch-status { display: none; }
 body:not(.launch-active) .launch-status { display: none; }
 #btnSparkBurst { min-height: 48px; }
-/* Burst my drawing: a small text-only pill, so the sparkler colours keep the room */
-#btnSparkBurst.finale-btn { min-width: 0; min-height: 40px; height: 40px; padding: 0 12px; border-radius: 99px; font-size: .6875rem; letter-spacing: .02em; max-width: 112px; line-height: 1.1; }
-#btnSparkBurst .cta-icon { display: none; }
 #groundList .shell-chip { cursor: pointer; }
 @media (max-width: 760px) {
   .bottom-ui { width: calc(100% - 20px); gap: 6px; }
@@ -1953,6 +1782,7 @@ body:not(.launch-active) .launch-status { display: none; }
   22%  { transform: scale(1); }
   90%  { opacity: 1; transform: scale(1); }
   100% { opacity: 0; transform: scale(1); }
+}
 }
 @media (prefers-reduced-motion: reduce) {
   .diwali-reveal.play img { animation-name: diwali-reveal-fade; }
@@ -2001,6 +1831,7 @@ body.room-ar.ar-searching .hint { display: block; }
 body.native-capture .launch-status,
 body.native-capture .bottom-ui,
 body.native-capture .hud,
+body.native-capture .meter,
 body.native-capture .world-strip,
 body.native-capture .spark-float,
 body.native-capture .play-rewards { display: none !important; }
@@ -2034,7 +1865,7 @@ body.native-capture .play-rewards { display: none !important; }
 .premium-steps b { color: var(--ink); font-weight: 600; }
 .premium-easy { margin: 12px 0 0; font-size: .76rem; color: var(--ink-3); }
 .premium-plan em { white-space: nowrap; }
-.premium-shots { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.premium-shots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .premium-shot { margin: 0; position: relative; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #0b0a24; aspect-ratio: 3 / 4; }
 .premium-shot img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .premium-shot figcaption { position: absolute; inset: auto 0 0 0; padding: 22px 7px 7px; background: linear-gradient(transparent, rgba(5, 4, 20, .92)); display: flex; flex-direction: column; gap: 1px; }
@@ -2051,1137 +1882,5 @@ body.native-capture .play-rewards { display: none !important; }
 .premium-stack b { font-size: .8rem; font-weight: 600; color: var(--ink); line-height: 1.25; }
 .premium-stack small { font-size: .7rem; line-height: 1.35; color: var(--ink-3); }
 @media (max-width: 340px) { .premium-stack { grid-template-columns: 1fr; } }
-/* The value stack: one line per thing Premium gives, the one just tried lit up first, then the total in gold */
-.premium-vstack { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.premium-vstack li { display: grid; grid-template-columns: 32px 1fr; column-gap: 10px; align-items: start; padding: 11px 12px; border-radius: 14px; background: rgba(255, 255, 255, .045); border: 1px solid var(--line); }
-.premium-vstack li.tried-first { background: linear-gradient(135deg, rgba(255, 210, 122, .16), rgba(255, 95, 162, .1)); border-color: rgba(255, 210, 122, .55); }
-.premium-vico { grid-row: span 2; font-size: 1.35rem; line-height: 1.15; text-align: center; }
-.premium-vstack b { font-size: .9rem; font-weight: 700; color: var(--ink); line-height: 1.25; }
-.premium-vstack small { font-size: .75rem; line-height: 1.4; color: var(--ink-2); }
-.premium-total { margin: 12px 0 0; padding: 10px 12px; border-radius: 12px; font-size: .82rem; font-weight: 600; line-height: 1.4; color: #ffe2a8; background: rgba(255, 210, 122, .08); border: 1px dashed rgba(255, 210, 122, .45); }
-.premium-proof { margin: 10px 0 0; font-size: .8rem; color: var(--ink-2); }
-.premium-soon { margin: 10px 0 0; padding: 7px 12px; border-radius: 99px; font-size: .8rem; font-weight: 700; text-align: center; color: #1c1004; background: linear-gradient(135deg, #ffe29a, var(--gold-2) 55%, var(--rose)); }
-.premium-soon[hidden], .premium-proof[hidden], #premiumRefund[hidden] { display: none; }
-/* The "one more free light" sheet opens on the Hazaar ladi going off */
-.try-art { display: block; margin: 0 0 14px; border-radius: 18px; overflow: hidden; aspect-ratio: 1100 / 614; box-shadow: 0 8px 28px rgba(0, 0, 0, .45), 0 0 0 1px rgba(255, 210, 122, .35); }
-.try-art img { display: block; width: 100%; height: 100%; object-fit: cover; }
 /* The sign is neon light: screen-blend it so only its glow adds to the sky and its faint dark edges vanish */
 .diwali-reveal { mix-blend-mode: screen; }
-
-/* ---------- Festival Glass: the 2026 UI refresh ----------
-   Quiet navy glass that glows gold only where you act. Type: Cinzel for titles, Outfit for everything else, nothing
-   under 11px. Every control is at least 44px to tap. In the Android app (.android-webview) the glass is solid. */
-:root {
-  --bg-1: #0b0e2a;
-  --bg-2: #151a3c;
-  --ink-3: rgba(246, 242, 255, 0.62);
-  --glass: rgba(14, 16, 40, 0.56);
-  --glass-2: rgba(16, 18, 44, 0.9);
-  --hair: rgba(255, 255, 255, 0.1);
-  --sheen: inset 0 1px 0 rgba(255, 255, 255, .08);
-  --accent: linear-gradient(135deg, #ffe29a, var(--gold-2) 52%, var(--rose));
-  --sheet: linear-gradient(180deg, #171a40 0%, #0e1030 46%, #090a22 100%);
-  --ease: cubic-bezier(.2, .8, .2, 1);
-  --tap: 44px;
-  --safe-l: env(safe-area-inset-left, 0px);
-  --safe-r: env(safe-area-inset-right, 0px);
-}
-.android-webview { --glass: rgba(14, 16, 40, .84); --glass-2: rgba(16, 18, 44, .97); }
-
-/* Buttons: one gold action per screen, glass for the rest */
-.btn { min-height: var(--tap); }
-.btn.small { min-height: 40px; }
-.btn.ghost { background: rgba(255, 255, 255, .07); border-color: var(--hair); box-shadow: var(--sheen); }
-.btn.primary { background: var(--accent); box-shadow: 0 10px 28px -10px rgba(255, 140, 90, .75), inset 0 1px 0 rgba(255, 255, 255, .45); }
-select { min-height: var(--tap); border-radius: 12px; }
-.field input, .field textarea { min-height: 48px; border-radius: 14px; padding: 12px 14px; font-size: 1rem; }
-.field textarea { min-height: 96px; }
-.chip { min-height: 40px; padding: 8px 14px; }
-.chips.small .chip { min-height: 36px; }
-.icon-btn { box-shadow: var(--sheen); }
-.icon-btn:active, .btn:active, .home-tile:active, .for-you:active, .quick:active { transition-duration: .12s; }
-:focus-visible { outline-offset: 3px; border-radius: 12px; }
-
-/* ---- Home ---- */
-.intro {
-  overflow-y: auto; overscroll-behavior: contain;
-  padding: calc(20px + var(--safe-t)) calc(20px + var(--safe-r)) calc(20px + var(--safe-b)) calc(20px + var(--safe-l));
-  background:
-    radial-gradient(ellipse 80% 55% at 50% 46%, rgba(4, 5, 13, .5), rgba(4, 5, 13, 0) 70%),
-    linear-gradient(180deg, rgba(4, 5, 13, .1) 0%, rgba(4, 5, 13, 0) 40%, rgba(4, 5, 13, .55) 100%),
-    url("assets/menu/home-portrait.jpg") center bottom / cover no-repeat,
-    #04050d;
-  background:
-    radial-gradient(ellipse 80% 55% at 50% 46%, rgba(4, 5, 13, .5), rgba(4, 5, 13, 0) 70%),
-    linear-gradient(180deg, rgba(4, 5, 13, .1) 0%, rgba(4, 5, 13, 0) 40%, rgba(4, 5, 13, .55) 100%),
-    image-set(url("assets/menu/home-portrait.webp") type("image/webp"), url("assets/menu/home-portrait.jpg") type("image/jpeg")) center bottom / cover no-repeat,
-    #04050d;
-}
-@media (orientation: landscape) {
-  .intro {
-    background:
-      radial-gradient(ellipse 60% 70% at 50% 46%, rgba(4, 5, 13, .55), rgba(4, 5, 13, 0) 72%),
-      linear-gradient(180deg, rgba(4, 5, 13, 0) 50%, rgba(4, 5, 13, .5) 100%),
-      url("assets/menu/home-landscape.jpg") center bottom / cover no-repeat,
-      #04050d;
-    background:
-      radial-gradient(ellipse 60% 70% at 50% 46%, rgba(4, 5, 13, .55), rgba(4, 5, 13, 0) 72%),
-      linear-gradient(180deg, rgba(4, 5, 13, 0) 50%, rgba(4, 5, 13, .5) 100%),
-      image-set(url("assets/menu/home-landscape.webp") type("image/webp"), url("assets/menu/home-landscape.jpg") type("image/jpeg")) center bottom / cover no-repeat,
-      #04050d;
-  }
-}
-.intro-inner { width: 100%; max-width: 420px; margin: auto; min-width: 0; }
-/* The home column never grows past the screen: an automatic grid column takes its widest content (a long Tamil tile
-   line), which pushed the buttons and tiles off the right edge */
-.intro { grid-template-columns: minmax(0, 1fr); }
-.intro-icon { width: 76px; height: 76px; border-radius: 20px; margin-bottom: 16px; box-shadow: 0 0 0 1px rgba(255, 210, 122, .4), 0 14px 40px -6px rgba(255, 150, 90, .6); }
-.title { font-size: clamp(2.5rem, 11vw, 4.6rem); filter: drop-shadow(0 2px 18px rgba(4, 5, 13, .9)) drop-shadow(0 0 26px rgba(255, 170, 110, .3)); }
-.lead { margin: 14px auto 26px; max-width: 320px; font-size: 1rem; line-height: 1.45; font-weight: 400; color: rgba(246, 242, 255, .82); text-shadow: 0 1px 12px rgba(4, 5, 13, .9); }
-.intro-actions { width: 100%; max-width: 360px; gap: 10px; }
-.intro-actions .btn { min-height: 56px; font-size: 1.0625rem; }
-.intro-actions .btn.ghost { background: rgba(14, 16, 40, .55); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-color: rgba(255, 255, 255, .14); }
-.home-tiles { width: 100%; max-width: 360px; gap: 10px; margin-top: 12px; }
-.home-tile {
-  position: relative; flex-direction: column; align-items: flex-start; gap: 8px;
-  min-height: 0; padding: 12px; border-radius: 18px;
-  background: rgba(14, 16, 40, .55); border-color: rgba(255, 255, 255, .1); box-shadow: var(--sheen);
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-}
-.home-tile::after {
-  content: ""; position: absolute; right: 12px; top: 16px; width: 8px; height: 8px;
-  border-right: 2px solid var(--ink-3); border-top: 2px solid var(--ink-3); transform: rotate(45deg);
-}
-.home-tile .tile-art { width: 48px; height: 48px; border-radius: 14px; }
-.home-tile .tile-text { width: 100%; gap: 2px; }
-.home-tile .tile-text b { font-size: .9375rem; }
-.home-tile .tile-text small { font-size: .78rem; line-height: 1.3; color: var(--ink-2); white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-@media (max-height: 700px) and (orientation: portrait) {
-  .intro-icon { width: 60px; height: 60px; border-radius: 16px; margin-bottom: 10px; }
-  .lead { margin: 10px auto 18px; font-size: .9375rem; }
-  .intro-actions .btn { min-height: 50px; }
-  .home-tile { flex-direction: row; align-items: center; padding: 10px; }
-  .home-tile .tile-art { width: 40px; height: 40px; border-radius: 12px; }
-  .home-tile .tile-text small { -webkit-line-clamp: 1; }
-  .home-tile::after { display: none; }
-}
-@media (orientation: landscape) and (max-height: 560px) {
-  .intro-inner { max-width: 760px; display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; align-items: center; text-align: left; }
-  .intro-icon { display: none; }
-  .intro .title { grid-column: 1; font-size: clamp(2rem, 7vw, 3rem); }
-  .intro .lead { grid-column: 1; margin: 10px 0 0; }
-  .intro-actions { grid-column: 2; grid-row: 1 / span 2; }
-  .home-tiles { grid-column: 1 / -1; grid-template-columns: repeat(4, minmax(0, 1fr)); max-width: none; }
-  .home-tile { flex-direction: row; align-items: center; padding: 8px 10px; }
-  .home-tile .tile-art { width: 36px; height: 36px; border-radius: 10px; }
-  .home-tile .tile-text small { display: none; }
-  .home-tile::after { display: none; }
-}
-
-/* ---- Play: top bar ---- */
-.hud { padding: calc(12px + var(--safe-t)) calc(12px + var(--safe-r)) 0 calc(12px + var(--safe-l)); }
-.scene-chip { min-height: var(--tap); padding: 8px 14px; font-size: .875rem; background: var(--glass); border-color: var(--hair); box-shadow: var(--sheen); }
-.view-toggle { padding: 3px; background: var(--glass); border-color: var(--hair); box-shadow: var(--sheen); }
-.view-toggle button { min-height: 36px; min-width: 44px; padding: 6px 12px; font-size: .8125rem; }
-@media (max-width: 760px) {
-  .brand { width: var(--tap); height: var(--tap); padding: 0; justify-content: center; border-radius: 50%; background: var(--glass); border-color: var(--hair); box-shadow: var(--sheen); }
-  .brand-home { font-size: 0; gap: 0; }
-  .brand-home::before { content: ""; width: 10px; height: 10px; margin: 0 0 0 4px; border-left: 2.2px solid var(--gold); border-bottom: 2.2px solid var(--gold); transform: rotate(45deg); }
-  .hud { row-gap: 26px; column-gap: 4px; padding-left: calc(10px + var(--safe-l)); padding-right: calc(10px + var(--safe-r)); }
-  .hud .actions { gap: 2px; }
-  .hud .icon-btn { width: var(--tap); height: var(--tap); }
-  .hud .icon-btn svg { width: 21px; height: 21px; stroke-width: 1.7; }
-  .hud .icon-btn[data-cap]::after { margin-top: 4px; font-size: 11px; font-weight: 500; letter-spacing: .01em; color: rgba(246, 242, 255, .8); }
-  body.ar .actions .icon-btn { width: 40px; height: 40px; }
-}
-/* Eight round buttons share the row on small phones: they shrink together, never past 38px */
-@media (max-width: 389px) {
-  .hud .icon-btn, .brand { width: max(38px, calc((100vw - 20px - 4px - 7 * 2px) / 8)); height: max(38px, calc((100vw - 20px - 4px - 7 * 2px) / 8)); }
-  .hud .icon-btn[data-cap]::after { font-size: 10.5px; }
-}
-
-/* ---- Play: bottom controls ---- */
-.bottom-ui { flex-direction: row; flex-wrap: wrap; justify-content: center; align-content: flex-end; column-gap: 8px; row-gap: 8px; }
-.bottom-ui > * { flex: 0 0 100%; }
-.bottom-ui > .play-rewards, .bottom-ui > .world-strip, .bottom-ui > .shapes-open { flex: 0 1 auto; }
-.bottom-ui .hint { font-size: .8125rem; color: rgba(246, 242, 255, .78); text-shadow: 0 1px 10px #000, 0 0 2px #000; }
-.play-rewards { min-height: 40px; gap: 4px; padding: 0 4px 0 14px; border-radius: 99px; background: var(--glass); border: 1px solid var(--hair); box-shadow: var(--sheen); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); font-size: .8125rem; }
-.points-balance b { font-size: .875rem; }
-#btnRewards { min-height: 40px; padding: 0 12px; border-radius: 99px; font-weight: 600; text-decoration: none; }
-#btnRewards:hover { background: rgba(255, 255, 255, .08); }
-.mode-tabs { padding: 3px; gap: 3px; background: var(--glass); border-color: var(--hair); box-shadow: var(--sheen); }
-.bottom-ui .mode-tabs { width: 100%; max-width: 420px; justify-self: center; margin: 0 auto; }
-.mode-tabs button { flex: 1 1 0; min-height: 40px; font-size: .875rem; }
-.mode-tabs button[aria-selected="true"] { background: var(--accent); box-shadow: 0 4px 14px -4px rgba(255, 140, 90, .7); }
-.bottom-ui .dock { border-radius: 22px; padding: 6px; gap: 6px; background: var(--glass); border-color: var(--hair); box-shadow: var(--sheen), 0 18px 40px -20px #000; }
-.bottom-ui .shell-chip, #groundList .shell-chip { border-radius: 16px; gap: 4px; }
-.shell-chip > span:nth-child(2) { font-size: .75rem; font-weight: 500; }
-.trial-status { font-size: .6875rem; }
-.shell-chip.active { background: rgba(255, 210, 122, .12); }
-.shell-chip .ico { border-radius: 12px; }
-.finale-btn { border-radius: 16px; letter-spacing: .06em; }
-.finale-btn:disabled, #btnSparkBurst:disabled { opacity: 1; filter: none; color: var(--ink-3); background: rgba(255, 255, 255, .07); box-shadow: inset 0 0 0 1px var(--hair); }
-.finale-btn:disabled::after { display: none; }
-.finale-btn:disabled .cta-icon { opacity: .5; filter: grayscale(1); }
-.launch-fire { min-height: 54px; border-radius: 99px; font-size: 1.0625rem; font-weight: 700; margin: 0 auto; }
-.bottom-ui > .launch-fire { flex: 0 0 auto; width: min(420px, 100%); }
-/* Tap sky shares the Fire row, leaving the cracker list the dock's full width */
-.bottom-ui > .tap-sky { flex: 0 1 auto; max-width: 36%; height: auto; min-height: 0; align-self: stretch; border-radius: 99px; padding: 0 12px; font-size: .6875rem; letter-spacing: .02em; line-height: 1.15; white-space: normal; text-align: center; }
-/* Clear and Burst all: two small round buttons side by side at the row's end (stacked they made the row taller); Burst all shows its cracker, its name stays for screen readers */
-.ground-tools { flex: none; display: flex; align-items: center; gap: 4px; }
-.bottom-ui .ground-tools .clear-btn, .bottom-ui #btnBurstAll.finale-btn { width: 38px; height: 38px; min-width: 0; min-height: 0; padding: 0; border-radius: 50%; }
-.ground-tools .clear-btn span { display: none; }
-.ground-tools .clear-btn svg { width: 18px; height: 18px; }
-#btnBurstAll .cta-icon { display: inline-block; transform: scale(.8); }
-#burstAllLabel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-
-.launch-active .scene-bar .tap-sky { opacity: .18; pointer-events: none; }
-body.home .bottom-ui > .finale-btn, body.card-mode .bottom-ui > .finale-btn, body.rushing .bottom-ui > .finale-btn, body.ui-hidden .bottom-ui > .finale-btn { display: none; }
-.clear-btn { min-height: var(--tap); }
-.swatches { gap: 4px; }
-.swatch { position: relative; width: 30px; height: 30px; margin: 0 3px; }
-.swatch::after { content: ""; position: absolute; inset: -8px; }
-.world-strip-head { min-height: 40px; }
-@media (max-width: 760px) {
-  .bottom-ui { width: auto; left: calc(10px + var(--safe-l)); right: calc(10px + var(--safe-r)); transform: none; bottom: calc(10px + var(--safe-b)); }
-  .bottom-ui .shell-chip, #groundList .shell-chip { width: 96px; min-height: 82px; }
-  .bottom-ui .world-strip-head { min-height: 40px; padding: 6px 14px; font-size: .8125rem; background: var(--glass); border-color: var(--hair); box-shadow: var(--sheen); }
-  .finale-btn { height: 56px; padding: 0 14px; }
-  .clear-btn { width: var(--tap); height: var(--tap); }
-  .swatch { width: 28px; height: 28px; margin: 0 2px; }
-}
-/* Phones: tight cells, so four and a bit crackers show and the row reads as one you can scroll */
-@media (max-width: 420px) {
-  .bottom-ui .shell-chip, #groundList .shell-chip { width: 70px; padding: 6px 2px; }
-  .bottom-ui .shell-list { gap: 2px; padding: 0 4px; }
-  .bottom-ui .shell-chip > span:nth-child(2) { font-size: .6875rem; }
-}
-@media (max-height: 720px) {
-  .bottom-ui { row-gap: 6px; }
-  .bottom-ui .hint { display: none; }
-  .bottom-ui .shell-chip, #groundList .shell-chip { min-height: 74px; padding: 5px 4px; }
-  .bottom-ui .shell-chip .ico { height: 36px; }
-  .launch-fire { min-height: 48px; }
-}
-/* Sparkler: the shapes bar's × is a 44px target; the tools stay clear of the bottom controls */
-.spark-close { width: 32px; height: 32px; top: -12px; right: -4px; font-size: 20px; }
-.spark-close::before { content: ""; position: absolute; inset: -6px; }
-.shapes-open { min-height: 40px; padding: 8px 16px; background: var(--glass); border-color: var(--hair); }
-.shape-chip { width: 62px; min-height: 60px; padding: 5px 2px; border-radius: 14px; font-size: .6875rem; }
-.spark-float { padding: 4px; gap: 2px; border-radius: 22px; background: var(--glass); border-color: var(--hair); box-shadow: var(--sheen); }
-.tool { width: 52px; min-height: 52px; justify-content: center; font-size: .6875rem; border-radius: 16px; }
-@media (max-width: 760px) {
-  .spark-float { top: calc(132px + var(--safe-t)); transform: none; right: calc(8px + var(--safe-r)); }
-  .tool { width: 48px; min-height: 48px; }
-}
-@media (max-height: 700px) { .tool span { display: none; } .tool { min-height: var(--tap); } }
-
-/* ---- Toast and small floating bits ---- */
-.toast { min-height: var(--tap); display: flex; align-items: center; justify-content: center; padding: 10px 20px; font-size: .875rem; font-weight: 500; border-color: rgba(255, 210, 122, .28); box-shadow: 0 16px 40px -16px #000, var(--sheen); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); max-width: min(360px, calc(100% - 32px)); }
-.share-bar, #shareBar { border-radius: 22px; }
-.share-bar .icon-btn { width: var(--tap); height: var(--tap); }
-.rec-badge { min-height: 36px; }
-.show-ui { min-height: var(--tap); }
-.nudge { min-height: var(--tap); }
-
-/* ---- Sheets and dialogs ---- */
-.modal-box { border-radius: 22px; background: var(--sheet); border-color: var(--hair); box-shadow: 0 40px 120px -30px #000, var(--sheen); }
-.modal-head h2, .world-head h2, .drawer-head h2, .rewards-box h2, .trial-box h2 { font-family: var(--display); font-size: 1.375rem; font-weight: 700; letter-spacing: .02em; }
-.modal-head p, .world-head p { font-size: .875rem; line-height: 1.45; color: var(--ink-2); }
-.nav-back { min-height: var(--tap); padding: 8px 12px 8px 4px; }
-.modal-foot { border-top-color: var(--hair); }
-.modal-foot .btn { min-height: 52px; }
-.steps { padding: 3px; border-radius: 14px; border-color: var(--hair); }
-.steps button { min-height: 38px; font-size: .875rem; border-radius: 11px; }
-.icon-btn[data-close], #btnCloseWorlds, #btnCloseRewards, .premium-close { width: var(--tap); height: var(--tap); }
-@media (max-width: 520px) {
-  #cardModal .modal-box, .sheet-modal .modal-box { background: var(--sheet); }
-}
-/* Birthdays with nobody yet: the envelope and balloons over the line of text */
-#bdayEmpty::before {
-  content: ""; display: block; width: 168px; height: 168px; margin: 0 auto 6px;
-  background: url("assets/menu/empty-birthdays.jpg") center / contain no-repeat;
-  background: image-set(url("assets/menu/empty-birthdays.webp") type("image/webp"), url("assets/menu/empty-birthdays.jpg") type("image/jpeg")) center / contain no-repeat;
-  -webkit-mask: radial-gradient(circle, #000 48%, transparent 70%); mask: radial-gradient(circle, #000 48%, transparent 70%);
-}
-.sheet-empty { color: var(--ink-2); font-size: .9375rem; padding: 4px 12px 18px; }
-.sheet-row { min-height: 64px; border-radius: 16px; border-color: var(--hair); }
-.row-icon { min-width: var(--tap); height: var(--tap); border-radius: 12px; }
-.mood { min-height: 72px; border-radius: 16px; }
-.streak-card, .rush-card, .joy-today { border-radius: 18px; }
-/* Lantern Rush and the Daily Sky: a rising lantern over the round's card */
-#rushModal .sheet-body::before {
-  content: ""; display: block; flex: none; width: 120px; height: 120px; margin: 0 auto -6px;
-  background: url("assets/menu/daily-sky.jpg") center / contain no-repeat;
-  background: image-set(url("assets/menu/daily-sky.webp") type("image/webp"), url("assets/menu/daily-sky.jpg") type("image/jpeg")) center / contain no-repeat;
-  -webkit-mask: radial-gradient(circle, #000 50%, transparent 71%); mask: radial-gradient(circle, #000 50%, transparent 71%);
-}
-@media (max-height: 640px) { #rushModal .sheet-body::before { width: 88px; height: 88px; } }
-.rush-rules li { font-size: .9375rem; }
-.rush-rules span { width: 28px; flex: none; text-align: center; }
-
-/* Achievements: a medal to open the sheet; badges still to earn stay readable */
-#achModal .sheet-body::before {
-  content: ""; display: block; flex: none; width: 112px; height: 112px; margin: 0 auto -4px;
-  background: url("assets/menu/achievements.jpg") center / contain no-repeat;
-  background: image-set(url("assets/menu/achievements.webp") type("image/webp"), url("assets/menu/achievements.jpg") type("image/jpeg")) center / contain no-repeat;
-  -webkit-mask: radial-gradient(circle, #000 52%, transparent 71%); mask: radial-gradient(circle, #000 52%, transparent 71%);
-}
-.ach-list { gap: 6px; }
-.ach-list li { opacity: 1; min-height: 60px; padding: 8px 10px; gap: 12px; border-radius: 16px; background: rgba(255, 255, 255, .035); border: 1px solid transparent; }
-.ach-list li.done { background: rgba(255, 210, 122, .08); border-color: rgba(255, 210, 122, .24); }
-.ach-list li:not(.done) .ach-icon { opacity: .5; }
-.ach-list li:not(.done) .ach-text b { color: var(--ink-2); }
-.ach-icon { width: 40px; height: 40px; font-size: 1.1rem; }
-.ach-text { font-size: .9375rem; gap: 1px; }
-.ach-text small { font-size: .8125rem; color: var(--ink-3); }
-.ach-share { width: var(--tap); height: var(--tap); }
-/* Painted medals (Google Flow): full colour once earned, a dim grey medal still to earn */
-.ach-icon.ach-medal { width: 48px; height: 48px; border: 0; border-radius: 0; background: none; box-shadow: none; filter: grayscale(.9) brightness(.8); opacity: .55; }
-.ach-medal img { width: 100%; height: 100%; display: block; }
-.ach-list li.done .ach-icon.ach-medal { filter: drop-shadow(0 0 8px rgba(255, 200, 110, .55)); opacity: 1; box-shadow: none; }
-
-/* Welcome: a diya sending up the first firework */
-.welcome-box { padding: 18px 22px 22px; background: var(--sheet); }
-.welcome-box::before {
-  content: ""; display: block; flex: none; width: 150px; height: 150px; margin: -6px auto -18px;
-  background: url("assets/menu/welcome.jpg") center / contain no-repeat;
-  background: image-set(url("assets/menu/welcome.webp") type("image/webp"), url("assets/menu/welcome.jpg") type("image/jpeg")) center / contain no-repeat;
-  -webkit-mask: radial-gradient(circle, #000 46%, transparent 70%); mask: radial-gradient(circle, #000 46%, transparent 70%);
-}
-.welcome-list li > span:first-child { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 12px; font-size: 1.25rem; background: rgba(255, 255, 255, .06); border: 1px solid var(--hair); }
-.welcome-box .btn { min-height: 54px; }
-@media (max-height: 640px) { .welcome-box::before { width: 110px; height: 110px; margin-bottom: -14px; } }
-
-/* Rewards and the "tried this cracker" box match the other dialogs */
-.trial-box { border-radius: 22px; background: var(--sheet); border-color: var(--hair); box-shadow: 0 40px 120px -30px #000, var(--sheen); }
-.reward-option .btn { border-radius: 99px; }
-.reward-option { border-top-color: var(--hair); }
-#btnCloseRewards { flex: none; }
-
-/* ---- Settings drawer ---- */
-.drawer { width: min(400px, 100%); background: var(--sheet); border-left-color: var(--hair); }
-.android-webview .drawer { background: #0e1030; }
-.drawer-head { padding: calc(14px + var(--safe-t)) calc(16px + var(--safe-r)) 10px 20px; }
-.drawer-head h2 { font-size: 1.5rem; }
-.drawer-body { padding: 0 calc(16px + var(--safe-r)) calc(28px + var(--safe-b)) 16px; }
-.set-group { border-top-color: var(--hair); padding: 16px 0; }
-.set-title { font-size: .6875rem; letter-spacing: .1em; margin-bottom: 2px; }
-.set-row, .switch { min-height: var(--tap); font-size: .9375rem; }
-.switch small, .set-row small { font-size: .8125rem; }
-.for-you { min-height: 64px; padding: 10px 12px; border-radius: 16px; border-color: var(--hair); }
-.for-you .tile-art { width: 42px; height: 42px; border-radius: 12px; }
-.tile-line { display: grid; place-items: center; flex: none; width: 42px; height: 42px; border-radius: 12px; background: linear-gradient(135deg, rgba(255, 210, 122, .2), rgba(255, 95, 162, .16)); border: 1px solid rgba(255, 210, 122, .3); }
-.tile-line svg { width: 22px; height: 22px; fill: none; stroke: var(--gold); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.for-you .tile-text b { font-size: .9375rem; }
-.for-you .tile-text small { font-size: .8125rem; color: var(--ink-3); }
-.quick-row { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); margin-bottom: 4px; }
-.quick { min-height: 68px; justify-content: center; gap: 6px; border-radius: 16px; font-size: .8125rem; border-color: var(--hair); }
-.quick svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.quick svg .dot { fill: #ff4d5e; stroke: none; }
-#setAR.locked::after { top: 4px; right: 6px; }
-.premium-row { min-height: 64px; border-radius: 16px; }
-.world-entry { min-height: 64px; border-radius: 16px; }
-.more-app { min-height: 60px; border-radius: 16px; border-color: var(--hair); }
-.more-app b, .about-app b { font-size: .9375rem; }
-.more-app small, .about-app small { font-size: .8125rem; }
-
-/* ---- World picker: a sheet with a grabber ---- */
-.world-box { background: var(--glass-2); border-color: var(--hair); box-shadow: 0 30px 80px -20px #000, var(--sheen); }
-#btnWorldReset { min-height: var(--tap); }
-@media (max-width: 760px) {
-  .world-box { position: relative; border-radius: 28px 28px 0 0; padding-top: 6px; }
-  .world-box::before { content: ""; position: absolute; left: 50%; top: 7px; width: 38px; height: 5px; margin-left: -19px; border-radius: 3px; background: rgba(255, 255, 255, .22); }
-  .world-preset { min-width: 0; }
-  .world-foot { flex-wrap: nowrap; padding: 10px calc(16px + var(--safe-r)) 12px calc(16px + var(--safe-l)); }
-  .world-foot .btn { flex: none; padding: 9px 14px; }
-}
-@media (max-width: 600px) and (orientation: portrait) { .world-foot .world-preset small { display: none; } }
-
-/* ---- Premium ---- */
-.premium-box .premium-close { position: absolute; background: rgba(4, 5, 13, .55); }
-.premium-box { background: var(--sheet); border-color: rgba(255, 210, 122, .35); }
-.premium-hero { height: 200px; }
-.premium-hero img { object-position: center 35%; }
-.premium-hero::after { background: linear-gradient(180deg, rgba(14, 16, 44, 0) 45%, #151838 100%); }
-.premium-body { margin-top: -30px; }
-.premium-body h2 { font-size: 1.5rem; }
-.premium-plan { min-height: 60px; border-radius: 18px; }
-.premium-cta { min-height: 56px; }
-.premium-links a, .premium-links button { display: inline-flex; align-items: center; min-height: var(--tap); padding: 0 4px; }
-.premium-compare { font-size: .8125rem; }
-.premium-compare tbody th { width: 52%; }
-@media (max-width: 760px) {
-  .premium-box { border-radius: 28px 28px 0 0; }
-  .premium-hero { height: 176px; border-radius: 28px 28px 0 0; }
-}
-/* Short landscape phones: the brand is the round Home button, and sheets drop their illustrations for the content */
-@media (max-height: 560px) and (min-width: 761px) {
-  .brand { width: var(--tap); height: var(--tap); padding: 0; justify-content: center; border-radius: 50%; background: var(--glass); border: 1px solid var(--hair); box-shadow: var(--sheen); }
-  .brand-name, .brand .brand-mark { display: none; }
-  .brand-home { display: inline-flex; font-size: 0; }
-  .brand-home::before { content: ""; width: 10px; height: 10px; margin-left: 4px; border-left: 2.2px solid var(--gold); border-bottom: 2.2px solid var(--gold); transform: rotate(45deg); }
-}
-@media (max-height: 520px) {
-  #bdayEmpty::before, #achModal .sheet-body::before, #rushModal .sheet-body::before { display: none; }
-  .welcome-box::before { width: 84px; height: 84px; margin-bottom: -10px; }
-}
-/* Full 44px targets for the segmented controls, chips, sliders and the small text actions */
-.mode-tabs button, .steps button, .chip, .chips.small .chip, .view-toggle button, #btnRewards, .play-rewards, .bottom-ui .world-strip-head, .world-strip-head, .shapes-open { min-height: var(--tap); }
-.view-toggle { padding: 2px; }
-.view-toggle button { min-height: 40px; }
-.view-toggle button::before { content: ""; position: absolute; inset: -3px 0; }
-.view-toggle button { position: relative; }
-input[type=range] { height: var(--tap); }
-#setReset, .premium-row .btn.small, #cPhotoLabel, .share-btns .btn.small, #btnCopyLink, #btnShare, #btnWorldReset { min-height: var(--tap); }
-.nav-back, #btnCardHome, #achBack, #btnRushHome { min-height: var(--tap); }
-.hud .icon-btn { width: var(--tap); height: var(--tap); }
-.brand { min-height: var(--tap); }
-.view-toggle { padding: 0; }
-.view-toggle button { min-height: var(--tap); min-width: 48px; }
-.view-toggle button::before { content: none; }
-#btnClearStreet { min-height: var(--tap); }
-@media (max-width: 760px) { #btnClearStreet { min-width: var(--tap); } }
-/* The welcome scrolls on short screens so Let's go is always reachable */
-.welcome-box { overflow-y: auto; }
-@media (max-height: 520px) { .welcome-box::before { display: none; } .welcome-box { gap: 12px; } }
-/* Small phones: the top row loses its gaps before its buttons shrink */
-@media (max-width: 389px) {
-  .hud { padding-left: calc(8px + var(--safe-l)); padding-right: calc(8px + var(--safe-r)); column-gap: 2px; }
-  .hud .actions { gap: 0; }
-  .hud .icon-btn, .brand { width: min(var(--tap), max(38px, calc((100vw - 16px - 2px) / 8))); height: min(var(--tap), max(38px, calc((100vw - 16px - 2px) / 8))); }
-}
-
-/* "See all our apps": a grid glyph in the same 44px tile as the app icons */
-.more-app .all-apps-ico { display: grid; place-items: center; background: rgba(255, 210, 122, .12); border: 1px solid rgba(255, 210, 122, .35); }
-.more-app .all-apps-ico svg { width: 24px; height: 24px; fill: none; stroke: var(--gold); stroke-width: 1.8; }
-
-/* Update available: a compact glass card at the top of the home screen */
-.update-card { display: flex; align-items: center; gap: 10px; width: min(100%, 460px); margin: 0 auto 14px; padding: 10px 10px 10px 12px;
-  border-radius: 18px; background: rgba(20, 18, 48, .82); border: 1px solid rgba(255, 210, 122, .45); box-shadow: 0 8px 28px rgba(0, 0, 0, .35); text-align: left; }
-.update-card[hidden] { display: none; }
-.update-ico { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: rgba(255, 210, 122, .14); }
-.update-ico svg { width: 22px; height: 22px; fill: none; stroke: var(--gold); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.update-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.update-text b { font-size: .92rem; }
-.update-text small { font-size: .76rem; color: var(--ink-2); }
-.update-card .btn.small { flex: none; min-height: 44px; padding: 0 16px; }
-.update-later { flex: none; min-width: 44px; min-height: 44px; padding: 0 6px; background: none; border: 0; color: var(--ink-2); font: inherit; font-size: .82rem; }
-
-/* A plan with a discounted first period (the Diwali offer): its note reads in gold */
-.premium-plan.has-offer small { color: var(--gold); font-weight: 600; }
-
-/* Light someone up: reason chips in a wrapping grid, and the streak diya that burns brighter each day in a row */
-.moods.reasons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.moods.reasons .mood { min-height: 56px; }
-.moods.reasons .mood small { font-size: .72rem; white-space: nowrap; }
-.streak-card { position: relative; }
-.streak-diya { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font-size: 2rem; opacity: var(--diya, .35);
-  filter: drop-shadow(0 0 calc(var(--diya, .35) * 18px) rgba(255, 190, 90, .9)); }
-.streak-place { color: var(--gold); }
-
-/* Gems: the counter in the top bar and the gem sheet */
-.gem-pill { display: inline-flex; align-items: center; gap: 4px; height: 36px; padding: 0 12px 0 9px; border-radius: 999px; border: 1px solid rgba(255, 210, 122, .35); background: linear-gradient(180deg, rgba(64, 48, 24, .92), rgba(28, 22, 52, .92)); color: var(--ink); font: 600 .875rem/1 Outfit, system-ui, sans-serif; cursor: pointer; white-space: nowrap; }
-.gem-pill [data-gems] { color: var(--gold); font-variant-numeric: tabular-nums; }
-.gem-pill.gain, .gem-btn.gain { animation: gem-gain .9s ease; }
-@keyframes gem-gain { 0% { transform: scale(1); } 30% { transform: scale(1.18); box-shadow: 0 0 22px rgba(255, 210, 122, .8); } 100% { transform: scale(1); } }
-body.rushing .gem-btn { opacity: .5; pointer-events: none; }
-.hud .gem-btn[data-cap]::after { color: var(--gold); font-weight: 600; }
-.shell-chip { position: relative; }
-.chip-gem { position: absolute; top: 0; right: 2px; padding: 1px 5px; border-radius: 999px; background: rgba(20, 16, 50, .85); border: 1px solid rgba(255, 210, 122, .45); color: var(--gold); font: 600 .625rem/1.3 Outfit, system-ui, sans-serif; font-style: normal; pointer-events: none; }
-.gem-balance { display: flex; align-items: baseline; justify-content: center; gap: 8px; padding: 14px; border-radius: 18px; background: rgba(255, 210, 122, .06); border: 1px solid var(--line); }
-.gem-balance span { font-size: 1.6rem; }
-.gem-balance b { font: 700 2.2rem/1 Cinzel, Georgia, serif; color: var(--gold); }
-.gem-balance small { color: rgba(246, 242, 255, .7); }
-.gem-video { width: 100%; margin-top: 12px; }
-.gem-packs { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 12px; }
-.gem-pack { display: flex; align-items: center; gap: 12px; min-height: 64px; padding: 10px 14px; border-radius: 16px; border: 1px solid var(--line); background: rgba(255, 255, 255, .04); color: var(--ink); text-align: left; cursor: pointer; }
-.gem-pack.best { border-color: rgba(255, 210, 122, .6); background: linear-gradient(180deg, rgba(255, 210, 122, .14), rgba(255, 210, 122, .04)); }
-.gem-pack:disabled { opacity: .55; cursor: default; }
-.gem-pack .gem-ico { font-size: 1.5rem; }
-.gem-pack .gem-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.gem-pack .gem-text b { font-weight: 600; }
-.gem-pack .gem-text small { color: rgba(246, 242, 255, .7); font-size: .8125rem; }
-.gem-pack .gem-price { padding: 8px 12px; border-radius: 999px; background: linear-gradient(90deg, #f9d98a, #f2a95a); color: #241a06; font-weight: 700; font-size: .875rem; white-space: nowrap; }
-.gem-status { min-height: 1.2em; margin-top: 8px; text-align: center; color: rgba(246, 242, 255, .7); font-size: .8125rem; }
-.gem-free { list-style: none; display: flex; flex-direction: column; gap: 8px; margin-top: 6px; color: rgba(246, 242, 255, .8); font-size: .875rem; }
-.gem-free li { display: flex; gap: 10px; align-items: center; }
-.gem-free span { width: 24px; text-align: center; }
-.gift-days { list-style: none; display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 16px 0 8px; padding: 0; }
-.gift-days li { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 2px; border-radius: 12px; border: 1px solid var(--line); background: rgba(255, 255, 255, .03); font-size: .72rem; }
-.gift-days small { color: rgba(246, 242, 255, .6); font-size: .62rem; white-space: nowrap; }
-.gift-days b { color: var(--gold); font-weight: 700; }
-.gift-days li.done { opacity: .45; }
-.gift-days li.today { border-color: var(--gold); background: rgba(255, 210, 122, .14); }
-.gift-days li.chest { border-color: rgba(255, 150, 110, .6); }
-.gem-pack.starter, .gem-pack.diwali { border-color: var(--gold); background: linear-gradient(180deg, rgba(255, 170, 90, .22), rgba(255, 210, 122, .06)); box-shadow: 0 0 22px rgba(255, 190, 110, .25); }
-.fest-days { list-style: none; display: flex; flex-direction: column; gap: 8px; margin: 0 0 14px; padding: 0; }
-.fest-day.done, .fest-day.missed { opacity: .55; }
-.fest-reward { flex: none; color: var(--gold); font-weight: 700; font-size: .875rem; white-space: nowrap; }
-.gift-next, .gift-saved { text-align: center; color: rgba(246, 242, 255, .8); font-size: .875rem; margin: 8px 0; }
-.gift-collect { width: 100%; margin-top: 12px; }
-
-/* AR safety warning */
-.ar-safety { text-align: left; }
-.ar-safety .ar-safety-ico { font-size: 2.2rem; text-align: center; }
-.ar-safety h2 { text-align: center; }
-.ar-safety ul { list-style: none; display: flex; flex-direction: column; gap: 10px; margin: 4px 0 8px; }
-.ar-safety li { line-height: 1.4; }
-.ar-safety li b { color: var(--gold); }
-
-/* The gratitude calendar in Light someone up */
-.joy-cal { margin: 12px 0 4px; padding: 12px; border-radius: 18px; border: 1px solid var(--line); background: rgba(255, 255, 255, .03); }
-.joy-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.joy-cal-head b { font-size: .95rem; }
-.joy-cal-nav { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: transparent; color: inherit; font-size: 1.2rem; line-height: 1; cursor: pointer; }
-.joy-cal-nav:disabled { opacity: .3; cursor: default; }
-.joy-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-.joy-cal-wd { text-align: center; font-size: .68rem; color: rgba(246, 242, 255, .5); padding-bottom: 2px; }
-.joy-cal-day { position: relative; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: transparent; color: rgba(246, 242, 255, .55); padding: 0; font: inherit; }
-.joy-cal-day small { font-size: .72rem; }
-.joy-cal-day:disabled { cursor: default; }
-.joy-cal-day.future { opacity: .35; }
-.joy-cal-day.lit { cursor: pointer; background: radial-gradient(circle, rgba(255, 210, 122, .16), transparent 70%); }
-.joy-cal-day.lit svg { position: absolute; inset: 8%; width: 84%; height: 84%; filter: drop-shadow(0 0 3px rgba(255, 200, 120, .6)); }
-.joy-cal-day.lit small { position: absolute; top: 0; right: 2px; font-size: .55rem; color: rgba(246, 242, 255, .8); }
-.joy-cal-day.today { cursor: pointer; border: 1.5px dashed var(--gold); color: var(--gold); }
-
-/* Settings from the home screen, top right below the status bar */
-.intro-gear { position: absolute; top: calc(14px + var(--safe-t)); right: 16px; z-index: 3; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line); background: rgba(10, 8, 30, .45); backdrop-filter: blur(8px); color: var(--gold); cursor: pointer; }
-.intro-gear svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
-/* On phones Full screen is hidden, so the quick row only shows when Ad privacy choices does */
-@media (max-width: 760px) { .quick-row:not(:has(#setAdPrivacy:not([hidden]))) { display: none; } }
-/* Hide controls: a small eye under the top bar's right end */
-.hud > .hide-eye { position: absolute; top: calc(100% + 10px); right: calc(12px + var(--safe-r)); width: 40px; height: 40px; min-width: 0; min-height: 0; }
-/* Phones: the 2D/3D switch has a row of its own at the foot of the top bar; the eye sits at its right end, in line with
-   it. Where that row is hidden (AR) it stays under the bar, clear of the buttons. */
-@media (max-width: 760px) {
-  body:not(.ar):not(.room-ar) .hud > .hide-eye { top: auto; bottom: 3px; }
-}
-.hud > .hide-eye svg { width: 20px; height: 20px; }
-body.home .hide-eye, body.card-mode .hide-eye, body.rushing .hide-eye { display: none; }
-
-/* ---------- Jewel Night: the look drawn in Google Flow (home art, tab icons and screen mockups) ----------
-   Dark jewel-case glass with a thin gold rim everywhere; gold is the light, each home feature keeps its own jewel
-   colour. Android turns off backdrop blur, so every surface is gradients and shadows only. */
-:root {
-  --jn-rim: rgba(255, 210, 122, .42);
-  --jn-rim-2: rgba(255, 226, 160, .8);
-  --jn-case: linear-gradient(180deg, rgba(38, 34, 70, .92) 0%, rgba(17, 15, 38, .94) 100%);
-  --jn-shine: inset 0 1px 0 rgba(255, 240, 200, .22), inset 0 -12px 20px -14px rgba(0, 0, 0, .7);
-  --jn-gold: linear-gradient(180deg, #fff2c6 0%, #ffd27a 38%, #f2a83a 70%, #ff7aa8 100%);
-  --jn-leaf: linear-gradient(100deg, #fff4d6 0%, #ffd27a 28%, #f6b14e 48%, #fff0c4 62%, #e8a23e 80%, #fff4d6 100%);
-}
-
-/* Home title: engraved gold leaf */
-#intro .title { background-image: var(--jn-leaf); filter: drop-shadow(0 2px 14px rgba(4, 5, 13, .95)) drop-shadow(0 0 22px rgba(255, 180, 90, .35)); }
-#intro .intro-icon { box-shadow: 0 0 0 1.5px var(--jn-rim-2), 0 12px 34px -8px rgba(255, 160, 80, .65); }
-
-/* Start the show: polished gold with a glossy top */
-#intro #btnStart {
-  position: relative; overflow: hidden; color: #2a1404; background: var(--jn-gold);
-  border: 1px solid rgba(255, 244, 210, .9);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), inset 0 -10px 18px -8px rgba(150, 50, 40, .45), 0 12px 30px -12px rgba(255, 130, 80, .9), 0 0 36px -10px rgba(255, 200, 110, .75);
-}
-#intro #btnStart::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 50%; border-radius: inherit; pointer-events: none; background: linear-gradient(180deg, rgba(255, 255, 255, .5), rgba(255, 255, 255, .04)); }
-#intro #btnStart > * { position: relative; }
-
-/* Greeting card: an emerald jewel pill with the envelope at its start */
-#intro .intro-actions .btn.ghost {
-  position: relative; overflow: hidden; color: #fff; padding-left: 60px; padding-right: 20px;
-  white-space: normal; line-height: 1.2; /* a long label (Tamil) wraps beside the envelope instead of running under it */
-  background: linear-gradient(180deg, #2fbfa4 0%, #138a78 55%, #0b5d55 100%);
-  border: 1px solid var(--jn-rim-2); text-shadow: 0 1px 2px rgba(0, 40, 36, .6);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), inset 0 -10px 18px -8px rgba(0, 0, 0, .35), 0 12px 28px -14px rgba(0, 0, 0, .9), 0 0 28px -12px rgba(60, 220, 190, .6);
-}
-#intro .intro-actions .btn.ghost::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 50%; pointer-events: none; border-radius: inherit; background: linear-gradient(180deg, rgba(255, 255, 255, .3), rgba(255, 255, 255, .03)); }
-#intro .intro-actions .btn.ghost > * { position: relative; }
-#intro .intro-actions .btn.ghost::after {
-  content: ""; position: absolute; left: 10px; top: 50%; width: 44px; height: 44px; margin-top: -22px; pointer-events: none;
-  background: url("assets/menu/card.png") center / contain no-repeat;
-  background: image-set(url("assets/menu/card.webp") type("image/webp"), url("assets/menu/card.png") type("image/png")) center / contain no-repeat;
-  filter: drop-shadow(0 3px 5px rgba(0, 40, 36, .6)) drop-shadow(0 0 8px rgba(255, 220, 140, .55));
-}
-
-/* Feature cards: dark jewel cases, the painted object filling the top, gold rim, the card tinted by its jewel */
-#intro .home-tile {
-  --j: 255, 95, 162;
-  position: relative; overflow: hidden; color: #fff;
-  flex-direction: column !important; align-items: center !important; text-align: center; gap: 6px;
-  padding: 8px 10px 12px !important; border-radius: 20px;
-  background: radial-gradient(120% 70% at 50% 0%, rgba(var(--j), .42), rgba(var(--j), 0) 70%), var(--jn-case);
-  border: 1px solid var(--jn-rim);
-  box-shadow: var(--jn-shine), 0 14px 30px -16px rgba(0, 0, 0, .95), 0 0 26px -14px rgba(var(--j), .9);
-}
-#intro .home-tile::before { content: ""; position: absolute; inset: 0 0 auto; height: 46%; pointer-events: none; border-radius: inherit; background: linear-gradient(180deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, 0)); }
-#intro .home-tile::after { display: none !important; }
-#intro .home-tile > * { position: relative; }
-#btnBirthdays { --j: 255, 95, 162 !important; }
-#btnJoy { --j: 255, 176, 70 !important; }
-#btnDailySky { --j: 80, 160, 255 !important; }
-#btnRush { --j: 160, 110, 255 !important; }
-#intro .home-tile .tile-art {
-  display: block !important; width: 88px !important; height: 88px !important; margin-top: 2px; border-radius: 0; box-shadow: none; background: none; overflow: visible;
-  filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .55)) drop-shadow(0 0 14px rgba(var(--j), .55));
-}
-#intro .home-tile .tile-art img { width: 100%; height: 100%; }
-#intro .home-tile .tile-text { align-items: center; }
-#intro .home-tile .tile-text b { color: #fff; font-size: .9375rem; text-shadow: 0 1px 2px rgba(0, 0, 0, .5); }
-#intro .home-tile .tile-text small { color: rgba(246, 242, 255, .78) !important; display: -webkit-box !important; -webkit-line-clamp: 2; }
-#intro .home-tile.soon { border-color: var(--jn-rim-2); box-shadow: var(--jn-shine), 0 0 0 1px var(--jn-rim-2), 0 0 30px -8px rgba(var(--j), .95); }
-#intro .home-tile.soon small { color: #ffe6a8 !important; }
-#intro .home-tile:active, #intro .intro-actions .btn.ghost:active { transform: scale(.97); filter: brightness(1.08); }
-#intro .intro-gear { background: var(--jn-case); border: 1px solid var(--jn-rim); box-shadow: var(--jn-shine), 0 6px 16px -8px rgba(0, 0, 0, .8); color: #ffd27a; }
-@media (max-height: 700px) and (orientation: portrait) {
-  #intro .home-tile .tile-art { width: 66px !important; height: 66px !important; }
-}
-@media (orientation: landscape) and (max-height: 560px) {
-  #intro .home-tile { flex-direction: row !important; padding: 6px 10px !important; }
-  #intro .home-tile .tile-art { width: 44px !important; height: 44px !important; }
-}
-
-/* Play: round jewel-case buttons with a gold rim */
-.hud .icon-btn:not(.accent), .brand, .scene-chip, .view-toggle, .hud > .hide-eye, .clear-btn, .share-bar .icon-btn {
-  background: var(--jn-case); border: 1px solid var(--jn-rim); box-shadow: var(--jn-shine), 0 6px 16px -10px #000;
-}
-.hud .icon-btn:not(.accent) { color: #ffe2a8; }
-.hud .gem-btn { border: 1px solid var(--jn-rim-2); }
-.view-toggle button[aria-pressed="true"], .mode-tabs button[aria-selected="true"], .steps button[aria-selected="true"] {
-  color: #2a1404; background: var(--jn-gold); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8), 0 4px 14px -4px rgba(255, 150, 80, .75);
-}
-
-/* Mode tabs: the painted burst, anar and phuljhari in place of the drawn glyphs */
-.mode-tabs, .bottom-ui .dock, .spark-float, .bottom-ui .world-strip-head, .play-rewards, .shapes-open {
-  background: var(--jn-case); border: 1px solid var(--jn-rim); box-shadow: var(--jn-shine), 0 18px 40px -20px #000;
-}
-.mode-tabs .tab-icon { width: 28px; height: 28px; border-radius: 0; transform: none; box-shadow: none; background: center / contain no-repeat; filter: drop-shadow(0 0 4px rgba(255, 200, 110, .55)); }
-.mode-tabs .tab-icon::before, .mode-tabs .tab-icon::after { display: none; }
-.mode-tabs [data-mode="sky"] .tab-icon { background-image: url("assets/menu/tab-sky.png"); background-image: image-set(url("assets/menu/tab-sky.webp") type("image/webp"), url("assets/menu/tab-sky.png") type("image/png")); }
-.mode-tabs [data-mode="ground"] .tab-icon { background-image: url("assets/menu/tab-ground.png"); background-image: image-set(url("assets/menu/tab-ground.webp") type("image/webp"), url("assets/menu/tab-ground.png") type("image/png")); }
-.mode-tabs [data-mode="spark"] .tab-icon { background-image: url("assets/menu/tab-spark.png"); background-image: image-set(url("assets/menu/tab-spark.webp") type("image/webp"), url("assets/menu/tab-spark.png") type("image/png")); }
-.mode-tabs button[aria-selected="true"] .tab-icon { filter: drop-shadow(0 1px 2px rgba(90, 30, 0, .55)); }
-
-/* Cracker tiles: dark cases with a warm spotlight, gold rim; the chosen one glows gold */
-.shell-chip .ico, .shell-chip.real .ico {
-  background: radial-gradient(circle at 50% 62%, rgba(255, 214, 150, .5), rgba(255, 170, 90, .12) 46%, rgba(0, 0, 0, 0) 70%), linear-gradient(180deg, #2a2550, #120f2a);
-  border: 1px solid var(--jn-rim); box-shadow: var(--jn-shine);
-}
-.shell-chip.active { background: linear-gradient(180deg, rgba(255, 210, 122, .16), rgba(255, 210, 122, .04)); border-color: var(--jn-rim-2); box-shadow: 0 0 18px -6px rgba(255, 200, 110, .8); }
-.shell-chip.active .ico { border-color: #ffe2a8; box-shadow: 0 0 0 1px #ffd27a, 0 0 16px rgba(255, 200, 110, .7); }
-.launch-fire { background: var(--jn-gold); color: #2a1404; border: 1px solid rgba(255, 244, 210, .9); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .85), inset 0 -10px 18px -8px rgba(150, 50, 40, .4), 0 12px 28px -12px rgba(255, 130, 80, .85); }
-.bottom-ui > .tap-sky { background: var(--jn-case); color: #ffe2a8; border: 1px solid var(--jn-rim); box-shadow: var(--jn-shine); }
-
-/* Sheets, dialogs and the settings drawer: midnight glass lit by a gold top edge, titles in gold leaf */
-.modal-box, .drawer, .trial-box, .welcome-box {
-  border: 1px solid var(--jn-rim);
-  box-shadow: inset 0 1px 0 rgba(255, 226, 160, .55), inset 0 24px 40px -30px rgba(255, 190, 100, .55), 0 40px 120px -30px #000;
-}
-.drawer { border-width: 0 0 0 1px; }
-.modal-head h2, .world-head h2, .drawer-head h2, .rewards-box h2, .trial-box h2, .welcome-box h2 {
-  background: var(--jn-leaf); -webkit-background-clip: text; background-clip: text; color: transparent;
-}
-.sheet-row, .for-you, .ach-list li, .mood, .streak-card, .rush-card, .joy-today { border-color: rgba(255, 210, 122, .2); }
-.chip[aria-pressed="true"], .chip.on, .chip.active { border-color: var(--jn-rim-2); box-shadow: 0 0 14px -4px rgba(255, 200, 110, .7); }
-.field input:focus, .field textarea:focus, select:focus { border-color: var(--jn-rim-2); box-shadow: 0 0 0 3px rgba(255, 210, 122, .18); }
-.switch input:checked + i { background: var(--jn-gold); }
-.modal .btn.primary, .drawer .btn.primary { background: var(--jn-gold); color: #2a1404; }
-
-/* ---------- Sheets in the Jewel Night look: a painted night backdrop and painted icons (Google Flow, assets/menu) ---------- */
-body .sheet-modal .modal-box, body #cardModal .modal-box, body .drawer, .android-webview .drawer {
-  background: linear-gradient(180deg, rgba(9, 8, 28, .42) 0%, rgba(9, 8, 28, .84) 26%, rgba(9, 8, 28, .86) 74%, rgba(9, 8, 28, .5) 100%),
-    url("assets/menu/sheet-backdrop.webp") center / cover, #0b0a24;
-}
-.chip:has(.chip-art) { display: inline-flex; align-items: center; gap: 6px; padding-left: 8px; }
-.chip-art { flex: none; width: 24px; height: 24px; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .5)); }
-.mood .mood-art { width: 40px; height: 40px; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, .55)); transition: transform .2s; }
-.mood.on .mood-art { transform: scale(1.1); filter: drop-shadow(0 4px 8px rgba(0, 0, 0, .55)) drop-shadow(0 0 10px rgba(255, 200, 110, .7)); }
-.moods.reasons .mood { min-height: 76px; }
-.row-avatar:has(.row-art) { background: rgba(255, 210, 122, .08); }
-.row-art { width: 78%; height: 78%; object-fit: contain; }
-.rush-rules li { align-items: center; }
-.rule-art { flex: none; width: 34px; height: 34px; filter: drop-shadow(0 3px 6px rgba(0, 0, 0, .5)); }
-.gem-pack img.gem-ico { flex: none; width: 46px; height: 46px; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, .55)); }
-.gift-amount { align-items: center; }
-.gift-art { width: 56px; height: 56px; filter: drop-shadow(0 6px 12px rgba(0, 0, 0, .5)) drop-shadow(0 0 16px rgba(255, 180, 90, .45)); }
-
-/* ---------- Diya Path (diya-path.js): a dark indigo night with glowing paths ---------- */
-#intro .home-tile.wide { grid-column: 1 / -1; flex-direction: row !important; text-align: left; gap: 12px; padding: 8px 14px !important; }
-#intro .home-tile.wide .tile-art { width: 64px !important; height: 64px !important; margin: 0; }
-#intro .home-tile.wide .tile-text { align-items: flex-start; }
-#btnDiya { --j: 255, 150, 60 !important; }
-@media (orientation: landscape) and (max-height: 560px) { #intro .home-tile.wide .tile-art { width: 44px !important; height: 44px !important; } }
-body.puzzling > :not(canvas):not(#skyGlow):not(#stage):not(#diyaPath):not(#rocketRush):not(#shareBar):not(#recBadge):not(#toast):not(#premiumNudge):not(.premium-panel):not(script) { visibility: hidden !important; }
-.diya {
-  --diya-fill: 0;
-  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; color: var(--ink);
-  background: radial-gradient(120% 60% at 50% 100%, rgba(255, 150, 60, calc(.06 + var(--diya-fill) * .22)), transparent 70%),
-    radial-gradient(90% 50% at 50% 0%, rgba(90, 80, 200, .35), transparent 70%), linear-gradient(180deg, #120f36 0%, #0a0a26 55%, #05051a 100%);
-  transition: background .6s;
-  padding: var(--safe-t) 0 var(--safe-b);
-}
-.diya[hidden] { display: none; }
-.diya.showing { background: transparent; }
-.diya-screen { flex: 1; display: flex; flex-direction: column; min-height: 0; transition: opacity .6s; }
-.diya-screen[hidden] { display: none; }
-.diya.showing .diya-screen { opacity: 0; pointer-events: none; }
-.diya-skip { position: absolute; inset: 0; }
-.diya-skip[hidden] { display: none; }
-.diya-top { display: flex; align-items: center; gap: 10px; padding: 12px 16px 6px; }
-.diya-title { flex: 1; min-width: 0; font-family: var(--display); font-size: 1.25rem; letter-spacing: .03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  background: var(--jn-leaf); -webkit-background-clip: text; background-clip: text; color: transparent; }
-/* level names can be long ("Festival of Lights 100", and longer in some languages): smaller, up to two lines */
-.diya-play .diya-title { font-size: 1.05rem; line-height: 1.15; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.diya-icon { flex: none; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; color: #ffd27a;
-  background: var(--jn-case); border: 1px solid var(--jn-rim); box-shadow: var(--jn-shine); }
-.diya-icon svg, .diya-tool svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.diya-gems { font-weight: 700; font-size: .9rem; padding: 6px 12px; border-radius: 999px; background: var(--jn-case); border: 1px solid var(--jn-rim); }
-.diya-moves { display: flex; flex-direction: column; align-items: flex-end; font-weight: 700; font-size: .95rem; }
-.diya-moves small { font-weight: 500; font-size: .74rem; color: var(--ink-3); }
-.diya-scroll { flex: 1; overflow-y: auto; padding: 4px 16px 24px; display: flex; flex-direction: column; gap: 14px; }
-.diya-lead { color: var(--ink-2); font-size: .9rem; line-height: 1.45; text-align: center; }
-.diya-daily { position: relative; display: grid; grid-template-columns: 1fr auto; text-align: left; gap: 2px 12px; padding: 14px 16px; border-radius: 20px; color: #fff;
-  background: radial-gradient(120% 90% at 0% 0%, rgba(255, 150, 60, .4), transparent 70%), var(--jn-case); border: 1px solid var(--jn-rim-2);
-  box-shadow: var(--jn-shine), 0 0 30px -10px rgba(255, 150, 60, .9); }
-.diya-daily b { font-family: var(--display); font-size: 1.1rem; }
-.diya-daily small { grid-column: 1; color: rgba(246, 242, 255, .8); font-size: .8rem; }
-.diya-daily-go { grid-row: 1 / span 2; grid-column: 2; align-self: center; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
-  background: var(--jn-gold); color: #2a1404; font-weight: 800; }
-.diya-daily.done { border-color: var(--jn-rim); box-shadow: var(--jn-shine); }
-.diya-chapter { padding: 12px; border-radius: 20px; background: var(--jn-case); border: 1px solid var(--jn-rim); box-shadow: var(--jn-shine); }
-.diya-chapter-head { width: 100%; display: flex; align-items: baseline; gap: 8px; padding: 2px 0; color: inherit; text-align: left; }
-.diya-chapter.shown .diya-chapter-head { margin-bottom: 10px; }
-.diya-chapter-head b { font-family: var(--display); font-size: 1.05rem; color: #ffe2a8; }
-.diya-chapter-head small { color: var(--ink-3); font-size: .78rem; }
-.diya-chapter-head span { margin-left: auto; font-size: .82rem; color: #ffd27a; font-weight: 700; }
-.diya-chapter-head i { align-self: center; width: 8px; height: 8px; border: solid #ffd27a; border-width: 0 2px 2px 0; transform: rotate(45deg) translate(-2px, -2px); transition: transform .2s; }
-.diya-chapter.shown .diya-chapter-head i { transform: rotate(-135deg) translate(-2px, -2px); }
-.diya-chapter.locked .diya-lock { margin: 8px 0 0; }
-.diya-chapter.locked { opacity: .72; }
-.diya-lock { font-size: .8rem; color: var(--ink-2); margin: -4px 0 10px; }
-.diya-levels { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-.diya-level { aspect-ratio: 1; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; color: #fff;
-  background: rgba(120, 110, 255, .1); border: 1px solid rgba(160, 160, 255, .28); }
-.diya-level b { font-size: 1.05rem; }
-.diya-level small { font-size: .56rem; letter-spacing: -.04em; color: #ffd27a; }
-.diya-level.won { background: rgba(255, 170, 70, .14); border-color: var(--jn-rim); }
-.diya-level.gold { box-shadow: 0 0 16px -4px rgba(255, 200, 110, .8); border-color: var(--jn-rim-2); }
-.diya-level:disabled { opacity: .45; }
-.diya-level:not(:disabled):active, .diya-tool:active, .diya-daily:active { transform: scale(.96); }
-.diya-tip { margin: 2px 16px 0; padding: 8px 12px; border-radius: 14px; font-size: .86rem; line-height: 1.35; text-align: center; color: #ffe8bd;
-  background: rgba(255, 200, 110, .1); border: 1px solid rgba(255, 210, 122, .3); }
-.diya-tip[hidden] { display: none; }
-.diya-board { flex: 1; min-height: 0; display: grid; place-items: center; padding: 8px 12px; }
-.diya-board canvas { display: block; touch-action: none; border-radius: 18px;
-  background: radial-gradient(70% 70% at 50% 50%, rgba(70, 60, 170, .35), rgba(10, 10, 40, .6)), url("assets/diya-path/board.webp") center / cover;
-  box-shadow: inset 0 0 0 1px rgba(160, 160, 255, .25), 0 0 40px -10px rgba(120, 110, 255, .55); }
-.diya-stat { text-align: center; font-size: .82rem; color: var(--ink-2); }
-.diya-ambient { display: flex; justify-content: center; gap: 6px; padding: 10px 0 2px; }
-/* the little row of lamps: the painted orange diya, dark until the board's fill reaches it, then lit with a flame */
-.diya[data-diyas="gold"] .diya-ambient i { background-image: url("assets/diya-path/gold-0.webp"); }
-.diya-ambient i { position: relative; width: 26px; height: 26px; background: url("assets/diya-path/diya-0.webp") center / contain no-repeat;
-  filter: brightness(.42) saturate(.5); transition: filter .5s; }
-.diya-ambient i::after { content: ""; position: absolute; left: 82%; top: 4px; width: 6px; height: 10px; border-radius: 50% 50% 50% 50% / 65% 65% 35% 35%;
-  background: radial-gradient(circle at 50% 70%, #fff6d0, #ffc24a 45%, #ff7a1a 75%, transparent 80%); opacity: 0; transform: translate(-50%, -60%) scale(.4); transition: opacity .4s, transform .4s; }
-.diya-ambient i.lit { filter: brightness(1) saturate(1) drop-shadow(0 0 6px rgba(255, 170, 60, .8)); }
-.diya-ambient i.lit::after { opacity: 1; transform: translate(-50%, -60%) scale(1); }
-.diya-tools { display: flex; gap: 10px; padding: 8px 16px 14px; }
-.diya-tool { flex: 1; min-height: 50px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 16px; font-weight: 600; font-size: .9rem; color: #ffe2a8;
-  background: var(--jn-case); border: 1px solid var(--jn-rim); box-shadow: var(--jn-shine); }
-.diya-tool:disabled { opacity: .45; }
-.diya-tool em { font-style: normal; font-size: .75rem; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; display: inline-grid; place-items: center; background: var(--jn-gold); color: #2a1404; }
-.diya-result, .diya-hintbox { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(4, 4, 16, .55); }
-.diya-result[hidden], .diya-hintbox[hidden] { display: none; }
-.diya-result-box { width: min(340px, 100%); padding: 22px 18px 18px; border-radius: 24px; text-align: center; display: flex; flex-direction: column; gap: 8px;
-  background: var(--jn-case); border: 1px solid var(--jn-rim-2); box-shadow: var(--jn-shine), 0 24px 60px -20px #000, 0 0 40px -16px rgba(255, 170, 70, .8); }
-.diya-result-box h2 { font-family: var(--display); font-size: 1.4rem; background: var(--jn-leaf); -webkit-background-clip: text; background-clip: text; color: transparent; }
-.diya-kicker { font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
-.diya-res-stars { font-size: 2rem; letter-spacing: .1em; color: #ffd27a; text-shadow: 0 0 16px rgba(255, 190, 90, .8); }
-.diya-res-line { color: var(--ink-2); font-size: .9rem; }
-.diya-res-gems { font-weight: 700; color: #ffe2a8; min-height: 1.2em; }
-.diya-res-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
-.diya-res-actions .btn { width: 100%; min-height: 48px; }
-.diya-res-actions .btn.primary { background: var(--jn-gold); color: #2a1404; }
-.diya-res-actions [hidden] { display: none; }
-.diya-res-share { display: flex; gap: 8px; }
-.diya-res-share .btn { flex: 1; min-width: 0; }
-body.diya-open .toast { z-index: 80; }
-
-/* ---------- Rocket Rush (rocket-rush.js): Diya Path's night, with rockets on a warm board ---------- */
-#btnRocket { --j: 255, 90, 78 !important; }
-.rr {
-  position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; color: var(--ink);
-  background: radial-gradient(120% 55% at 50% 100%, rgba(255, 110, 70, .16), transparent 70%),
-    radial-gradient(90% 50% at 50% 0%, rgba(90, 80, 200, .35), transparent 70%), linear-gradient(180deg, #120f36 0%, #0a0a26 55%, #05051a 100%);
-  transition: background .6s;
-  padding: var(--safe-t) 0 var(--safe-b);
-}
-.rr[hidden] { display: none; }
-.rr.showing { background: transparent; }
-.rr-screen { flex: 1; display: flex; flex-direction: column; min-height: 0; transition: opacity .6s; }
-.rr-screen[hidden] { display: none; }
-.rr.showing .rr-screen { opacity: 0; pointer-events: none; }
-.rr-daily { background: radial-gradient(120% 90% at 0% 0%, rgba(255, 90, 78, .42), transparent 70%), var(--jn-case);
-  box-shadow: var(--jn-shine), 0 0 30px -10px rgba(255, 110, 70, .9); }
-.rr-world .diya-level.rr-breather { background: rgba(80, 200, 160, .1); }
-.rr-world .diya-level.rr-breather.won { background: rgba(255, 170, 70, .14); }
-.rr-fuses { display: flex; gap: 6px; padding: 0 4px; }
-.rr-fuses i { width: 12px; height: 22px; border-radius: 6px 6px 3px 3px; position: relative; background: linear-gradient(180deg, #ffe39a, #ff8a2a);
-  box-shadow: 0 0 10px rgba(255, 150, 60, .8); transition: background .3s, box-shadow .3s, opacity .3s; }
-.rr-fuses i::before { content: ""; position: absolute; left: 50%; top: -7px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: #fff6d0;
-  box-shadow: 0 0 8px 2px rgba(255, 200, 90, .9); }
-.rr-fuses i.out { background: #3a2230; box-shadow: none; opacity: .7; }
-.rr-fuses i.out::before { background: #5a3a40; box-shadow: none; }
-.rr-stat { display: grid; grid-template-columns: 1fr auto 1fr; align-items: baseline; gap: 8px; padding: 6px 18px 0; font-size: .82rem; color: var(--ink-2); }
-.rr-stat b { font-size: 1rem; color: #ffe2a8; }
-.rr-stat span:last-child { text-align: right; }
-/* The clock beside the par: tabular figures so it doesn't wobble as it counts; gold once past par */
-.rr-time { display: inline-flex; justify-content: flex-end; align-items: baseline; gap: 8px; white-space: nowrap; }
-.rr-clock { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--ink); transition: color .3s; }
-.rr-clock.over { color: var(--gold); }
-@media (prefers-reduced-motion: reduce) { .rr-clock { transition: none; } }
-.rr-board { position: relative; }
-.rr-board canvas { background: radial-gradient(70% 70% at 50% 50%, rgba(140, 60, 40, .3), rgba(14, 8, 30, .7));
-  box-shadow: inset 0 0 0 1px rgba(255, 210, 122, .22), 0 0 40px -10px rgba(255, 120, 70, .45); }
-.rr-chain, .rr-banner { position: absolute; left: 50%; top: 16%; transform: translateX(-50%); pointer-events: none; white-space: nowrap; font-family: var(--display); font-weight: 800;
-  font-size: 1.35rem; color: #fff1c4; text-shadow: 0 0 14px rgba(255, 160, 60, .95), 0 2px 0 #4a1408; }
-.rr-chain[hidden], .rr-banner[hidden] { display: none; }
-.rr-chain.pop { animation: rrPop 1.2s ease-out both; }
-.rr-banner { top: 44%; font-size: 1.6rem; animation: rrPop 1.1s ease-out both; }
-@keyframes rrPop { 0% { opacity: 0; transform: translateX(-50%) scale(.6); } 15% { opacity: 1; transform: translateX(-50%) scale(1.12); } 30% { transform: translateX(-50%) scale(1); }
-  80% { opacity: 1; } 100% { opacity: 0; transform: translateX(-50%) translateY(-18px); } }
-.rr-skip { display: flex; align-items: flex-end; justify-content: center; padding-bottom: calc(28px + var(--safe-b)); }
-.rr-res-share { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.rr-res-share .btn { min-width: 0; padding-left: 8px; padding-right: 8px; }
-.rr-res-share [hidden] { display: none; }
-.rr-skip-btn { position: absolute; top: calc(14px + var(--safe-t)); right: 16px; min-height: 40px; padding: 0 18px; border-radius: 999px; font-weight: 700; font-size: .9rem;
-  color: #ffe2a8; background: rgba(5, 5, 26, .55); border: 1px solid var(--jn-rim); }
-.rr-skip p { font-size: .82rem; color: rgba(246, 242, 255, .7); padding: 6px 12px; border-radius: 999px; background: rgba(5, 5, 26, .45); }
-body.rr-open .toast { z-index: 80; }
-body.rr-open #shareBar, body.rr-open #recBadge { z-index: 90; }
-
-/* ---------- Daily Sky vs Challenge: each its own jewel and badge, so the two read apart at a glance ---------- */
-#btnDailySky { --j: 70, 175, 255 !important; }
-#btnRush { --j: 40, 205, 150 !important; }
-.tile-badge {
-  position: absolute !important; top: 8px; right: 8px; z-index: 1; min-width: 26px; padding: 3px 8px; border-radius: 999px;
-  font-size: .6875rem; font-weight: 700; letter-spacing: .04em; line-height: 1.2; text-transform: uppercase; pointer-events: none;
-}
-#badgeDaily { color: #2a1404; background: var(--jn-gold); box-shadow: 0 0 12px rgba(255, 200, 110, .7); }
-#badgeDaily.done { color: #d8f4ff; background: rgba(70, 175, 255, .3); box-shadow: inset 0 0 0 1px rgba(150, 215, 255, .6); }
-#btnRush .tile-badge { color: #e6fff5; font-style: italic; background: linear-gradient(180deg, #2fd9a0, #0f8a64); box-shadow: inset 0 0 0 1px rgba(200, 255, 230, .55), 0 0 12px rgba(40, 205, 150, .55); }
-#btnBoard { --j: 255, 200, 90 !important; }
-
-/* ---------- Leaderboard sheet ---------- */
-.board-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 999px; background: rgba(255, 255, 255, .05); border: 1px solid var(--jn-rim); }
-.board-tab { min-height: 40px; border-radius: 999px; font-weight: 600; font-size: .9375rem; color: var(--ink-2); background: none; border: 0; }
-.board-tab[aria-selected="true"] { color: #2a1404; background: var(--jn-gold); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .8), 0 4px 14px -6px rgba(255, 150, 80, .9); }
-.board-list, .board-me { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.board-list li, .board-me li {
-  display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 14px; border-radius: 16px;
-  background: rgba(255, 255, 255, .035); border: 1px solid transparent;
-}
-.board-list li:nth-child(-n+3) { background: rgba(255, 210, 122, .06); }
-.board-list li.me, .board-me li { background: radial-gradient(120% 140% at 0% 50%, rgba(255, 200, 110, .26), rgba(255, 200, 110, .06)); border-color: var(--jn-rim-2); box-shadow: 0 0 20px -8px rgba(255, 190, 100, .8); }
-.board-rank { flex: none; width: 36px; text-align: center; font-weight: 700; color: var(--ink-2); font-size: .9375rem; }
-.board-list li:nth-child(-n+3) .board-rank { font-size: 1.4rem; }
-.board-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .9375rem; }
-.board-name small { margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: .6875rem; font-weight: 700; color: #2a1404; background: var(--gold); vertical-align: 1px; }
-.board-score { flex: none; font-variant-numeric: tabular-nums; color: var(--gold); }
-.board-me { border-top: 1px dashed var(--jn-rim); padding-top: 10px; color: var(--ink-2); font-size: .9375rem; text-align: center; }
-.board-state { text-align: center; color: var(--ink-2); font-size: .9375rem; padding: 18px 12px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.board-state[hidden], .board-me[hidden] { display: none; }
-#boardModal .sheet-body::before {
-  content: ""; display: block; flex: none; width: 96px; height: 96px; margin: 0 auto -6px;
-  background: url("assets/menu/achievements.jpg") center / contain no-repeat;
-  background: image-set(url("assets/menu/achievements.webp") type("image/webp"), url("assets/menu/achievements.jpg") type("image/jpeg")) center / contain no-repeat;
-  -webkit-mask: radial-gradient(circle, #000 52%, transparent 71%); mask: radial-gradient(circle, #000 52%, transparent 71%);
-}
-@media (max-height: 640px) { #boardModal .sheet-body::before { display: none; } }
-
-/* ---------- Premium: free crackers, the gem sheet's Premium line, the after-videos nudge ---------- */
-body.premium .chip-gem { display: none; }
-.chip-gem.vip { background: linear-gradient(135deg, #ffe29a, #f5b54a); border-color: transparent; color: #3a2200; } /* 10 gems or more */
-/* Sivakasi crackers Premium unlocks (saravedi, double and seven shot): the crown on the chip's corner for free players */
-body:not(.premium) .shell-chip.premium-item { position: relative; }
-/* …and, while its one free light is left, a "Free try" tag on the opposite corner */
-/* Centred across the foot of the picture, clear of the crown (top right) and the New badge (top left) */
-.chip-try { position: absolute; top: 33px; left: 50%; transform: translateX(-50%); max-width: calc(100% - 4px); overflow: hidden; text-overflow: ellipsis; padding: 1px 5px; border-radius: 999px; background: rgba(18, 70, 48, .9); border: 1px solid rgba(125, 255, 180, .5); color: #9ff5c8; font: 600 .5625rem/1.3 Outfit, system-ui, sans-serif; font-style: normal; pointer-events: none; white-space: nowrap; }
-.chip-try[hidden], body.premium .chip-try { display: none; }
-.chip-new { position: absolute; top: 0; left: 2px; padding: 1px 5px; border-radius: 999px; background: linear-gradient(135deg, #ffe29a, #f5b54a); color: #3a2200; font: 800 .5625rem/1.3 Outfit, system-ui, sans-serif; font-style: normal; letter-spacing: .04em; text-transform: uppercase; pointer-events: none; }
-body:not(.premium) .shell-chip.premium-item::before {
-  content: ''; position: absolute; top: 1px; right: 4px; width: 18px; height: 16px;
-  background: var(--crown-badge); filter: drop-shadow(0 0 4px rgba(255, 190, 60, .85)) drop-shadow(0 1px 1px rgba(0, 0, 0, .6));
-  transform: rotate(14deg); pointer-events: none; z-index: 2;
-}
-.gem-premium { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-radius: 16px; text-align: left; color: var(--ink);
-  background: linear-gradient(100deg, rgba(255, 210, 122, .16), rgba(255, 120, 160, .1)); border: 1px solid var(--jn-rim-2); box-shadow: var(--jn-shine); }
-.gem-premium[hidden] { display: none; }
-.gem-premium b { display: block; color: #ffe2a8; }
-.gem-premium small { color: var(--ink-2); font-size: .8rem; }
-.premium-nudge { position: fixed; left: 50%; bottom: calc(18px + var(--safe-b)); transform: translateX(-50%); z-index: 95; display: flex; align-items: center; gap: 10px;
-  width: min(340px, calc(100% - 32px)); padding: 10px 14px; border-radius: 18px; text-align: left; color: var(--ink);
-  background: var(--jn-case); border: 1px solid var(--jn-rim-2); box-shadow: var(--jn-shine), 0 16px 40px -14px #000; animation: nudgeIn .4s var(--ease, ease) both; }
-.premium-nudge[hidden] { display: none; }
-.premium-nudge b { display: block; color: #ffe2a8; font-size: .92rem; }
-.premium-nudge small { color: var(--ink-2); font-size: .78rem; }
-@keyframes nudgeIn { from { opacity: 0; transform: translate(-50%, 16px); } to { opacity: 1; transform: translate(-50%, 0); } }
-#btnBoard .tile-art { -webkit-mask: radial-gradient(circle, #000 55%, transparent 71%); mask: radial-gradient(circle, #000 55%, transparent 71%); }
-/* Puzzles (Diya Path, Rocket Rush): Premium chapters, crowned levels, past dailies, chests, the quiet Premium link */
-.diya-crown { display: inline-block; width: 18px; height: 16px; margin-left: 6px; vertical-align: -2px; font-size: 0; color: transparent; background: var(--crown-badge); filter: drop-shadow(0 0 4px rgba(255, 190, 60, .8)); }
-.diya-level.premium-only { background: linear-gradient(160deg, rgba(255, 210, 122, .1), rgba(120, 80, 200, .14)); border-color: rgba(255, 210, 122, .32); }
-.diya-level.premium-only b { color: rgba(255, 238, 200, .75); }
-.diya-archive { display: flex; flex-direction: column; gap: 6px; }
-.diya-archive[hidden] { display: none; }
-.diya-archive > b { font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
-.diya-archive-days { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
-.diya-past { flex: none; width: 58px; padding: 6px 0; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 1px; color: #fff;
-  background: rgba(120, 110, 255, .1); border: 1px solid rgba(160, 160, 255, .28); }
-.diya-past b { font-size: .82rem; }
-.diya-past small { font-size: .56rem; color: #ffd27a; }
-.diya-past.won { background: rgba(255, 170, 70, .14); border-color: var(--jn-rim); }
-.diya-past.premium-only { border-color: rgba(255, 210, 122, .32); }
-.diya-chest { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; font-weight: 700; color: #ffe2a8; }
-.diya-chest[hidden] { display: none; }
-.diya-chest .btn.small { padding: 6px 12px; font-size: .8rem; min-height: 0; }
-.diya-upsell { display: inline-flex; align-items: center; justify-content: center; gap: 6px; margin: 4px auto 0; padding: 6px 10px; border-radius: 999px;
-  font-size: .82rem; font-weight: 600; color: #ffd27a; background: none; border: 1px dashed rgba(255, 210, 122, .45); }
-.diya-upsell[hidden] { display: none; }
-/* Diya Path styles: Premium boards behind the grid, and the style chips on the map */
-.diya[data-board="palace"] .diya-board canvas { background-image: radial-gradient(70% 70% at 50% 50%, rgba(70, 60, 170, .2), rgba(10, 10, 40, .55)), url("assets/diya-path/board-palace.webp"); }
-.diya[data-board="ghat"] .diya-board canvas { background-image: radial-gradient(70% 70% at 50% 50%, rgba(40, 60, 140, .2), rgba(5, 10, 30, .5)), url("assets/diya-path/board-ghat.webp"); }
-.diya[data-board="temple"] .diya-board canvas { background-image: radial-gradient(70% 70% at 50% 50%, rgba(60, 40, 30, .15), rgba(10, 6, 20, .55)), url("assets/diya-path/board-temple.webp"); }
-.diya-style { display: flex; flex-direction: column; gap: 8px; }
-.diya-style-row { display: flex; align-items: center; gap: 10px; }
-.diya-style-row > b { flex: none; width: 52px; font-size: .78rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
-.diya-style-row > span { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
-.diya-style-row .chip { flex: none; padding: 6px 12px; font-size: .82rem; }
-.diya-style-row .chip.premium-only { border-color: rgba(255, 210, 122, .32); color: #ffe2a8; }
-/* Rocket Rush: the win message over the board (rocket-rush.js finale) */
-.rr-banner.win { top: 30%; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 2rem; animation: rrWin 2.3s ease-out both;
-  background: none; -webkit-text-stroke: 0; }
-.rr-banner.win small { font-family: var(--font); font-size: 1.6rem; letter-spacing: .12em; color: #ffd27a; text-shadow: 0 0 16px rgba(255, 190, 90, .95); }
-@keyframes rrWin { 0% { opacity: 0; transform: translateX(-50%) scale(.5); } 12% { opacity: 1; transform: translateX(-50%) scale(1.15); } 22% { transform: translateX(-50%) scale(1); }
-  85% { opacity: 1; } 100% { opacity: 0; transform: translateX(-50%) translateY(-14px); } }
-/* Leaderboard games: one row of chips above the period tabs, scrolling sideways (the edge peeks so it reads as a row) */
-.board-cats { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; margin: 0 -16px 12px; padding: 2px 16px; }
-.board-cats::-webkit-scrollbar { display: none; }
-.board-cats::-webkit-scrollbar { display: none; }
-.board-cat { flex: none; scroll-snap-align: start; min-height: 40px; padding: 0 16px; border-radius: 999px; font-size: .8125rem; font-weight: 600; color: var(--ink-2); background: rgba(255, 255, 255, .05); border: 1px solid var(--jn-rim, rgba(255, 255, 255, .15)); white-space: nowrap; }
-.board-cat[aria-selected="true"] { color: #fff; border-color: rgba(255, 214, 140, .8); background: rgba(255, 200, 120, .16); box-shadow: 0 0 14px -6px rgba(255, 190, 110, .9); }
-.board-tab { font-size: .875rem; }
-/* 3D is Premium: a small crown on the 3D switch for free players */
-#viewToggle [data-view="3d"].premium-lock::after { top: -11px; right: -8px; }
-/* Diya Path: Premium devotional backgrounds, the deity at the top, the board area kept dark */
-.diya[data-scene="lakshmi"]:not(.showing) { background: linear-gradient(180deg, rgba(8, 6, 26, 0) 0%, rgba(8, 6, 26, 0) 70%, rgba(7, 6, 26, .45) 100%), url("assets/diya-path/gods/lakshmi.webp") top center / cover no-repeat, #07061a; }
-.diya[data-scene="kubera"]:not(.showing) { background: linear-gradient(180deg, rgba(8, 6, 26, 0) 0%, rgba(8, 6, 26, 0) 70%, rgba(7, 6, 26, .45) 100%), url("assets/diya-path/gods/kubera.webp") top center / cover no-repeat, #07061a; }
-.diya[data-scene="golden-temple"]:not(.showing) { background: linear-gradient(180deg, rgba(8, 6, 26, 0) 0%, rgba(8, 6, 26, 0) 70%, rgba(7, 6, 26, .45) 100%), url("assets/diya-path/gods/golden-temple.webp") top center / cover no-repeat, #07061a; }
-.diya[data-scene="mahavira"]:not(.showing) { background: linear-gradient(180deg, rgba(8, 6, 26, 0) 0%, rgba(8, 6, 26, 0) 70%, rgba(7, 6, 26, .45) 100%), url("assets/diya-path/gods/mahavira.webp") top center / cover no-repeat, #07061a; }
-.diya[data-scene="buddha"]:not(.showing) { background: linear-gradient(180deg, rgba(8, 6, 26, 0) 0%, rgba(8, 6, 26, 0) 70%, rgba(7, 6, 26, .45) 100%), url("assets/diya-path/gods/buddha.webp") top center / cover no-repeat, #07061a; }
-.diya[data-scene="church"]:not(.showing) { background: linear-gradient(180deg, rgba(8, 6, 26, 0) 0%, rgba(8, 6, 26, 0) 70%, rgba(7, 6, 26, .45) 100%), url("assets/diya-path/gods/church.webp") top center / cover no-repeat, #07061a; }
-.diya[data-scene="mosque"]:not(.showing) { background: linear-gradient(180deg, rgba(8, 6, 26, 0) 0%, rgba(8, 6, 26, 0) 70%, rgba(7, 6, 26, .45) 100%), url("assets/diya-path/gods/mosque.webp") top center / cover no-repeat, #07061a; }
-.diya[data-scene="balaji"]:not(.showing) { background: linear-gradient(180deg, rgba(8, 6, 26, 0) 0%, rgba(8, 6, 26, 0) 70%, rgba(7, 6, 26, .45) 100%), url("assets/diya-path/gods/balaji.webp") top center / cover no-repeat, #07061a; }
-.diya[data-scene="ganesha"]:not(.showing) { background: linear-gradient(180deg, rgba(8, 6, 26, 0) 0%, rgba(8, 6, 26, 0) 70%, rgba(7, 6, 26, .45) 100%), url("assets/diya-path/gods/ganesha.webp") top center / cover no-repeat, #07061a; }
-.diya[data-scene="lakshmi-ganesha"]:not(.showing) { background: linear-gradient(180deg, rgba(8, 6, 26, 0) 0%, rgba(8, 6, 26, 0) 70%, rgba(7, 6, 26, .45) 100%), url("assets/diya-path/gods/lakshmi-ganesha.webp") top center / cover no-repeat, #07061a; }
-/* Over a devotional background the picture shows in full: the board is clear and its grid drawn stronger (diya-path.js) */
-.diya[data-scene]:not([data-scene="night"]) .diya-board canvas { background: none !important; box-shadow: 0 0 0 1px rgba(255, 225, 160, .55) !important; }
-.diya-style-row > b { width: auto; min-width: 52px; white-space: nowrap; }
-.diya[data-scene]:not([data-scene="night"]) :is(.diya-lead, .diya-style-row > b, .diya-stat) { color: #fff6e0; text-shadow: 0 1px 3px rgba(0, 0, 0, .9), 0 0 12px rgba(0, 0, 0, .7); }
-/* Backgrounds as picture cards in a sideways row: the picture, its name under it, a crown on Premium ones */
-.diya-style-row .chip.diya-pic { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; width: 84px; padding: 5px 5px 7px; border-radius: 14px; font-size: .74rem; line-height: 1.15; white-space: normal; text-align: center; }
-.diya-pic > i { display: block; width: 72px; height: 72px; border-radius: 10px; background: radial-gradient(circle at 70% 25%, #fff6d8 0 6%, transparent 7%), radial-gradient(circle at 30% 60%, rgba(255,255,255,.7) 0 1%, transparent 2%), linear-gradient(180deg, #1b1550, #07061a) center / cover; background-size: cover; background-position: center; box-shadow: inset 0 0 0 1px rgba(255, 225, 160, .25); }
-.diya-pic.active > i { box-shadow: 0 0 0 2px var(--gold), 0 0 14px rgba(255, 196, 80, .5); }
-.diya-pic.premium-only > i { filter: saturate(.85) brightness(.85); }
-.diya-pic .diya-crown { position: absolute; top: -6px; right: -4px; margin: 0; width: 22px; height: 19px; transform: rotate(14deg); }
-.diya-style-row:has(.diya-pic) { align-items: flex-start; }
-.diya-style-row:has(.diya-pic) > span { padding-top: 8px; }
-/* Previewing a Premium background: a pill over the board with the name, a countdown and Unlock */
-.diya-preview { position: absolute; left: 50%; top: calc(64px + var(--safe-t, 0px)); transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 16px; border-radius: 99px; background: rgba(12, 8, 30, .82); border: 1px solid rgba(255, 210, 122, .55); box-shadow: 0 8px 24px rgba(0, 0, 0, .5), 0 0 18px rgba(255, 190, 60, .3); white-space: nowrap; }
-.diya-preview b { color: #ffe2a8; font-size: .9rem; }
-.diya-preview small { color: var(--ink-2); font-size: .78rem; }
-.diya-preview em { font-style: normal; display: inline-grid; place-items: center; min-width: 22px; height: 22px; border-radius: 50%; font-size: .78rem; font-weight: 700; color: #ffe2a8; border: 1.5px solid rgba(255, 210, 122, .6); }
-.diya-preview button { padding: 8px 16px; border-radius: 99px; font-weight: 700; font-size: .85rem; color: #2a1404; background: linear-gradient(135deg, #fff0b8, #ffc94d 50%, #e8902a); }
-.diya-preview button::before { content: ''; display: inline-block; width: 16px; height: 14px; margin-right: 6px; vertical-align: -2px; background: var(--crown-badge); }
-/* In the puzzle: the Background button opens one row of background chips above the tools */
-.diya-tools { gap: 6px; padding-left: 10px; padding-right: 10px; }
-.diya-tool { min-width: 0; padding: 0 6px; gap: 4px; font-size: .84rem; white-space: nowrap; }
-.diya-tool svg { flex: none; }
-@media (max-width: 380px) { .diya-tool svg { display: none; } .diya-tool { font-size: .8rem; } }
-.diya-bg-pick { margin: 0 10px 10px; padding: 8px 10px; border-radius: 16px; background: rgba(10, 8, 30, .72); border: 1px solid var(--line); }
-.diya-bg-pick .diya-style-row > b { display: none; }
-.diya-bg-pick .diya-style-row > span { padding: 6px 2px 2px; }
-
-/* Tamil: its words run long, so buttons and labels wrap or shrink a little instead of clipping, as English fits */
-html[lang="ta"] .diya-tool { white-space: normal; line-height: 1.1; text-align: center; font-size: .76rem; padding: 0 4px; }
-html[lang="ta"] .diya-tool em { flex: none; }
-@media (max-width: 430px) { html[lang="ta"] .diya-tool svg { display: none; } }
-html[lang="ta"] .world-cta { max-width: 100%; white-space: normal; text-align: center; line-height: 1.15; font-size: .68rem; padding: 4px 8px; }
-html[lang="ta"] .tool span { font-size: .58rem; letter-spacing: 0; line-height: 1.05; text-align: center; white-space: normal; word-break: break-word; }
-html[lang="ta"] .hint { font-size: .74rem; letter-spacing: 0; max-width: calc(100vw - 24px); white-space: normal; text-align: center; line-height: 1.25; }
-html[lang="ta"] .shell-chip > span:nth-child(2), html[lang="ta"] .shell-chip > span:last-child { font-size: .6rem; letter-spacing: -.01em; }
-
-/* ---------- Android TV (html.tv, set by the app shell; played from the sofa with a remote, see tv.js) ---------- */
-/* No camera, no freehand drawing, no screen recording, video saving or share sheet on a TV (TVs have no share targets). */
-html.tv #btnAR, html.tv #btnFlip, html.tv #setAR, html.tv #arSafety,
-html.tv #btnPhoto, html.tv #btnRec, html.tv #btnShareShow, html.tv #btnFull, html.tv #setFull,
-html.tv [data-mode="spark"], html.tv #btnShapesOpen, html.tv #shapeStrip, html.tv #sparkFloat, html.tv .spark-tools, html.tv #btnSparkBurst,
-html.tv .photo-pick, html.tv .photo-pick + .help, html.tv #btnImportContacts,
-html.tv #rrSave, html.tv #btnRecordCard, html.tv #btnSaveTool, html.tv #btnShareJoy, html.tv #btnRushShare, html.tv #btnRushChallenge,
-html.tv #setShareApp { display: none !important; }
-/* Read from across the room: everything a size up. */
-html.tv { font-size: 112%; }
-/* The remote's focus: a warm ring that is easy to follow at ten feet. */
-html.tv .tv-focus, html.tv :focus-visible {
-  outline: 3px solid #ffd76a !important; outline-offset: 3px;
-  box-shadow: 0 0 0 6px rgba(255, 215, 106, .28), 0 0 22px rgba(255, 190, 80, .55) !important;
-  transform: scale(1.03); transition: transform .12s ease, box-shadow .12s ease; z-index: 5;
-}
-html.tv input.tv-focus, html.tv select.tv-focus, html.tv textarea.tv-focus { transform: none; }
-/* Diya Path and Rocket Rush on a wide screen: the board fills the left, tip, score, tools and backgrounds sit on the right. */
-html.tv .diya-play, html.tv .rr-play {
-  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); grid-template-rows: auto auto auto auto 1fr;
-  column-gap: 20px; align-content: stretch;
-}
-html.tv .diya-play > .diya-top, html.tv .rr-play > .diya-top { grid-column: 1 / -1; }
-html.tv .diya-play > .diya-board, html.tv .rr-play > .diya-board { grid-column: 1; grid-row: 2 / -1; min-height: 0; }
-html.tv .diya-play > :not(.diya-top):not(.diya-board):not(.diya-ambient):not(.diya-preview),
-html.tv .rr-play > :not(.diya-top):not(.diya-board) { grid-column: 2; align-self: start; }
-html.tv .diya-play .diya-tools, html.tv .rr-play .diya-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-/* Diya Path's eye: the board fades down so the picture behind it shows */
-.diya-board canvas { transition: opacity .35s ease; }
-.diya.peek .diya-board canvas { opacity: .06; }
-.diya.peek .diya-stat, .diya.peek .diya-ambient { opacity: .2; transition: opacity .35s ease; }
-.diya-tool.diya-peek { flex: 0 0 44px; }
-/* The narrow-phone rules above hide the tools' icons to leave room for their words; the peek button has no words,
-   only its eye, so it keeps it (it was an empty box). Words that still don't fit wrap onto a second line. */
-.diya-tools #diyaPeek svg { display: block; }
-@media (max-width: 380px) { .diya-tool { white-space: normal; line-height: 1.1; text-align: center; } }
-@media (max-width: 430px) { html[lang="ta"] .diya-tool { font-size: .72rem; padding: 0 3px; } }
-.diya-tool.diya-peek[aria-pressed="true"] { background: rgba(255, 210, 120, .28); }
-@media (prefers-reduced-motion: reduce) { .diya-board canvas, .diya.peek .diya-stat, .diya.peek .diya-ambient { transition: none; } }
-/* Share video replays: the board without its grid or backing, just the rockets / diyas over the sky */
-.rr.rr-clean .rr-board canvas, .diya.diya-clean .diya-board canvas { background: none !important; box-shadow: none !important; }
-/* Diya Path: the grid's canvas sits under the board canvas (same cell of the board's grid) and carries the board's
-   picture; the board canvas on top is clear, so a recorded clip has the diyas and paths but no grid. */
-.diya-board > canvas { grid-area: 1 / 1; }
-.diya-board > .diya-grid { pointer-events: none; }
-#diyaCanvas { background: none !important; box-shadow: none !important; }
-
-/* Cracker chips: the picture fills its cell and the cells sit close, so more crackers show in the list at once. */
-#shellList, #groundList { gap: 4px; }
-.bottom-ui .shell-chip, #groundList .shell-chip { width: 76px; min-height: 0; padding: 3px 3px 4px; gap: 3px; }
-.bottom-ui .shell-chip .ico, #groundList .shell-chip .ico { width: 100%; height: 56px; }
-.shell-chip.real .ico img, .shell-chip.art .ico img { width: 100%; height: 100%; padding: 0; }
-.shell-chip.real .ico img { object-fit: contain; }
-/* One selection mark: the gold frame round the picture; the chip itself stays plain. */
-.bottom-ui .shell-chip, #groundList .shell-chip, .bottom-ui .shell-chip.active, #groundList .shell-chip.active { border-color: transparent; background: transparent; box-shadow: none; }
-.shell-chip.active > span:nth-child(2) { color: #fff; font-weight: 600; }
-@media (max-width: 420px) {
-  .bottom-ui .shell-chip, #groundList .shell-chip { width: 66px; }
-  .bottom-ui .shell-chip .ico, #groundList .shell-chip .ico { height: 50px; }
-}
-
-/* Diya Path result: a close button in the top corner of the card. */
-.diya-result-box { position: relative; }
-.diya-res-close { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; background: rgba(4, 5, 13, .45); }
-
-/* The sparkler lighter's holder at the end of the cracker list (Sky and Ground): a lit sparkler standing in it, an arrow
-   and a line saying where to drag it. Picked up, the sparkler leaves the holder (.out) and the canvas draws it. */
-.lighter-holder { flex: none; position: relative; width: 66px; height: 74px; border-radius: 14px; touch-action: none;
-  background: radial-gradient(circle at 50% 18%, rgba(255, 200, 110, .28), rgba(255, 170, 70, .06) 46%, transparent 70%), rgba(255, 255, 255, .04);
-  border: 1px dashed rgba(255, 210, 122, .45); }
-.lighter-holder[hidden] { display: none; }
-.lighter-grip { position: absolute; inset: 0; cursor: grab; touch-action: none; }
-.lighter-grip i { position: absolute; left: 50%; top: 7px; width: 4px; height: 32px; margin-left: -2px; border-radius: 2px;
-  background: linear-gradient(#5a4a3c 0 58%, #b8bec6 58%); transform: rotate(-12deg); transform-origin: 50% 0; }
-.lighter-grip i::before { content: ""; position: absolute; left: 50%; top: 0; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%;
-  background: radial-gradient(circle, #fff 0 18%, #ffe7b0 30%, rgba(255, 190, 90, .6) 52%, transparent 72%); animation: lighterFlicker .18s steps(2) infinite; }
-.lighter-grip i::after { content: ""; position: absolute; left: 50%; top: 0; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%;
-  background: repeating-conic-gradient(rgba(255, 231, 176, .85) 0 3deg, transparent 3deg 22deg); -webkit-mask: radial-gradient(circle, transparent 28%, #000 30% 60%, transparent 70%);
-  mask: radial-gradient(circle, transparent 28%, #000 30% 60%, transparent 70%); animation: lighterSpin .6s linear infinite; }
-.lighter-guide { position: absolute; left: 0; right: 0; bottom: 3px; display: flex; flex-direction: column; align-items: center; gap: 0; pointer-events: none;
-  font-size: .56rem; line-height: 1.05; text-align: center; color: #ffe2a8; }
-.lighter-guide-text { max-width: 62px; }
-.lighter-arrow { position: absolute; left: 7px; top: -36px; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent;
-  border-bottom: 9px solid #ffd27a; filter: drop-shadow(0 0 4px rgba(255, 190, 90, .9)); animation: lighterBob 1.2s ease-in-out infinite; }
-.lighter-holder.out .lighter-grip i { opacity: 0; }
-.lighter-holder.out .lighter-arrow { display: none; }
-@keyframes lighterFlicker { 50% { transform: scale(.82); opacity: .8; } }
-@keyframes lighterSpin { to { transform: rotate(360deg); } }
-@keyframes lighterBob { 0%, 100% { transform: translateY(0); opacity: .55; } 50% { transform: translateY(-5px); opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .lighter-grip i::before, .lighter-grip i::after, .lighter-arrow { animation: none; } }
-@media (max-width: 420px) { .lighter-holder { width: 58px; height: 66px; } }
-/* Ground's Clear and Burst all buttons are gone from the dock: the sparkler lights the crackers, and the cracker list
-   (with the sparkler's holder) keeps the row. */
-.ground-tools { display: none !important; }
-
-/* Tap sky: a Premium chip in the scene bar, beside the 2D / 3D switch */
-.scene-bar .tap-sky { padding: 6px 14px; border-radius: 99px; font-size: .8rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #ffe2a8; background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-.scene-bar .tap-sky[aria-pressed="true"] { color: #1c1004; background: linear-gradient(135deg, #ffe29a, var(--gold-2) 55%, var(--rose)); filter: none; }
-.scene-bar .tap-sky[hidden] { display: none; }
-
-/* Leaderboard: the title sits on the Home row at the top, centred; the line about the board goes under both */
-#boardModal .card-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; column-gap: 8px; }
-#boardModal .card-head > div { display: contents; }
-#boardModal .card-head .nav-back { grid-column: 1; grid-row: 1; justify-self: start; }
-#boardTitle { grid-column: 2; grid-row: 1; margin: 0; text-align: center; white-space: nowrap; }
-#boardSub { grid-column: 1 / -1; grid-row: 2; }
-#boardModal .board-cats, #boardModal .board-tabs { flex-shrink: 0; } /* a long list scrolls; the game and period tabs keep their height */
-/* Android TV play console: one low row along the bottom, read from across the room. Sky / Ground stacked on the left,
-   the crackers in the middle (fading at the edges as they scroll), the sparkler after a divider, Fire on the right.
-   The sky above stays clear for the show. */
-html.tv body.mode-sky .bottom-ui, html.tv body.mode-ground .bottom-ui { flex-wrap: nowrap; align-items: stretch; gap: 14px;
-  padding: 12px 14px; margin: 0 12px 10px; border-radius: 26px;
-  background: linear-gradient(180deg, rgba(22, 16, 44, .72), rgba(10, 8, 24, .86)); border: 1px solid rgba(255, 210, 122, .22);
-  box-shadow: 0 18px 48px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .06); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
-html.tv .bottom-ui > #modeTabs { flex: 0 0 132px !important; width: 132px; margin: 0; flex-direction: column; gap: 6px; padding: 5px;
-  border-radius: 18px; align-self: stretch; }
-html.tv .bottom-ui > #modeTabs [role="tab"] { flex: 1 1 0; min-height: 0; justify-content: flex-start; gap: 8px; padding: 0 12px; border-radius: 13px; font-size: .95rem; }
-html.tv .bottom-ui > .dock { flex: 1 1 0; min-width: 0; padding: 0; background: none; border: 0; box-shadow: none; display: flex; align-items: center; gap: 10px; }
-html.tv .dock .shell-list { flex: 1 1 0; min-width: 0; gap: 10px; padding: 4px 18px;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, transparent, #000 18px, #000 calc(100% - 28px), transparent); }
-html.tv .dock .shell-chip { transition: transform .18s ease, box-shadow .18s ease; }
-html.tv .dock .shell-chip.active { transform: translateY(-4px); box-shadow: 0 0 0 2px #ffd27a, 0 10px 26px rgba(255, 170, 70, .45); border-radius: 16px; }
-html.tv .dock .lighter-holder { flex: none; padding-left: 12px; border-left: 1px solid rgba(255, 210, 122, .22); }
-html.tv .bottom-ui > .launch-fire, html.tv body.mode-sky .bottom-ui > .launch-fire { flex: 0 0 190px; width: 190px; max-width: none; min-height: 0; margin: 0;
-  align-self: stretch; border-radius: 20px; font-size: 1.15rem; letter-spacing: .02em; box-shadow: 0 0 0 1px rgba(255, 230, 170, .5), 0 10px 30px rgba(255, 120, 90, .45); }
-html.tv .bottom-ui :is(button, [role="tab"]):focus-visible { outline: 3px solid #ffe29a; outline-offset: 3px; }
-html.tv .scene-bar .tap-sky { white-space: nowrap; }
-html.tv body.launch-active .bottom-ui { opacity: 0; pointer-events: none; transition: opacity .3s; } /* the console steps aside for the show */
-/* Android TV has no ads and no AR: the Premium sheet leaves out what a TV can't use */
-html.tv .no-tv, html.tv #btnGemPremium small { display: none !important; }
-
-/* The reminder question on the gift sheet (Android 13+, before the system dialog) */
-.gift-remind { display: grid; gap: 8px; text-align: center; }
-.gift-remind p { margin: 4px 0; }
-.gem-pack.mini { opacity: .95; }
-
-/* The watermark on recorded videos: bottom-left, small and steady, clear of the fireworks and the stop button */
-/* The closing card on an Android screen recording (game.js nativeOutro): over everything, and it takes the taps */
-.end-card { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 100; touch-action: none; }
-.end-card[hidden] { display: none; }
-.rec-mark { display: none; }
-body.native-capture .rec-mark {
-  display: flex; align-items: center; gap: 8px; position: fixed; z-index: 60; pointer-events: none;
-  left: 14px; bottom: calc(14px + var(--safe-b, 0px)); padding: 6px 12px 6px 6px; border-radius: 14px;
-  background: rgba(8, 6, 20, .55); border: 1px solid rgba(255, 210, 122, .35); color: #fff;
-}
-.rec-mark img { width: 28px; height: 28px; border-radius: 7px; }
-.rec-mark span { display: flex; flex-direction: column; line-height: 1.15; }
-.rec-mark b { font: 700 13px/1.15 Cinzel, Georgia, serif; color: #ffd77e; }
-.rec-mark small { font: 500 10.5px/1.2 Outfit, sans-serif; color: rgba(255, 255, 255, .85); }
-
-/* The world / 2D-3D / Tap sky row always fits the screen: long names (Tamil, Malayalam…) shrink with an ellipsis. */
-.scene-bar { max-width: calc(100vw - 24px); min-width: 0; justify-content: center; }
-.scene-bar .scene-chip { flex: 0 1 auto; min-width: 0; max-width: 40vw; padding-inline: 10px; }
-.scene-bar .scene-chip span { white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.1; font-size: .8rem; }
-.scene-bar .view-toggle { flex: none; }
-.scene-bar .tap-sky { flex: 0 1 auto; min-width: 0; max-width: 30vw; padding-inline: 10px; letter-spacing: .01em; line-height: 1.1; text-align: center; }
-.scene-bar .tap-sky span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; white-space: normal; font-size: .72rem; }
-/* Phones: the world is named on the top bar in every mode, with its icon; the bottom strip is gone so the ground stays clear. */
-@media (max-width: 760px) { body.mode-sky:not(.card-mode):not(.ar) .world-strip { display: none !important; } }
-/* Phones: the eye (hide controls) ends the 2D/3D row, so the row keeps clear of it. */
-@media (max-width: 760px) { body:not(.ar):not(.room-ar) .scene-bar { max-width: calc(100vw - 24px - 52px); margin-right: 52px; } }
-/* The website's "Get it on Google Play": a quiet third button, never the love card's look */
-#intro .intro-actions .btn.ghost.get-app { text-decoration: none; background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 215, 126, .45); color: #ffe2a8; box-shadow: none; gap: 8px; }
-#intro .intro-actions .btn.ghost.get-app::before, #intro .intro-actions .btn.ghost.get-app::after { content: none !important; display: none !important; }
-.intro-actions .get-app span[aria-hidden] { font-size: .8em; color: #ffd77e; }

@@ -5,8 +5,8 @@
   const STATES = ['READY', 'IGNITING', 'ASCENDING', 'BURSTING', 'FADING', 'RETURNING'];
   const REPLAY_COST = 50, FINISH_POINTS = 10;
   class LaunchController {
-    constructor({ storage, premium, prepare, ignite, changed, blocked, failed, locks, beforeLaunch }) {
-      Object.assign(this, { storage, premium, prepare, ignite, changed, blocked, failed, locks, beforeLaunch });
+    constructor({ storage, premium, prepare, ignite, changed, blocked, failed, locks }) {
+      Object.assign(this, { storage, premium, prepare, ignite, changed, blocked, failed, locks });
       this.state = 'READY';
       this.generation = 0;
       this.sequence = null;
@@ -63,11 +63,6 @@
       if (this.state !== 'READY') return false;
       const ticket = ++this.generation;
       this.setState('IGNITING');
-      // A video ad at a natural break plays before the cracker is lit; it can never block or fail the launch.
-      if (this.beforeLaunch) {
-        try { await this.beforeLaunch(selection); } catch (_) { /* play on */ }
-        if (ticket !== this.generation) return false;
-      }
       const start = () => {
         if (ticket !== this.generation) return false;
         const paid = this.premium();
