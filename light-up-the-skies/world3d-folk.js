@@ -22,7 +22,8 @@ const D_BODY = 0, D_HEAD = 1, D_EAR = 2 /* 2, 3 */, D_LEG = 4 /* 4..7: front lef
   D_TAIL = 8, D_TONGUE = 9, D_TUBE = 10;
 const M_TORSO = 11, M_HEAD = 12, M_LEG = 13 /* 13, 14 */, M_ARM = 15 /* upper, fore; left 15, 16; right 17, 18 */, M_STICK = 19;
 const D_BALL = 20; // the dog's ball, for fetch
-const PARTS = 21;
+const K_BASE = 21; // Pataka Chor's shopkeeper: the old man's parts again (torso … stick), from here
+const PARTS = 21, PARTS_KEEPER = 30;
 const SPEED = { walk: 1.15, trot: 2.3, run: 5.2, man: 0.5 };
 const SHADOW = [0.24 * DOG, 0.42 * DOG, 0.34 * MAN, 0.34 * MAN]; // blob shadows' half width and length: the dog's, the old man's
 // Bubbles over their heads, from one sheet: no words, so nothing to translate.
@@ -33,6 +34,8 @@ const C = {
   tube: '#c8352c', char: '#2b1e18', kurta: '#efe7d6', jacket: '#7d2e27', skin: '#b9784d', skinDark: '#9c6039', white: '#f5f2ea',
   pyjama: '#f3eee2', sandal: '#5b3920', wood: '#7a4f27', ball: '#d9f23c',
 };
+// Seth-ji, the shopkeeper who hoards the bazaar's crackers: younger, black-haired, a mustard kurta and a green waistcoat.
+const KC = { ...C, kurta: '#e9b949', jacket: '#2f6b4c', skin: '#a86a42', skinDark: '#8a5434', white: '#1f1714', gold: '#f3eee2', pyjama: '#f6f1e4' };
 
 // ---------- Geometry: flat-shaded parts, merged ----------
 const tA = new THREE.Vector3(), tB = new THREE.Vector3(), tC = new THREE.Vector3(), tN = new THREE.Vector3(), tE = new THREE.Vector3();
@@ -44,7 +47,7 @@ const cyl = (r0, r1, h, n) => new THREE.CylinderGeometry(r1, r0, h, n); // r0 at
 const ball = (r) => new THREE.IcosahedronGeometry(r, 0);
 const cone = (r, h, n) => new THREE.ConeGeometry(r, h, n);
 class Kit {
-  constructor() { this.pos = []; this.nor = []; this.col = []; this.part = []; this.tris = [0, 0]; }
+  constructor() { this.pos = []; this.nor = []; this.col = []; this.part = []; this.tris = [0, 0, 0]; }
   // geo, placed in its part's own space by m, coloured `color` (or by color(v, n), for a two-tone coat).
   add(part, geo, color, m) {
     const g = geo.index ? geo.toNonIndexed() : geo;
@@ -59,7 +62,7 @@ class Kit {
         tCol.set(typeof color === 'function' ? color(v, tN) : color);
         this.pos.push(v.x, v.y, v.z); this.nor.push(tN.x, tN.y, tN.z); this.col.push(tCol.r, tCol.g, tCol.b); this.part.push(part);
       }
-      this.tris[part < M_TORSO || part === D_BALL ? 0 : 1]++;
+      this.tris[part < M_TORSO || part === D_BALL ? 0 : part < K_BASE ? 1 : 2]++;
     }
     geo.dispose(); if (g !== geo) g.dispose();
     return this;
@@ -89,45 +92,51 @@ function dogParts(k) {
   k.add(D_BALL, new THREE.IcosahedronGeometry(0.07, 1), (v) => (Math.abs(v.y) < 0.014 ? C.white : C.ball));
 }
 // The old man faces +z with his feet at y = 0: a cream kurta, a maroon jacket over a round belly, white hair and moustache.
-function manParts(k) {
-  k.add(M_TORSO, cyl(0.25, 0.2, 0.7, 7), C.kurta, mat(0, 0.05, 0))
-    .add(M_TORSO, cyl(0.225, 0.215, 0.5, 7), C.jacket, mat(0, 0.25, 0))
-    .add(M_TORSO, ball(0.17), C.jacket, mat(0, 0.14, 0.08, 0, 0, 0, 1, 1, 0.9))
-    .add(M_TORSO, box(0.025, 0.36, 0.02), C.gold, mat(0, 0.27, 0.205))
-    .add(M_TORSO, cyl(0.055, 0.055, 0.1, 6), C.skin, mat(0, 0.54, 0.01));
-  k.add(M_HEAD, ball(0.13), C.skin, mat(0, 0.12, 0, 0, 0, 0, 1, 1.06, 1))
-    .add(M_HEAD, box(0.04, 0.055, 0.05), C.skinDark, mat(0, 0.11, 0.13))
-    .add(M_HEAD, box(0.035, 0.035, 0.02), C.dark, mat(0.05, 0.15, 0.118))
-    .add(M_HEAD, box(0.035, 0.035, 0.02), C.dark, mat(-0.05, 0.15, 0.118));
+// b: the first part (M_TORSO for the old man, K_BASE for the shopkeeper); c: the colours.
+function manParts(k, b = M_TORSO, c = C) {
+  k.add(b, cyl(0.25, 0.2, 0.7, 7), c.kurta, mat(0, 0.05, 0))
+    .add(b, cyl(0.225, 0.215, 0.5, 7), c.jacket, mat(0, 0.25, 0))
+    .add(b, ball(0.17), c.jacket, mat(0, 0.14, 0.08, 0, 0, 0, 1, 1, 0.9))
+    .add(b, box(0.025, 0.36, 0.02), c.gold, mat(0, 0.27, 0.205))
+    .add(b, cyl(0.055, 0.055, 0.1, 6), c.skin, mat(0, 0.54, 0.01));
+  k.add(b + 1, ball(0.13), c.skin, mat(0, 0.12, 0, 0, 0, 0, 1, 1.06, 1))
+    .add(b + 1, box(0.04, 0.055, 0.05), c.skinDark, mat(0, 0.11, 0.13))
+    .add(b + 1, box(0.035, 0.035, 0.02), c.dark, mat(0.05, 0.15, 0.118))
+    .add(b + 1, box(0.035, 0.035, 0.02), c.dark, mat(-0.05, 0.15, 0.118));
   for (const s of [1, -1]) {
-    k.add(M_HEAD, box(0.078, 0.032, 0.035), C.white, mat(0.037 * s, 0.07, 0.125, 0, 0, -0.28 * s)) // the moustache
-      .add(M_HEAD, box(0.058, 0.02, 0.02), C.white, mat(0.05 * s, 0.19, 0.118, 0, 0, 0.15 * s)) // bushy brows
-      .add(M_HEAD, ball(0.065), C.white, mat(0.112 * s, 0.11, -0.03)); // the hair left round a bald top
+    k.add(b + 1, box(0.078, 0.032, 0.035), c.white, mat(0.037 * s, 0.07, 0.125, 0, 0, -0.28 * s)) // the moustache
+      .add(b + 1, box(0.058, 0.02, 0.02), c.white, mat(0.05 * s, 0.19, 0.118, 0, 0, 0.15 * s)) // bushy brows
+      .add(b + 1, ball(0.065), c.white, mat(0.112 * s, 0.11, -0.03)); // the hair left round a bald top
   }
-  k.add(M_HEAD, ball(0.08), C.white, mat(0, 0.1, -0.085, 0, 0, 0, 1.3, 0.8, 0.7));
+  k.add(b + 1, ball(0.08), c.white, mat(0, 0.1, -0.085, 0, 0, 0, 1.3, 0.8, 0.7));
   for (const s of [0, 1]) {
-    k.add(M_LEG + s, cyl(0.065, 0.075, 0.8, 6), C.pyjama, mat(0, -0.4, 0)).add(M_LEG + s, box(0.1, 0.045, 0.22), C.sandal, mat(0, -0.82, 0.04));
-    k.add(M_ARM + s * 2, cyl(0.055, 0.065, 0.3, 6), C.kurta, mat(0, -0.15, 0));
-    k.add(M_ARM + s * 2 + 1, cyl(0.05, 0.055, 0.26, 6), C.kurta, mat(0, -0.13, 0)).add(M_ARM + s * 2 + 1, ball(0.055), C.skin, mat(0, -0.3, 0));
+    k.add(b + 2 + s, cyl(0.065, 0.075, 0.8, 6), c.pyjama, mat(0, -0.4, 0)).add(b + 2 + s, box(0.1, 0.045, 0.22), c.sandal, mat(0, -0.82, 0.04));
+    k.add(b + 4 + s * 2, cyl(0.055, 0.065, 0.3, 6), c.kurta, mat(0, -0.15, 0));
+    k.add(b + 4 + s * 2 + 1, cyl(0.05, 0.055, 0.26, 6), c.kurta, mat(0, -0.13, 0)).add(b + 4 + s * 2 + 1, ball(0.055), c.skin, mat(0, -0.3, 0));
   }
   // The walking stick, held at its crook.
-  k.add(M_STICK, cyl(0.02, 0.022, 0.86, 5), C.wood, mat(0, -0.375, 0)).add(M_STICK, box(0.04, 0.04, 0.15), C.wood, mat(0, 0.05, 0.05));
+  k.add(b + 8, cyl(0.02, 0.022, 0.86, 5), c.wood, mat(0, -0.375, 0)).add(b + 8, box(0.04, 0.04, 0.15), c.wood, mat(0, 0.05, 0.05));
 }
 
 // Each vertex follows its part (three vec4 rows per part); a touch of their own colour glows, so they read at night.
-function folkMaterial(rows) {
+// soot: how sooty the dog, the old man and the shopkeeper are (0..1), a cracker having gone off on them: it darkens them.
+function folkMaterial(rows, parts, soot) {
   const m = new THREE.MeshLambertMaterial({ vertexColors: true });
   m.onBeforeCompile = (s) => {
     s.uniforms.partRows = { value: rows };
+    s.uniforms.soot = { value: soot };
     s.vertexShader = s.vertexShader
-      .replace('#include <common>', `#include <common>\nattribute float part;\nuniform vec4 partRows[${PARTS * 3}];`)
+      .replace('#include <common>', `#include <common>\nattribute float part;\nuniform vec4 partRows[${parts * 3}];\nuniform vec3 soot;\nvarying float vSoot;`)
       .replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
         int pk = int(part + 0.5) * 3;
         vec4 r0 = partRows[pk], r1 = partRows[pk + 1], r2 = partRows[pk + 2];
         objectNormal = vec3(dot(r0.xyz, objectNormal), dot(r1.xyz, objectNormal), dot(r2.xyz, objectNormal));`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        transformed = vec3(dot(r0, vec4(transformed, 1.0)), dot(r1, vec4(transformed, 1.0)), dot(r2, vec4(transformed, 1.0)));`);
-    s.fragmentShader = s.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * 0.24;');
+        transformed = vec3(dot(r0, vec4(transformed, 1.0)), dot(r1, vec4(transformed, 1.0)), dot(r2, vec4(transformed, 1.0)));
+        vSoot = part < ${M_TORSO}.5 - 1.0 ? soot.x : part < ${K_BASE}.5 - 1.0 ? soot.y : soot.z;`);
+    s.fragmentShader = s.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vSoot;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ndiffuseColor.rgb *= 1.0 - 0.7 * vSoot;\ntotalEmissiveRadiance += diffuseColor.rgb * 0.24;');
   };
   return m;
 }
@@ -168,21 +177,25 @@ const ease = (o, k, key, to) => { o[key] += (to - o[key]) * k; };
 /** The dog and the old man for a scene's cracker `zone`, standing on the ground at height `ground`. view: { project,
     ppm, frame, floor } from the engine (frame() is { w, bottom }: the screen's width and where the ground stops showing
     above the controls; floor(sx, sy) is where a screen point meets the forecourt, { x, z, hit }). sound(name, x, y, z) plays 'bark', 'yip', 'grumble' or 'clap' from there. */
-export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
+/** patrols (Pataka Chor's street): { dog, man, keeper } loops of [x, z] waypoints they walk instead of strolling the
+    forecourt; with them comes a third figure, the shopkeeper (keeper), and none of them keeps off the forecourt's middle. */
+export function build({ tier, zone, ground = 0.17, view, sound = () => {}, patrols = null }) {
   // Where they walk: the zone, kept off its edges, round a narrow oval down its middle, where crackers stand in the view
   // you start with and the rangoli lies; either side of it, near you, is where they like to be.
   const R = { x0: zone.x0 + 0.7, x1: zone.x1 - 0.7, z0: zone.z0 + 1, z1: zone.z1 - 0.4 }, depth = zone.z1 - zone.z0;
   const K = { x: (zone.x0 + zone.x1) / 2, z: zone.z1 - depth * 0.35, a: clamp((zone.x1 - zone.x0) * 0.15, 2.6, 3.4), b: depth * 0.37 };
 
-  const kit = new Kit();
+  const kit = new Kit(), parts = patrols ? PARTS_KEEPER : PARTS;
   dogParts(kit); manParts(kit);
+  if (patrols) manParts(kit, K_BASE, KC);
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(kit.pos, 3));
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(kit.nor, 3));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(kit.col, 3));
   geo.setAttribute('part', new THREE.Float32BufferAttribute(kit.part, 1));
-  const rows = new Float32Array(PARTS * 12), drawn = new Float32Array(PARTS * 12).fill(NaN);
-  const mesh = new THREE.Mesh(geo, folkMaterial(rows));
+  const rows = new Float32Array(parts * 12), drawn = new Float32Array(parts * 12).fill(NaN);
+  const soot = new THREE.Vector3();
+  const mesh = new THREE.Mesh(geo, folkMaterial(rows, parts, soot));
   mesh.frustumCulled = false; // its parts are placed in the shader
   mesh.userData.folk = true;
   const objects = [mesh];
@@ -190,9 +203,11 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
   let shadow = null;
   if (tier) {
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(24), 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1, 1], 2));
-    g.setIndex([0, 2, 1, 2, 3, 1, 4, 6, 5, 6, 7, 5]);
+    const n = patrols ? 3 : 2, idx = [];
+    for (let i = 0; i < n; i++) idx.push(i * 4, i * 4 + 2, i * 4 + 1, i * 4 + 2, i * 4 + 3, i * 4 + 1);
+    g.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12 * n), 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(Array.from({ length: n }, () => [0, 0, 1, 0, 0, 1, 1, 1]).flat(), 2));
+    g.setIndex(idx);
     shadow = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: blobTexture(), transparent: true, depthWrite: false }));
     shadow.frustumCulled = false;
     objects.push(shadow);
@@ -208,13 +223,19 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
 
   const walker = (top) => ({ x: 0, z: 0, yaw: 0, v: 0, speed: 0, tx: 0, tz: 0, side: 1, act: '', t: 0, dur: 0, phase: 0, amp: 0,
     from: null, bub: null, sprite: bubble(), top, said: -9 });
-  const dog = walker(0.87 * DOG), man = walker(1.77 * MAN), both = [dog, man];
+  const dog = walker(0.87 * DOG), man = walker(1.77 * MAN), keeper = patrols ? walker(1.77 * MAN) : null;
+  const both = keeper ? [dog, man, keeper] : [dog, man]; // (everyone there is)
   // The dog's pose, eased towards what it is doing.
   Object.assign(dog, { p: { sit: 0, lie: 0, roll: 0, ear: 0, head: 0, tuck: 0, hop: 0, wag: 0.2, tongue: 0, tremble: 0, wiggle: 0, lean: 0, leap: 0, beg: 0, bow: 0 }, wagT: 0, wagRate: 4, tube: 0, tubeAt: null, barks: 0, spin: 0 });
   // The ball: 0 put away, 1 in your finger, 2 flying, 3 on the ground, 4 in the dog's mouth, 5 brought back to you.
   const ball = { mode: 0, x: 0, y: 0, z: 0, fx: 0, fy: 0, fz: 0, tx: 0, tz: 0, t: 0, dur: 1 };
   // The old man's: how much of each gesture is showing (they blend), and his stick in hand or propped against him.
-  Object.assign(man, { w: { ears: 0, fist: 0, glare: 0, grumble: 0, clap: 0, shoo: 0 }, want: { ears: 0, fist: 0, glare: 0, grumble: 0, clap: 0, shoo: 0 }, prop: false, look: 0, fistAt: -9, earsAt: -9 });
+  const manly = () => ({ w: { ears: 0, fist: 0, glare: 0, grumble: 0, clap: 0, shoo: 0 }, want: { ears: 0, fist: 0, glare: 0, grumble: 0, clap: 0, shoo: 0 }, prop: false, look: 0, fistAt: -9, earsAt: -9 });
+  Object.assign(man, manly());
+  if (keeper) Object.assign(keeper, manly());
+  // Patrols: each walker's loop and the waypoint it is heading for; soot: how sooty a cracker left them (fades).
+  for (const [w, name] of [[dog, 'dog'], [man, 'man'], [keeper, 'keeper']]) if (w) Object.assign(w, { route: patrols && patrols[name] && patrols[name].length ? patrols[name] : null, leg: 0, soot: 0, name });
+  const nextLeg = (w) => { w.leg = (w.leg + 1) % w.route.length; return w.route[w.leg]; };
 
   let on = true, busy = false, shown = true, placed = false, clock = 0, quiet = 99, acc = 0, lastSeen = false, bubbles = false, slow = 0;
   let spent = false, fetches = 0, cheerAt = -99, pets = 0, petAt = -9, crackers = [];
@@ -262,6 +283,12 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
     const dist = Math.hypot(dx, dz);
     if (dist < 0.25) return true;
     dx /= dist; dz /= dist;
+    if (patrols) { // the street: straight there
+      turn(w, Math.atan2(dx, dz), dt, rate);
+      const step = Math.min(dist, w.v * dt);
+      w.x += Math.sin(w.yaw) * step; w.z += Math.cos(w.yaw) * step;
+      return false;
+    }
     const u = (w.x - K.x) / K.a, v = (w.z - K.z) / K.b;
     if (u * u + v * v < 1.7) {
       let nx = u / K.a, nz = v / K.b; const l = Math.hypot(nx, nz) || 1; nx /= l; nz /= l;
@@ -283,6 +310,7 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
   function nextDog() {
     const r = Math.random(), byMan = Math.hypot(dog.x - man.x, dog.z - man.z) < 3.5;
     if (cheerAt > clock - 8 && man.act === 'clap') { act(dog, 'happy', 2); say(dog, HEART); return; }
+    if (dog.route) { if (r < 0.15) act(dog, 'sniff', 1.2 + Math.random()); else go(dog, nextLeg(dog), SPEED.walk); return; }
     if (!byMan || r < 0.35) go(dog, near(man.x, man.z, 1.2, 3), SPEED.walk * (Math.random() < 0.12 ? 2 : 1));
     else if (r < 0.55) act(dog, 'sniff', 1.4 + Math.random() * 1.6);
     else if (r < 0.82) act(dog, 'sit', 2 + Math.random() * 3);
@@ -404,14 +432,19 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
   }
 
   // ---------- The old man ----------
-  const calmMan = () => man.act === 'walk' || man.act === 'look' || man.act === '';
-  function nextMan() {
+  const calmMan = (m = man) => m.act === 'walk' || m.act === 'look' || m.act === '';
+  function nextMan(m = man) {
+    if (m.route) { // on patrol: the next waypoint, now and then a look round
+      if (Math.random() < 0.25) { act(m, 'look', 1.5 + Math.random() * 2); m.look = m.yaw + (Math.random() < 0.5 ? -1.4 : 1.4); }
+      else go(m, nextLeg(m), m === keeper ? SPEED.man * 2 : SPEED.man * 1.4);
+      return;
+    }
     if (cheerAt > clock - 10) { cheerAt = -99; act(man, 'clap', 2.6); say(man, CLAP, 2); noise(man, 'clap'); if (dog.act === 'sit' || dog.act === 'walk' || dog.act === 'sniff') { act(dog, 'happy', 2); say(dog, HEART); } return; }
     if (Math.random() < 0.6) go(man, near(man.x, man.z, 2.5, 8), SPEED.man);
     else { act(man, 'look', 3 + Math.random() * 3); man.look = Math.random() < 0.5 ? Math.PI : Math.atan2(dog.x - man.x, dog.z - man.z); }
   }
-  function thinkMan(dt) {
-    const m = man, k = Math.min(1, dt * 8);
+  function thinkMan(dt, m = man) {
+    const k = Math.min(1, dt * 8);
     m.t += dt;
     let speed = 0;
     const want = m.want;
@@ -420,9 +453,9 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
       case 'walk':
         speed = SPEED.man;
         if (!m.bub && Math.random() < dt * 0.05) say(m, NOTE, 1.6); // he hums as he goes
-        if (moveTo(m, dt, 3) || m.t > 30) nextMan(); // (a spot it can't reach: on to the next)
+        if (moveTo(m, dt, 3) || m.t > 30) nextMan(m); // (a spot it can't reach: on to the next)
         break;
-      case 'look': turn(m, m.look, dt, 2); if (m.t > m.dur) nextMan(); break;
+      case 'look': turn(m, m.look, dt, 2); if (m.t > m.dur) nextMan(m); break;
       case 'ears': want.ears = 1; if (m.from) face(m, m.from.x, m.from.z, dt, 3); if (quiet > 1 && !busy) { act(m, 'grumble', 1.4); say(m, GRUMBLE); noise(m, 'grumble'); } break;
       case 'fist': want.fist = 1; if (m.from) face(m, m.from.x, m.from.z, dt, 3); if (m.t > m.dur) act(m, clock - m.earsAt < 2.5 ? 'ears' : 'glare'); break;
       case 'glare':
@@ -430,10 +463,12 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
         if (quiet > 1 && !busy) { act(m, 'grumble', 1.4); say(m, GRUMBLE); noise(m, 'grumble'); }
         else if (m.t > 1.6) { act(m, 'fist', 1.4); say(m, GRUMBLE); } // and another fist for the sky, while the show lasts
         break;
-      case 'grumble': want.grumble = 1; if (m.t > m.dur) nextMan(); break;
-      case 'clap': want.clap = 1; face(m, K.x, K.z, dt, 3); if (m.t > m.dur) nextMan(); break;
-      case 'shoo': want.shoo = 1; face(m, cam.x, cam.z, dt, 6); if (m.t > m.dur) nextMan(); break;
-      default: nextMan();
+      case 'grumble': want.grumble = 1; if (m.t > m.dur) nextMan(m); break;
+      case 'clap': want.clap = 1; face(m, K.x, K.z, dt, 3); if (m.t > m.dur) nextMan(m); break;
+      case 'shoo': want.shoo = 1; face(m, cam.x, cam.z, dt, 6); if (m.t > m.dur) nextMan(m); break;
+      // Pataka Chor: after you, fast, to where you were seen; there he stands glaring till called off.
+      case 'hunt': speed = m.speed; want.glare = 0.6; if (moveTo(m, dt, 8)) { speed = 0; face(m, cam.x, cam.z, dt, 6); } break;
+      default: nextMan(m);
     }
     m.v += (speed - m.v) * Math.min(1, dt * 4);
     for (const key in want) ease(m.w, k, key, want[key]);
@@ -490,8 +525,8 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
     else if (ball.mode) put(D_BALL, local(mOut, null, ball.x, ground + 0.07 * 1.6 * DOG + ball.y, ball.z, 0, 0, 0, 1.6 * DOG)); // (bigger than life, so you can follow it)
     else put(D_BALL, local(mOut, null, d.x, ground, d.z, 0, 0, 0, 0));
   }
-  function poseMan(dt) {
-    const m = man, w = m.w;
+  function poseMan(dt, m = man, b = M_TORSO) {
+    const w = m.w;
     m.phase += dt * m.v * 8.5;
     m.amp += (clamp(m.v * 0.7, 0, 0.35) - m.amp) * Math.min(1, dt * 6);
     const ph = Math.sin(m.phase), sw = ph * m.amp, t = clock;
@@ -504,30 +539,31 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
     const jit = w.ears * Math.sin(t * 31) * 0.035;
     local(mRoot, null, m.x, ground + Math.abs(ph) * 0.025 * Math.min(1, m.v * 3) * MAN, m.z, 0, m.yaw, 0, MAN, 'YXZ');
     local(mBody, mRoot, 0, 0.9, 0, lean, 0, jit);
-    put(M_TORSO, mBody);
-    put(M_HEAD, local(mHead, mBody, 0, 0.58, 0.02, headP, headY, 0));
-    for (let s = 0; s < 2; s++) put(M_LEG + s, local(mOut, mRoot, s ? -0.1 : 0.1, 0.86, 0, s ? -sw : sw));
+    put(b, mBody);
+    put(b + 1, local(mHead, mBody, 0, 0.58, 0.02, headP, headY, 0));
+    for (let s = 0; s < 2; s++) put(b + 2 + s, local(mOut, mRoot, s ? -0.1 : 0.1, 0.86, 0, s ? -sw : sw));
     // Left arm (no stick): swings, covers an ear, shakes a fist at the sky, claps, rests on the hip.
     local(mArm, mBody, 0.25, 0.45, 0, mix(-sw * 0.8, -0.25, -2.8, 0, 0, -1.15, 0), 0, mix(0.06, 2.2, 0.25, 0.06, 0.06, 0.3, 1));
-    put(M_ARM, mArm);
-    put(M_ARM + 1, local(mOut, mArm, 0, -0.3, 0, mix(-0.1, 0, -0.6 + 0.45 * Math.sin(t * 19), -0.1, -0.1, 0, 0), 0, mix(0, 2.4, 0, 0, 0, -1.5 + 0.45 * clapOpen, -2.3)));
+    put(b + 4, mArm);
+    put(b + 5, local(mOut, mArm, 0, -0.3, 0, mix(-0.1, 0, -0.6 + 0.45 * Math.sin(t * 19), -0.1, -0.1, 0, 0), 0, mix(0, 2.4, 0, 0, 0, -1.5 + 0.45 * clapOpen, -2.3)));
     // Right arm: the stick hand (its gestures wave the stick).
     local(mArm, mBody, -0.25, 0.45, 0, mix(-0.3, -0.25, -0.9, -0.3, -0.3, -1.15, -2.5), 0, mix(-0.06, -2.2, -0.1, -0.06, -0.06, -0.3, -0.15));
-    put(M_ARM + 2, mArm);
+    put(b + 6, mArm);
     local(mFore, mArm, 0, -0.3, 0, mix(-0.3, 0, -0.4, -0.3, -0.3, 0, -0.3), 0, mix(0, -2.4, 0, 0, 0, 1.5 - 0.45 * clapOpen, 0));
-    put(M_ARM + 3, mFore);
-    if (m.prop) put(M_STICK, local(mOut, mRoot, -0.36, 0.8, 0.08, 0, 0, -0.1)); // leant on him
+    put(b + 7, mFore);
+    if (m === keeper) put(b + 8, local(mOut, mRoot, 0, 0, 0, 0, 0, 0, 0)); // the shopkeeper has no stick
+    else if (m.prop) put(b + 8, local(mOut, mRoot, -0.36, 0.8, 0.08, 0, 0, -0.1)); // leant on him
     else {
       const plant = 0.5 + 0.22 * Math.sin(m.phase + Math.PI / 2) * (m.amp / 0.35);
-      put(M_STICK, local(mOut, mFore, 0, -0.3, 0, mix(plant, 0, 0.3 + 0.55 * Math.sin(t * 11), 0.45 + 0.12 * Math.sin(t * 8), 0.5 + 0.2 * Math.sin(t * 9), 0, 0.5 * Math.sin(t * 13)), 0, 0));
+      put(b + 8, local(mOut, mFore, 0, -0.3, 0, mix(plant, 0, 0.3 + 0.55 * Math.sin(t * 11), 0.45 + 0.12 * Math.sin(t * 8), 0.5 + 0.2 * Math.sin(t * 9), 0, 0.5 * Math.sin(t * 13)), 0, 0));
     }
   }
   function shadows() {
     if (!shadow) return;
     const a = shadow.geometry.attributes.position, y = ground + 0.012;
     let o = 0;
-    for (let i = 0; i < 2; i++) {
-      const w = both[i], hw = SHADOW[i * 2], hl = SHADOW[i * 2 + 1], c = Math.cos(w.yaw), s = Math.sin(w.yaw);
+    for (let i = 0; i < both.length; i++) {
+      const w = both[i], j2 = Math.min(i, 1) * 2, hw = SHADOW[j2], hl = SHADOW[j2 + 1], c = Math.cos(w.yaw), s = Math.sin(w.yaw);
       for (let j = 0; j < 4; j++) { const u = j & 1 ? hw : -hw, v = j & 2 ? hl : -hl; a.array[o++] = w.x + u * c + v * s; a.array[o++] = y; a.array[o++] = w.z - u * s + v * c; }
     }
     a.needsUpdate = true;
@@ -554,6 +590,7 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
     for (const w of both) { sphere.center.set(w.x, ground + w.top / 2, w.z); sphere.radius = w.top; if (frustum.intersectsSphere(sphere)) return true; }
     return false;
   }
+  const who = (name) => ({ dog, man, keeper })[name] || null;
   const show = (v) => { for (const o of objects) o.visible = v && !o.isSprite; if (!v) { dog.bub = man.bub = null; } };
 
   return {
@@ -571,17 +608,22 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
         placed = true;
         [man.x, man.z] = spot(); [dog.x, dog.z] = near(man.x, man.z, 1, 2.5);
         man.yaw = Math.PI; dog.yaw = Math.atan2(man.x - dog.x, man.z - dog.z);
+        for (const w of both) if (w.route) { [w.x, w.z] = w.route[0]; w.yaw = Math.PI; }
       }
       clock += dt; quiet = busy ? 0 : quiet + dt;
-      thinkDog(dt); thinkMan(dt);
+      thinkDog(dt); thinkMan(dt); if (keeper) thinkMan(dt, keeper);
       // Posed (and drawn) so many times a second at most: by tier, and fewer still on a phone already struggling (under
       // 30 frames a second).
       acc += dt;
       slow += ((dt > 1 / 30 ? 1 : 0) - slow) * Math.min(1, dt * 2);
       if (acc < (slow > 0.5 ? 1 / 8 : [1 / 15, 1 / 30, 0][tier]) - 1e-4) return false;
       const step = acc; acc = 0;
-      poseDog(step); poseMan(step); shadows(); bubbleStep(step);
-      let moved = bubbles;
+      poseDog(step); poseMan(step); if (keeper) poseMan(step, keeper, K_BASE); shadows(); bubbleStep(step);
+      // Soot fades off them over a few seconds.
+      let sooty = false;
+      for (const w of both) if (w.soot > 0) { w.soot = Math.max(0, w.soot - step / 6); sooty = true; }
+      soot.set(dog.soot || 0, man.soot || 0, keeper ? keeper.soot || 0 : 0);
+      let moved = bubbles || sooty;
       for (let i = 0; i < rows.length && !moved; i++) if (!(Math.abs(rows[i] - drawn[i]) < 1e-4)) moved = true; // (NaN: not drawn yet)
       if (!moved) return false;
       const seenNow = inView(camera);
@@ -614,6 +656,54 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
         man.earsAt = clock; man.from = { x: pos.x, z: pos.z };
         if (man.act !== 'ears') act(man, 'ears');
       } else if (calmMan()) { act(man, 'look', 1.5); man.look = Math.atan2(pos.x - man.x, pos.z - man.z); }
+      // The shopkeeper flinches too, unless he is after you.
+      if (keeper && !sky && keeper.act !== 'hunt' && Math.hypot(keeper.x - pos.x, keeper.z - pos.z) < 14 * power) { keeper.earsAt = clock; keeper.from = { x: pos.x, z: pos.z }; act(keeper, 'ears'); }
+    },
+    // ----- Pataka Chor: watching you, coming after you, a cracker on them -----
+    /** Who is where, facing which way (yaw: radians, 0 is +z), and what they are doing. */
+    get watchers() { return both.map((w) => ({ name: w.name, x: w.x, z: w.z, yaw: w.yaw, act: w.act })); },
+    /** One of them has seen you (at x, z): the dog barks, the men grumble, and each looks your way. */
+    notice(name, x, z) {
+      const w = who(name);
+      if (!w || !placed) return;
+      if (w === dog) { if (['alert', 'flee', 'cower'].includes(dog.act)) return; say(dog, BARK, 0.7); noise(dog, 'bark'); act(dog, 'sit', 1.4); dog.yaw = Math.atan2(x - dog.x, z - dog.z); return; }
+      if (w.act === 'hunt') return;
+      say(w, BANG, 0.9); noise(w, 'grumble'); act(w, 'look', 1.6); w.look = Math.atan2(x - w.x, z - w.z);
+    },
+    /** After you: walks fast to (x, z) and waits there, glaring, till calm(). */
+    hunt(name, x, z, speed = 3) { const w = who(name); if (!w || w === dog) return; act(w, 'hunt'); w.tx = x; w.tz = z; w.speed = speed; say(w, GRUMBLE, 1.4); noise(w, 'grumble'); },
+    /** Caught you: a finger wagged in your face (the ear-pull), then back to the patrol. */
+    nab(name) { const w = who(name); if (!w || w === dog) return; act(w, 'shoo', 2.2); say(w, GRUMBLE, 2); noise(w, 'grumble'); },
+    /** A noise at (x, z) (Pataka Chor's decoy): the dog races there to sniff it out, the men turn to look, and one
+        coming after you forgets you. */
+    lure(x, z) {
+      if (!placed) return;
+      if (!['flee', 'cower'].includes(dog.act)) { go(dog, [x, z], SPEED.run, 'walk'); say(dog, BARK, 0.6); noise(dog, 'bark'); }
+      for (const m of [man, keeper]) if (m) { act(m, 'look', 3.5); m.look = Math.atan2(x - m.x, z - m.z); say(m, BANG, 0.8); }
+    },
+    /** Back to the patrol. */
+    calm(name) { const w = who(name); if (w && w.act === 'hunt') nextMan(w); },
+    /** Who a screen point (CSS px) is on: 'dog', 'man', 'keeper' or null. */
+    hit(sx, sy) {
+      if (!on || !shown || !placed) return null;
+      let best = null, bd = 1;
+      for (const w of both) {
+        const h = w === dog ? 0.45 * DOG : 0.9 * MAN, p = view.project(w.x, ground + h, w.z, []);
+        if (!p) continue;
+        const r = Math.max(26, (w === dog ? 0.6 * DOG : 0.55 * MAN) * view.ppm(p[2])), d = Math.hypot(p[0] - sx, p[1] - sy) / r;
+        if (d < bd) { bd = d; best = w.name; }
+      }
+      return best;
+    },
+    /** A cracker went off right on one of them: a cartoon fright (the dog bolts, the men jump and clap their ears), a
+        sooty face and a cross bubble. Nobody is hurt. Returns where they were. */
+    splat(name) {
+      const w = who(name);
+      if (!w || !placed) return null;
+      quiet = 0; w.soot = 1;
+      if (w === dog) { dog.from = { x: dog.x + 0.1, z: dog.z + 0.1 }; act(dog, 'alert', 0.25); say(dog, BANG, 0.9); noise(dog, 'bark'); dog.tube = 0; }
+      else { w.earsAt = clock; w.from = { x: w.x, z: w.z + 1 }; act(w, 'ears'); say(w, GRUMBLE, 1.8); noise(w, 'grumble'); }
+      return { x: w.x, z: w.z };
     },
     /** A show worth applauding: the old man claps once it is quiet (and the dog joins in). */
     cheer() { if (!on) return; cheerAt = clock; if (calmMan() && calm()) nextMan(); },
@@ -669,7 +759,8 @@ export function build({ tier, zone, ground = 0.17, view, sound = () => {} }) {
     // For tests: where they are and what they are up to.
     get state() {
       const at = (w, h) => { const p = view.project(w.x, ground + h, w.z, []); return p && [Math.round(p[0]), Math.round(p[1])]; };
-      return { tier, shown, ball: ball.mode, dog: { x: dog.x, z: dog.z, act: dog.act, tube: dog.tube, at: at(dog, 0.45 * DOG) }, man: { x: man.x, z: man.z, act: man.act, at: at(man, MAN) }, keepOut: K, walk: R };
+      return { tier, shown, ball: ball.mode, dog: { x: dog.x, z: dog.z, yaw: dog.yaw, act: dog.act, tube: dog.tube, at: at(dog, 0.45 * DOG) }, man: { x: man.x, z: man.z, yaw: man.yaw, act: man.act, at: at(man, MAN) },
+        keeper: keeper && { x: keeper.x, z: keeper.z, yaw: keeper.yaw, act: keeper.act, at: at(keeper, MAN) }, keepOut: K, walk: R };
     },
   };
 }

@@ -115,13 +115,14 @@
   };
   const PALETTES = {
     classic: Object.values(COLORS),
+    tricolor: ['#ff9933', '#ffffff', '#138808', '#ffb15c', '#e8ffe8'],
     gold: ['#ffd36b', '#ffb347', '#fff1c9', '#ff9a3c', '#ffe08a'],
     rainbow: ['#ff4d6d', '#ffb347', '#ffe66d', '#4dff9a', '#4dc3ff', '#b06bff'],
     rose: ['#ff5fa2', '#ff8fb8', '#ff3b6b', '#ffd1e1', '#e04dff'],
     ocean: ['#4dc3ff', '#5ff0ff', '#4a7dff', '#b0f0ff', '#8f7bff'],
     festive: ['#3dff8a', '#ff4040', '#ffd36b', '#e8fff2'],
   };
-  const THEME_LABELS = { classic: 'Classic', gold: 'Golden', rainbow: 'Rainbow', rose: 'Rose', ocean: 'Ocean', festive: 'Festive' };
+  const THEME_LABELS = { classic: 'Classic', gold: 'Golden', rainbow: 'Rainbow', rose: 'Rose', ocean: 'Ocean', festive: 'Festive', tricolor: 'Tricolour' };
   let palette = PALETTES[settings.theme] || PALETTES.classic;
   const color = () => pick(palette);
 
@@ -213,6 +214,7 @@
   let curLayer = 0; // 0 = sky (behind city), 1 = ground (in front)
   let curDim = 1; // brightness of the stars being made: far bursts are dimmer (3D view)
   let curScale = 1; // size of the effects being made: a far cracker's sparks, smoke and glow are smaller (atDepth)
+  let curHang = 1; // bigger sky shells hang longer (set while a shell bursts)
   // 3D worlds: the scene point the effects being made belong to (a cracker on the ground, a burst in the sky). When the
   // 3D camera turns or steps, everything pinned to an anchor moves with it (followAnchors).
   let curAnchor = null;
@@ -273,10 +275,15 @@
     'golden-manor': 'golden-manor' };
   // A world still loading its picture counts already. The night skies (Default, Particle Festival) have no 3D scene:
   // they stay flat, and 3D comes back with the next landmark.
-  const model3d = () => SCENES_3D[world.pending || world.id] || '';
-  // The 3D landmarks are Premium; 2D stays free for everyone.
+  // Pataka Chor (chor.js) plays on its own bazaar street, whatever the chosen world. placing: chor.js is putting down a
+  // cracker the player found; any other cracker placement is refused while the mode is on (no shop, nothing to buy).
+  // street: which of its streets (world3d-<street>.js): the free bazaar, or a Premium one.
+  const chor = { on: false, placing: false, street: 'chor-street' };
+  const skyOf = (t) => (typeof t === 'string' && t.startsWith('sky:') ? t.slice(4) : null); // a found sky shell's shell
+  const model3d = () => (chor.on ? chor.street : SCENES_3D[world.pending || world.id] || '');
+  // The 3D landmarks are Premium; 2D stays free for everyone. Pataka Chor's street is free, and always 3D.
   const has3d = () => premium.active;
-  const w3dWanted = () => mode === 'play' && settings.scene3d && has3d() && !w3dFailed && !!model3d() && !arOn && !rush.on && !document.body.classList.contains('home');
+  const w3dWanted = () => mode === 'play' && (chor.on || (settings.scene3d && has3d())) && !w3dFailed && !!model3d() && !arOn && !rush.on && !document.body.classList.contains('home');
   // Ready: built and wanted. Shown: ready and published to the screen by syncWorld3d (so nothing treats a scene that
   // finished building while the game was paused as on screen before it is).
   const w3dReady = () => !!w3d && w3dWanted() && w3d.id === model3d();
@@ -547,18 +554,21 @@
   function release(pool, p) { p.onDeath = null; if (pool.length < Q().poolCap) pool.push(p); }
 
   function star(x, y, vx, vy, col, life, o) {
-    if (stars.length + sparks.length + smokes.length + confettis.length >= Q().maxStars) return null;
     o = o || {};
+    // Scripted picture stars (the tiger, the flag) may go 200 past the budget: a picture needs its points, and they
+    // are cheap (no glitter, no tails, no physics while scripted).
+    if (stars.length + sparks.length + smokes.length + confettis.length >= Q().maxStars + (o.follow ? 200 : 0)) return null;
     const p = starPool.pop() || {};
     p.x = p.px = x; p.y = p.py = y;
     p.vx = vx; p.vy = vy;
-    p.color = col; p.life = life; p.age = 0;
+    p.color = col; p.life = life * curHang; p.age = 0;
     const size = o.size || 2.2, uv = UV();
     p.w = o.w || Math.max(1.1, size * uv);
     p.k = o.drag || 1.5;
     p.grav = o.grav ?? 1;
     if (launch.sequence && !launch.sequence.ground) {
-      p.life = Math.min(4.5, life * 1.24); p.grav *= 0.7;
+      if (!o.follow) p.life = Math.min(4.5, life * 1.24); // a scripted picture (the tiger) keeps its own timing
+      p.grav *= 0.7;
     } else if (launch.sequence && launch.sequence.ground) {
       p.vy *= 1.2; p.vx *= 1.08;
     }
@@ -568,6 +578,11 @@
     p.strobe = o.strobe || 0;
     p.color2 = o.color2 || null;
     p.change = o.change || 0;
+    // changeT (seconds) flips every star of a shell at the same instant, as real colour-change stars do.
+    p.chT = o.changeT !== undefined ? o.changeT * curHang : p.change * p.life;
+    p.fl = !o.w && !o.hold && o.flicker !== false; // flickers out at the end of its life, as a burning star does
+    p.fol = o.follow || null; // follow(p) -> [x, y] while it is scripted, or null to let it go
+    p.wig = (o.wig || 0) * U; p.sw = o.swirl || 0; // wig: a go-getter's random wander; swirl: turns its path (rad/s)
     p.twinkle = !!o.twinkle;
     p.fade = o.fade || 0.35;
     p.onDeath = o.onDeath || null;
@@ -615,6 +630,33 @@
   }
   const GLIT = { cap: 0.92, gl: true };
 
+  function liftTrail(s) {
+    if (s.lift === 'comet') { // a thick burning comet: white-hot head, a long brocade tail
+      for (let k = 0; k < 2; k++) spark(s.x, s.y, rand(-18, 18) * U, rand(5, 45) * U, Math.random() < 0.5 ? '#ffe9c4' : '#ffc46e', rand(0.5, 0.95), { drag: 2.4, grav: 0.5, st: 0.04 });
+      if (Math.random() < 0.6) spark(s.x, s.y, rand(-30, 30) * U, rand(0, 40) * U, '#ffd98a', rand(0.4, 0.8), GLIT);
+    } else if (s.lift === 'crackle') {
+      if (Math.random() < 0.85) spark(s.x, s.y, rand(-25, 25) * U, rand(10, 70) * U, '#ffc987', rand(0.25, 0.55));
+      if (Math.random() < 0.18) spark(s.x, s.y, rand(-20, 20) * U, rand(0, 30) * U, '#fff3d0', rand(0.3, 0.6), { onDeath: (p) => { crackleBurst(p.x, p.y); if (Math.random() < 0.3) Sound.crackle(pan(p.x)); } });
+    } else if (Math.random() < 0.85) spark(s.x, s.y, rand(-25, 25) * U, rand(10, 70) * U, '#ffc987', rand(0.25, 0.55));
+  }
+
+  // Layered breaks, as real shells are built: a pistil, one to three petals and rings in one call.
+  // Each layer: { r: radius as a share of the shell, n: stars, col, col2 + changeT (s), life, size, drag, glitter, gcol,
+  // tail, strobe, grav, fade, ring: { squash, tilt } for a flat ring }.
+  function layers(x, y, sz, list) {
+    const R = R0() * sz;
+    for (const l of list) {
+      const k = l.drag || 1.5, r = R * (l.r || 1) * k, n = cnt((l.n || 60) * (l.ring ? Math.sqrt(sz) : sz));
+      const o = { drag: k, size: l.size || 2.2, color2: l.col2, changeT: l.col2 ? l.changeT ?? (l.life || 1.6) * 0.55 : undefined,
+        glitter: l.glitter || 0, gcol: l.gcol, tail: l.tail || 0, strobe: l.strobe || 0, grav: l.grav, fade: l.fade, twinkle: l.twinkle };
+      const life = l.life || 1.6;
+      if (l.ring) {
+        const sq = l.ring.squash ?? rand(0.3, 1), tilt = l.ring.tilt ?? rand(0, TAU), c = Math.cos(tilt), si = Math.sin(tilt);
+        for (let i = 0; i < n; i++) { const a = (i / n) * TAU, px = Math.cos(a), py = Math.sin(a) * sq; star(x, y, (px * c - py * si) * r, (px * si + py * c) * r, l.col, life * rand(0.96, 1.04), o); }
+      } else sphere(n, (dx, dy) => { const j = rand(0.93, 1.04); star(x, y, dx * r * j, dy * r * j, l.col, life * rand(0.94, 1.05), o); });
+    }
+  }
+
   const cnt = (n) => Math.max(6, Math.round(n * Q().count));
 
   // Directions on a projected sphere (golden spiral) — gives a natural 3D shell look.
@@ -652,6 +694,262 @@
   // ---------- Shell types ----------
   const R0 = () => 190 * U;
   const UV = () => Math.max(U, 0.65); // a visual floor for sprite sizes: U is .5 on every portrait phone
+  // Picture shells' points, [x, y, colour] around the burst point, scaled to the shell and this phone's star budget.
+  function flagIndiaPts(sz) {
+    const w = R0() * sz * 1.25, h = w * 2 / 3, cols = Math.max(11, Math.round(17 * Math.sqrt(Q().count))), rows = 3;
+    const wave = (px) => Math.sin(px / w * Math.PI * 1.6) * h * 0.06;
+    const pts = [], cols3 = ['#ff7a00', '#fff4e6', '#0fb23a']; // deeper saffron and green: a held star cools towards white
+    for (let b = 0; b < 3; b++) for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const px = -w + (c / (cols - 1)) * w * 2, py = -h + ((b * rows + r + 0.5) / (rows * 3)) * h * 2;
+      if (b === 1 && Math.hypot(px, py) < h * 0.27) continue; // the chakra's place
+      pts.push([px, py + wave(px), cols3[b]]);
+    }
+    const cr = h * 0.24, spokes = Math.round(24 * Math.min(1, Q().count + 0.3));
+    for (let i = 0; i < 26; i++) { const a = (i / 26) * TAU; pts.push([Math.cos(a) * cr, Math.sin(a) * cr + wave(0), '#5b7bff']); }
+    for (let i = 0; i < spokes; i++) { const a = (i / spokes) * TAU; for (const f of [0.35, 0.7]) pts.push([Math.cos(a) * cr * f, Math.sin(a) * cr * f + wave(0), '#5b7bff']); }
+    return pts;
+  }
+  // The animal's size: big, but never past the screen's width or up behind the buttons.
+  const tigerS = (sz) => Math.min(R0() * sz * 0.95, W * 0.3, H * 0.17);
+  // National animals drawn in stars, front view, after drone shows and drawing guides (research/fireworks-videos).
+  // Each art function adds lines in face units: add(colour, polyline, role, move(open, i) -> [x, y]). Roles: 'eye' (seen
+  // first, blinks), 'fang' (bared only as the mouth opens), 'mouth' (moves with open), '' (the face).
+  const mouthParts = (add, o) => { // an oval mouth at cy that opens, with fangs and a tongue
+    const C = (k) => o.cy + 0.06 * k, R = (k) => 0.035 + o.open * k, oval = (k) => arc(0, C(k), o.rx, R(k), 0, TAU, 20);
+    add(o.lip || '#ffffff', oval(1), 'mouth', (k, i) => oval(k)[i]);
+    const fang = (sx, top, len) => (k) => { const c = C(k), r = R(k), y0 = top ? c - r : c + r, d = (top ? 1 : -1) * len * Math.min(1, k * 1.4); return [[sx - 0.035, y0], [sx, y0 + d], [sx + 0.035, y0]]; };
+    for (const [sx, top, len] of o.fangs || []) { const f = fang(sx, top, len); add('#ffffff', f(1), 'fang', (k, i) => f(k)[i]); }
+    const tongue = (k) => arc(0, C(k) + R(k) * 0.45, o.rx * 0.48, 0.06 + 0.04 * k, Math.PI * 1.05, Math.PI * 1.95, 6);
+    add('#ff5f7a', tongue(1), 'fang', (k, i) => tongue(k)[i]);
+  };
+  const ring2 = (cx, cy, r, n = 8) => arc(cx, cy, r, r, 0, TAU, n);
+  const ANIMAL_ART = {
+    // The Bengal tiger: angry V brows, slanted eyes, a big nose, a jagged ruff and jagged stripes.
+    tiger(add, spots) {
+      const gold = spots, face = gold ? '#ffc23d' : '#ff8a2b', ruffC = gold ? '#ffd36b' : '#ffb347', mark = gold ? '#ff7a1a' : '#e2462a';
+      const head = [], ruff = [];
+      for (let i = 0; i <= 40; i++) { const a = Math.PI * (0.95 + 1.1 * i / 40); head.push([Math.cos(a) * 0.9, Math.sin(a) * 0.85]); }
+      for (let i = 0; i <= 22; i++) { const a = Math.PI * (0.05 + 0.9 * i / 22), r = i % 2 ? 0.86 : 1.02; ruff.push([Math.cos(a) * r * 0.95, 0.05 + Math.sin(a) * r * 0.9]); }
+      add(face, head); add(ruffC, ruff);
+      add(face, arc(-0.66, -0.72, 0.22, 0.2, Math.PI * 0.9, Math.PI * 2.1, 10)); add(face, arc(0.66, -0.72, 0.22, 0.2, Math.PI * 0.9, Math.PI * 2.1, 10));
+      add('#fff4e6', arc(-0.66, -0.68, 0.1, 0.08, Math.PI, Math.PI * 2, 5)); add('#fff4e6', arc(0.66, -0.68, 0.1, 0.08, Math.PI, Math.PI * 2, 5));
+      add('#ffd36b', [[-0.62, -0.46], [-0.4, -0.38], [-0.14, -0.26]]); add('#ffd36b', [[0.62, -0.46], [0.4, -0.38], [0.14, -0.26]]);
+      add('#d8ff5a', [[-0.56, -0.24], [-0.36, -0.3], [-0.16, -0.18], [-0.36, -0.13], [-0.56, -0.24]], 'eye');
+      add('#d8ff5a', [[0.56, -0.24], [0.36, -0.3], [0.16, -0.18], [0.36, -0.13], [0.56, -0.24]], 'eye');
+      add('#ffffff', [[-0.36, -0.22], [-0.35, -0.2]], 'eye'); add('#ffffff', [[0.36, -0.22], [0.35, -0.2]], 'eye');
+      add('#ffd36b', [[-0.1, -0.24], [-0.13, 0.02]]); add('#ffd36b', [[0.1, -0.24], [0.13, 0.02]]);
+      add('#ff5f7a', [[-0.17, 0.04], [0.17, 0.04], [0, 0.2], [-0.17, 0.04]]);
+      add('#fff4e6', arc(-0.2, 0.3, 0.2, 0.14, Math.PI * 0.75, Math.PI * 1.9, 8)); add('#fff4e6', arc(0.2, 0.3, 0.2, 0.14, Math.PI * 1.1, Math.PI * 2.25, 8));
+      for (const sg of [-1, 1]) { add('#fff4e6', [[sg * 0.34, 0.3], [sg * 0.8, 0.22]]); add('#fff4e6', [[sg * 0.34, 0.36], [sg * 0.82, 0.4]]); }
+      if (gold) { // the jaguar's rosettes
+        for (const [rx, ry] of [[-0.25, -0.62], [0.25, -0.62], [0, -0.72], [-0.47, -0.5], [0.47, -0.5], [-0.74, -0.08], [0.74, -0.08], [-0.78, 0.18], [0.78, 0.18], [-0.6, 0.08], [0.6, 0.08]]) add(mark, ring2(rx, ry, 0.065, 7));
+      } else {
+        add(mark, [[-0.06, -0.84], [0, -0.52], [0.06, -0.84]]); add(mark, [[-0.3, -0.8], [-0.17, -0.55], [-0.2, -0.8]]); add(mark, [[0.3, -0.8], [0.17, -0.55], [0.2, -0.8]]);
+        for (const sg of [-1, 1]) { add(mark, [[sg * 0.88, -0.3], [sg * 0.6, -0.22], [sg * 0.86, -0.18]]); add(mark, [[sg * 0.95, 0], [sg * 0.62, 0.05], [sg * 0.94, 0.12]]); add(mark, [[sg * 0.88, 0.32], [sg * 0.64, 0.3], [sg * 0.84, 0.42]]); }
+      }
+      mouthParts(add, { cy: 0.42, rx: 0.27, open: 0.24, fangs: [[-0.15, true, 0.17], [0.15, true, 0.17], [-0.1, false, 0.11], [0.1, false, 0.11]] });
+    },
+    jaguar(add) { ANIMAL_ART.tiger(add, true); },
+    // The lion: a face inside a great jagged mane.
+    lion(add) {
+      const mane = [], inner = [];
+      for (let i = 0; i <= 32; i++) { const a = (i / 32) * TAU, r = i % 2 ? 0.98 : 1.18; mane.push([Math.cos(a) * r, 0.05 + Math.sin(a) * r * 0.98]); }
+      for (let i = 0; i <= 24; i++) { const a = (i / 24) * TAU, r = i % 2 ? 0.8 : 0.9; inner.push([Math.cos(a) * r, 0.05 + Math.sin(a) * r * 0.98]); }
+      add('#ff8a2b', mane); add('#e2662a', inner);
+      add('#ffcf6b', arc(0, 0.06, 0.62, 0.7, 0, TAU, 30)); // the face
+      add('#ffcf6b', ring2(-0.44, -0.56, 0.1, 6)); add('#ffcf6b', ring2(0.44, -0.56, 0.1, 6)); // ears
+      add('#fff4e6', [[-0.46, -0.32], [-0.28, -0.26], [-0.12, -0.22]]); add('#fff4e6', [[0.46, -0.32], [0.28, -0.26], [0.12, -0.22]]);
+      add('#ffe14d', [[-0.42, -0.14], [-0.27, -0.2], [-0.12, -0.12], [-0.27, -0.07], [-0.42, -0.14]], 'eye');
+      add('#ffe14d', [[0.42, -0.14], [0.27, -0.2], [0.12, -0.12], [0.27, -0.07], [0.42, -0.14]], 'eye');
+      add('#ffffff', [[-0.27, -0.15], [-0.26, -0.13]], 'eye'); add('#ffffff', [[0.27, -0.15], [0.26, -0.13]], 'eye');
+      add('#ffcf6b', [[-0.09, -0.18], [-0.12, 0.06]]); add('#ffcf6b', [[0.09, -0.18], [0.12, 0.06]]);
+      add('#ff8a8a', [[-0.15, 0.08], [0.15, 0.08], [0, 0.22], [-0.15, 0.08]]);
+      add('#fff4e6', arc(-0.15, 0.32, 0.16, 0.12, Math.PI * 0.7, Math.PI * 1.9, 7)); add('#fff4e6', arc(0.15, 0.32, 0.16, 0.12, Math.PI * 1.1, Math.PI * 2.3, 7));
+      for (const sg of [-1, 1]) add('#fff4e6', [[sg * 0.28, 0.34], [sg * 0.62, 0.3]]);
+      mouthParts(add, { cy: 0.44, rx: 0.22, open: 0.22, fangs: [[-0.12, true, 0.15], [0.12, true, 0.15], [-0.08, false, 0.1], [0.08, false, 0.1]] });
+    },
+    // The bald eagle: a white head, fierce brows, a hooked yellow beak that opens in a screech, brown shoulders.
+    eagle(add) {
+      const head = [];
+      for (let i = 0; i <= 30; i++) { const a = Math.PI * (0.92 + 1.16 * i / 30); head.push([Math.cos(a) * 0.62, -0.05 + Math.sin(a) * 0.72]); }
+      const neck = [];
+      for (let i = 0; i <= 14; i++) { const t = i / 14, x = -0.6 + 1.2 * t; neck.push([x, 0.62 + (i % 2 ? 0.1 : 0) - Math.abs(x) * 0.1]); }
+      add('#f4f6ff', head); add('#f4f6ff', neck);
+      add('#c8722a', [[-1.05, 0.95], [-0.8, 0.66], [-0.55, 0.62]]); add('#c8722a', [[1.05, 0.95], [0.8, 0.66], [0.55, 0.62]]); // shoulders
+      add('#c8722a', [[-1.12, 1.08], [-0.86, 0.82]]); add('#c8722a', [[1.12, 1.08], [0.86, 0.82]]);
+      add('#ffd36b', [[-0.5, -0.3], [-0.3, -0.24], [-0.12, -0.12]]); add('#ffd36b', [[0.5, -0.3], [0.3, -0.24], [0.12, -0.12]]); // heavy brows
+      add('#ffd23d', [[-0.42, -0.16], [-0.3, -0.21], [-0.18, -0.12], [-0.3, -0.07], [-0.42, -0.16]], 'eye');
+      add('#ffd23d', [[0.42, -0.16], [0.3, -0.21], [0.18, -0.12], [0.3, -0.07], [0.42, -0.16]], 'eye');
+      add('#ffffff', [[-0.3, -0.15], [-0.29, -0.13]], 'eye'); add('#ffffff', [[0.3, -0.15], [0.29, -0.13]], 'eye');
+      add('#ffc21a', [[-0.17, -0.04], [0.17, -0.04], [0.11, 0.22], [0, 0.4], [-0.11, 0.22], [-0.17, -0.04]]); // the hooked upper beak
+      add('#ffe7b0', [[-0.06, 0.04], [-0.04, 0.06]]); add('#ffe7b0', [[0.06, 0.04], [0.04, 0.06]]); // nostrils
+      const low = (k) => [[-0.1, 0.24], [0, 0.32 + 0.22 * k], [0.1, 0.24]];
+      add('#ffc21a', low(1), 'mouth', (k, i) => low(k)[i]); // the lower beak drops in the screech
+      const tng = (k) => [[-0.03, 0.27], [0, 0.27 + 0.16 * k], [0.03, 0.27]];
+      add('#ff5f7a', tng(1), 'fang', (k, i) => tng(k)[i]);
+    },
+    // The giant panda: a round white face, grey ear and eye patches, a small nose and a smile that grows.
+    panda(add) {
+      add('#f4f6ff', arc(0, 0.04, 0.86, 0.78, 0, TAU, 36));
+      add('#9aa3b5', ring2(-0.62, -0.66, 0.2, 10)); add('#9aa3b5', ring2(0.62, -0.66, 0.2, 10)); // ears
+      add('#9aa3b5', ring2(-0.62, -0.66, 0.1, 6)); add('#9aa3b5', ring2(0.62, -0.66, 0.1, 6));
+      const patch = (sg) => arc(sg * 0.33, -0.06, 0.19, 0.26, 0, TAU, 14).map(([px, py]) => { const dx = px - sg * 0.33, dy = py + 0.06, a = sg * 0.5; return [sg * 0.33 + dx * Math.cos(a) - dy * Math.sin(a), -0.06 + dx * Math.sin(a) + dy * Math.cos(a)]; });
+      add('#9aa3b5', patch(-1)); add('#9aa3b5', patch(1));
+      add('#ffffff', ring2(-0.33, -0.08, 0.07, 6), 'eye'); add('#ffffff', ring2(0.33, -0.08, 0.07, 6), 'eye');
+      add('#ffffff', [[-0.31, -0.1], [-0.3, -0.09]], 'eye'); add('#ffffff', [[0.31, -0.1], [0.3, -0.09]], 'eye');
+      add('#9aa3b5', arc(0, 0.2, 0.1, 0.06, 0, TAU, 8)); // nose
+      add('#ff8ab0', arc(-0.5, 0.3, 0.1, 0.05, 0, TAU, 6)); add('#ff8ab0', arc(0.5, 0.3, 0.1, 0.05, 0, TAU, 6)); // blush
+      const smile = (k) => Array.from({ length: 9 }, (_, i) => { const t = i / 8, x = -0.2 - 0.06 * k + (0.4 + 0.12 * k) * t; return [x, 0.34 + Math.sin(t * Math.PI) * (0.06 + 0.1 * k)]; });
+      add('#ff8ab0', smile(1), 'mouth', (k, i) => smile(k)[i]);
+    },
+  };
+  // How each animal's big moment plays: a roar (tiger, jaguar, lion), a screech (eagle) or a burst of hearts (panda).
+  const ANIMAL_FX = { tiger: 'roar', jaguar: 'roar', lion: 'roar', eagle: 'screech', panda: 'hearts' };
+  // Points spread evenly along an animal's lines by length (about 220 even on a low phone); each is
+  // [x, y, colour, role, at(open) -> [x, y] or null], scaled by S.
+  function animalPts(kind, sz) {
+    const S = tigerS(sz), lines = [];
+    ANIMAL_ART[kind]((c, l, r = '', mv = null) => lines.push({ c, l, r, mv }));
+    const len = (l) => l.slice(1).reduce((d, p, i) => d + Math.hypot(p[0] - l[i][0], p[1] - l[i][1]), 0);
+    const total = lines.reduce((a, L) => a + len(L.l), 0), n = Math.round(Math.max(170, 260 * Math.sqrt(Q().count))), step = total / n, out = [];
+    for (const L of lines) {
+      const tot = len(L.l), k = Math.max(L.r === 'eye' && L.l.length === 2 ? 1 : 2, Math.round(tot / step));
+      for (let j = 0; j < k; j++) {
+        const f = k === 1 ? 0 : j / (k - 1);
+        const at = (l) => { const want = f * len(l); let d = 0; for (let i = 1; i < l.length; i++) { const sg = Math.hypot(l[i][0] - l[i - 1][0], l[i][1] - l[i - 1][1]); if (d + sg >= want || i === l.length - 1) { const t = sg ? Math.min(1, (want - d) / sg) : 0; return [l[i - 1][0] + (l[i][0] - l[i - 1][0]) * t, l[i - 1][1] + (l[i][1] - l[i - 1][1]) * t]; } d += sg; } return l[0]; };
+        const p0 = at(L.l);
+        out.push([p0[0] * S, p0[1] * S, L.c, L.r, L.mv ? (o) => { const q = at(L.l.map((_, i) => L.mv(o, i))); return [q[0] * S, q[1] * S]; } : null]);
+      }
+    }
+    return out;
+  }
+  const tigerPts = (sz) => animalPts('tiger', sz);
+  // The animal, cinematic. Two eyes open in the dark sky and blink; the face gathers round them (from the flag's stars
+  // when `from` is given, else from the burst); it lunges towards you; then its moment: the mouth opens and, a beat
+  // later, a roar (a cone of breath, shockwave rings, a trembling head, a shaking sky), a screech (a wind blast and
+  // feathers) or a burst of hearts; then it calms, breathes and the stars fall away. Timed on each star's own age.
+  function animalCinema(kind, x, y0, sz, from) {
+    const T = animalPts(kind, sz), S = tigerS(sz), fx = ANIMAL_FX[kind], show = { roared: false };
+    const y = Math.max(y0, safeTop() + S * 1.35 + 64 * U); // the ears (or the mane) stay clear of the top buttons
+    const back = (u) => 1 + 2.70158 * (u - 1) ** 3 + 1.70158 * (u - 1) ** 2, ease = (u) => 1 - (1 - u) ** 3, sm = (u) => u * u * (3 - 2 * u);
+    const EYES = 0.9, FORM = 0.8, LUNGE = 0.8, ROAR = 1.7, CALM = 0.9;
+    const tF = EYES, tL = tF + FORM, tR = tL + LUNGE, tC = tR + ROAR, tEnd = tC + CALM;
+    const ring = (mx, my, v, col) => { for (let i = 0; i < 30; i++) { const a = (i / 30) * TAU; star(mx, my, Math.cos(a) * v * U, Math.sin(a) * v * 0.8 * U, col, 0.45, { drag: 3.2, grav: 0, size: 1.6, flicker: false }); } };
+    const momentFx = () => {
+      show.roared = true;
+      const my = y + S * (kind === 'eagle' ? 0.3 : kind === 'panda' ? 0.36 : 0.5);
+      if (fx === 'hearts') { // the panda's smile: little hearts float up and sparkle
+        flash(x, my, '#ff8ab0', 1.2); addLight('#ff8ab0', 1.8);
+        for (let h = 0; h < 6; h++) {
+          const hx = x + rand(-1.1, 1.1) * S, hy = y + rand(-0.6, 0.2) * S, hs = rand(0.12, 0.2) * S, vy = -rand(40, 80) * U;
+          heartPath(0, 0, 1).forEach(([px, py]) => star(hx, hy, px * hs * 2.2, py * hs * 2.2 + vy, h % 2 ? '#ff6ec7' : '#ff8ab0', rand(1.2, 1.6), { drag: 2.2, grav: -0.15, size: 1.8 }));
+        }
+        for (let i = 0; i < cnt(24); i++) { const a = rand(0, TAU), v = rand(80, 260) * U; star(x, my, Math.cos(a) * v, Math.sin(a) * v, '#fff4e6', rand(0.5, 0.9), { drag: 2, size: 1.4, twinkle: true }); }
+        Sound.pop(pan(x)); Sound.crackle(pan(x)); buzz(25);
+        return;
+      }
+      const eagle = fx === 'screech';
+      flash(x, my, eagle ? '#f4f6ff' : '#ffb347', 1.9); addLight(eagle ? '#e8ecff' : '#ff8a2b', 2.8); addLight('#ffffff', 0.8);
+      ring(x, my, 600, '#fff1d6'); after(0.16, () => ring(x, my, 420, '#fff1d6'));
+      for (let i = 0; i < cnt(50); i++) { // a cone of breath (or a blast of wind), out of the mouth and towards you
+        const a = Math.PI / 2 + rand(-0.95, 0.95), v = rand(160, 620) * U;
+        const col = eagle ? (Math.random() < 0.6 ? '#f4f6ff' : '#cfe0ff') : kind === 'jaguar' ? (Math.random() < 0.55 ? '#ffe14d' : '#ff9a1a') : (Math.random() < 0.55 ? '#ffcf6b' : '#ff5f2b');
+        star(x + rand(-14, 14) * U, my + rand(-6, 6) * U, Math.cos(a) * v, Math.sin(a) * v * 0.75, col, rand(0.5, 1.1), { drag: 1.7, grav: -0.1, size: rand(1.6, 2.6), glitter: 0.9, gcol: eagle ? '#ffffff' : '#ffe7b0' });
+      }
+      if (eagle) for (let i = 0; i < 10; i++) star(x + rand(-1, 1) * S, y + rand(-0.4, 0.6) * S, rand(-40, 40) * U, rand(-30, 10) * U, '#f4f6ff', rand(1.6, 2.4), { drag: 1.2, grav: 0.25, size: 2, wig: 600 }); // drifting feathers
+      shake = Math.max(shake, eagle ? 0.4 : 0.6); buzz([60, 40, 90]);
+      Sound.thump(pan(x)); Sound.bang(pan(x), { rate: eagle ? 1.3 : 0.45, gain: 1.35 }); Sound.crackle(pan(x));
+    };
+    T.forEach((t, i) => {
+      const [sx, sy] = from ? from[i % from.length] : [x, y], role = t[3], eye = role === 'eye', fang = role === 'fang', mv = t[4];
+      star(sx, sy, 0, 0, t[2], tEnd + rand(1, 1.5), { size: eye ? 3.5 : fang ? 3 : 2.7, grav: 0.55, drag: 2, fade: 0.2, flicker: false, tau: 0.01, follow: (p) => {
+        const a = p.age;
+        if (a >= tEnd) { p.dim = 1; return null; } // let go: it droops and fades
+        let sc = 0.62, rot = 0, cy = y, open = 0;
+        if (a < tL) { // the eyes first, then the face gathering round them
+          const at = eye ? Math.min(1, a / (EYES * 0.7)) : Math.max(0, (a - tF) / FORM);
+          p.dim = fang ? 0 : eye ? (a > 0.55 && a < 0.68 ? 0.15 : 1) : sm(at); // a blink; the fangs wait
+          const [qx, qy] = mv ? mv(0) : [t[0], t[1]], tx = x + qx * sc, ty = y + qy * sc, u = ease(at);
+          return [sx + (tx - sx) * u, sy + (ty - sy) * u];
+        }
+        p.dim = 1;
+        if (a < tR) { const u = (a - tL) / LUNGE; sc = 0.62 + (1.1 - 0.62) * back(u); rot = 0.2 * (1 - u) * Math.sin(u * Math.PI * 2.2); cy = y - S * 0.1 * (1 - u); }
+        else if (a < tC) { // its moment: the mouth opens first, the roar (screech, hearts) follows
+          const r = a - tR; open = r < 0.28 ? sm(r / 0.28) : r > ROAR - 0.35 ? sm((ROAR - r) / 0.35) : 1;
+          if (r > 0.3 && !show.roared) momentFx();
+          const tremble = fx !== 'hearts' && show.roared && r < 1 ? (Math.random() - 0.5) * 0.014 : 0;
+          sc = 1.1 + 0.06 * open + tremble; cy = y - S * 0.06 * open;
+          if (fx === 'hearts') rot = 0.12 * Math.sin(r * 6) * open; // the panda wobbles happily
+        } else { const b = a - tC; sc = 1.1 + 0.03 * Math.sin(b * 5); rot = 0.04 * Math.sin(b * 2.4); }
+        if (fang) p.dim = open > 0.2 ? Math.min(1, open * 1.3) : 0; // bared only in its moment
+        const [qx, qy] = mv ? mv(open) : [t[0], t[1]], c = Math.cos(rot), si = Math.sin(rot), px = qx * sc, py = qy * sc;
+        return [x + px * c - py * si, cy + px * si + py * c];
+      } });
+    });
+  }
+  const tigerCinema = (x, y0, sz, from) => animalCinema('tiger', x, y0, sz, from);
+  // Flags as a grid of stars, from a colour at each (u, v) in 0..1 and optional extra lines (stars, a band), scaled to the
+  // shell and the screen. Returns [x, y, colour] points around the burst point.
+  const FLAGS = {
+    bangladesh: { ar: 0.6, at: (u, v) => (((u - 0.45) / 0.6) ** 2 + (v - 0.5) ** 2 < 0.33 ** 2 ? '#ff3344' : '#0fb23a') },
+    usa: {
+      ar: 10 / 19,
+      at: (u, v) => (u < 0.4 && v < 7 / 13 ? '#2f55ff' : Math.floor(v * 13) % 2 ? '#fff4e6' : '#ff3344'),
+      extra: () => { const l = []; for (let r = 0; r < 5; r++) for (let c = 0; c < 6; c++) l.push([0.035 + c * 0.066 + (r % 2) * 0.033, 0.055 + r * 0.1, '#ffffff']); return l; },
+    },
+    uk: {
+      ar: 0.5,
+      at: (u, v) => {
+        const X = u * 2, Y = v, d1 = Math.abs(X * 1 - Y * 2) / Math.sqrt(5), d2 = Math.abs((2 - X) * 1 - Y * 2) / Math.sqrt(5);
+        const cx = Math.abs(X - 1), cy = Math.abs(Y - 0.5);
+        if (cx < 0.1 || cy < 0.1) return '#ff3344';
+        if (cx < 1 / 6 || cy < 1 / 6) return '#fff4e6';
+        if (Math.min(d1, d2) < 0.035) return '#ff3344';
+        if (Math.min(d1, d2) < 0.1) return '#fff4e6';
+        return '#2f55ff';
+      },
+    },
+    china: {
+      ar: 2 / 3, at: () => '#ff2a2a',
+      extra: () => {
+        const l = [], starAt = (cx, cy, r, n) => starPath(0, 0, 1).forEach(([px, py]) => l.push([cx + px * r * (2 / 3), cy + py * r, '#ffd400']));
+        starAt(5 / 30, 5 / 20, 0.15); for (const [cx, cy] of [[10 / 30, 2 / 20], [12 / 30, 4 / 20], [12 / 30, 7 / 20], [10 / 30, 9 / 20]]) starAt(cx, cy, 0.05);
+        return l;
+      },
+    },
+    brazil: {
+      ar: 0.7,
+      at: (u, v) => (((u - 0.5) / 0.7) ** 2 + (v - 0.5) ** 2 < 0.25 ** 2 ? '#2f55ff' : Math.abs(u - 0.5) / 0.415 + Math.abs(v - 0.5) / 0.41 <= 1 ? '#ffd400' : '#0fb23a'),
+      extra: () => arc(0.5, 0.62, 0.22, 0.2, Math.PI * 1.15, Math.PI * 1.85, 8).map(([u, v]) => [u, v, '#ffffff']),
+    },
+  };
+  function flagPts(id, sz) {
+    const F = FLAGS[id], w = Math.min(R0() * sz * 1.25, W * 0.46), h = w * F.ar * 2 / 2;
+    const cols = Math.round(clamp(26 * Math.sqrt(Q().count), 22, 30)), rows = Math.max(8, Math.round(cols * F.ar)), pts = [];
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const u = (c + 0.5) / cols, v = (r + 0.5) / rows, px = -w + u * w * 2;
+      pts.push([px, -h + v * h * 2 + Math.sin(px / w * Math.PI * 1.6) * h * 0.06, F.at(u, v)]);
+    }
+    for (const [u, v, c] of F.extra ? F.extra() : []) { const px = -w + u * w * 2; pts.push([px, -h + v * h * 2 + Math.sin(px / w * Math.PI * 1.6) * h * 0.06, c]); }
+    return pts;
+  }
+  // A country in one shot: its flag forms and holds, then every star becomes its national animal (animalCinema).
+  function countryShow(x, y, sz, F, kind) {
+    // The flag's stars are scripted (fly out, hold with a slow wave), so even a low phone draws the whole flag.
+    const made = F.map((p) => star(x, y, 0, 0, p[2], 3, { size: 2.5, grav: 0.55, drag: 2, flicker: false, tau: 0.01, follow: (q) => {
+      const a = q.age, u = Math.min(1, a / 0.55), e = 1 - (1 - u) ** 3, wave = Math.sin(p[0] / 40 + a * 2.4) * 2.5 * U;
+      return [x + p[0] * e, y + p[1] * e + wave * u];
+    } }));
+    addLight(F[0][2], 0.8); addLight(F[F.length - 1][2], 0.6);
+    after(1.9, () => {
+      const from = made.filter((p) => p && stars.includes(p)).map((p) => [p.x, p.y]);
+      // The flag's stars become the animal's: freed now, so a low phone's star budget has room for it.
+      for (const p of made) { const i = p ? stars.indexOf(p) : -1; if (i >= 0) { stars[i] = stars[stars.length - 1]; stars.pop(); release(starPool, p); } }
+      if (!from.length) return;
+      animalCinema(kind, x, y, sz, from);
+      Sound.crackle(pan(x));
+    });
+  }
   const TYPES = {
     peony: {
       label: 'Peony', icon: '🌸',
@@ -662,6 +960,7 @@
           star(x, y, dx * R * k * j, dy * R * k * j, c1, rand(1.3, 1.7), { drag: k, size: 2.4 });
         });
         if (Math.random() < 0.45) sphere(cnt(40 * sz), (dx, dy) => star(x, y, dx * R * 0.5 * k, dy * R * 0.5 * k, c2, rand(1.1, 1.4), { drag: k, size: 2.2 }));
+        else if (Math.random() < 0.5) sphere(cnt(22 * sz), (dx, dy) => star(x, y, dx * R * 0.28 * k, dy * R * 0.28 * k, '#ffffff', rand(0.4, 0.55), { drag: k, size: 2.6 })); // a white flash core
       },
     },
     chrysanthemum: {
@@ -670,7 +969,7 @@
         const R = R0() * sz, k = 1.5;
         sphere(cnt(120 * sz), (dx, dy) => {
           const j = rand(0.94, 1.03);
-          star(x, y, dx * R * k * j, dy * R * k * j, c1, rand(1.5, 1.9), { drag: k, size: 2, glitter: 0.35, gcol: '#ffe2a0' });
+          star(x, y, dx * R * k * j, dy * R * k * j, c1, rand(1.5, 1.9), { drag: k, size: 2, glitter: 0.35, gcol: '#ffe2a0', color2: '#b8401f', changeT: 1.3 }); // all cool to embers together
         });
       },
     },
@@ -685,13 +984,13 @@
       },
     },
     palm: {
-      label: 'Palm', icon: '🌴',
+      label: 'Palm', icon: '🌴', lift: 'comet', // the trunk: a thick rising comet
       fn(x, y, sz, c1) {
         const R = R0() * sz * 1.1, k = 1.25, n = Math.round(9 + sz * 4);
         const off = Math.random() * TAU;
         for (let i = 0; i < n; i++) {
           const a = off + (i / n) * TAU + rand(-0.1, 0.1), j = rand(0.85, 1.05);
-          star(x, y, Math.cos(a) * R * k * j, Math.sin(a) * R * k * j, c1, rand(2, 2.4), { drag: k, size: 4, glitter: 1.6, gcol: '#ffd27a', fade: 0.45 });
+          star(x, y, Math.cos(a) * R * k * j, Math.sin(a) * R * k * j, c1, rand(2, 2.4), { drag: k, size: 4.6, glitter: 1.6, gcol: '#ffd27a', fade: 0.45, tail: 0.5 });
         }
         sphere(cnt(24), (dx, dy) => star(x, y, dx * 60 * U, dy * 60 * U, '#fff4e0', 0.5, { drag: 2, size: 2 }));
       },
@@ -703,7 +1002,8 @@
         const squash = rand(0.3, 1), tilt = rand(0, TAU), n = cnt(64 * Math.sqrt(sz));
         const pts = [];
         for (let i = 0; i < n; i++) { const a = (i / n) * TAU; pts.push([Math.cos(a) * R, Math.sin(a) * R * squash]); }
-        shape(x, y, rotate(pts, tilt), c1, { drag: k, life: 1.6, size: 2.5 });
+        if (Math.random() < 0.4) shape(x, y, rotate(pts, tilt), '#ffd36b', { drag: k, life: 1.8, size: 2.5, glitter: 0.8, color2: c1, changeT: 0.8, onDeath: (p) => { if (Math.random() < 0.35) crackleBurst(p.x, p.y); } });
+        else shape(x, y, rotate(pts, tilt), c1, { drag: k, life: 1.6, size: 2.5 });
         sphere(cnt(28), (dx, dy) => star(x, y, dx * R * 0.3 * k, dy * R * 0.3 * k, c2, 1.2, { drag: k, size: 2 }));
       },
     },
@@ -711,10 +1011,11 @@
       label: 'Crossette', icon: '✚',
       fn(x, y, sz, c1) {
         const R = R0() * sz * 0.7, k = 1.2, n = cnt(20 * Math.sqrt(sz));
+        const v = Math.random() < 0.35; // V pairs: each star splits in two at ±30° from its path
         const split = (p) => {
-          const a = Math.random() * TAU;
-          for (let i = 0; i < 4; i++) {
-            const b = a + (i * Math.PI) / 2;
+          const a = v ? Math.atan2(p.vy, p.vx) : Math.random() * TAU;
+          for (let i = 0; i < (v ? 2 : 4); i++) {
+            const b = v ? a + (i ? 0.52 : -0.52) : a + (i * Math.PI) / 2;
             star(p.x, p.y, Math.cos(b) * 120 * U, Math.sin(b) * 120 * U, p.color, rand(0.55, 0.75), { drag: 1.8, size: 2 });
           }
           Sound.pop(pan(p.x));
@@ -739,9 +1040,11 @@
       fn(x, y, sz, c1) {
         const R = R0() * sz, k = 1.8;
         const col = Math.random() < 0.5 ? '#fff4e0' : c1;
+        const ball = Math.random() < 0.3; // a slow-falling ball of twinkles
         sphere(cnt(70 * sz), (dx, dy) => {
-          star(x, y, dx * R * k, dy * R * k, col, rand(1.9, 2.7), { drag: k, grav: 0.6, size: 2.6, strobe: rand(7, 13) });
+          star(x, y, dx * R * k, dy * R * k, col, rand(1.9, 2.7) * (ball ? 1.3 : 1), { drag: ball ? 2.2 : k, grav: ball ? 0.25 : 0.6, size: 2.6, strobe: ball ? rand(9, 12) : rand(7, 13) });
         });
+        if (Math.random() < 0.25) TYPES.horsetail.fn(x, y, sz * 0.7, '#ffd36b');
       },
     },
     horsetail: {
@@ -756,7 +1059,10 @@
     },
     kamuro: {
       label: 'Kamuro', icon: '🌟',
-      fn(x, y, sz) {
+      fn(x, y, sz, c1, c2, s) {
+        if (!(s && s.cluster) && Math.random() < 0.3) { // a cluster of three, as the Yokohama finale fired them
+          for (const d of [-1, 1]) after(rand(0.08, 0.25), () => TYPES.kamuro.fn(x + d * R0() * sz * 0.55, y + rand(-20, 30) * U, sz * 0.7, c1, c2, { cluster: true }));
+        }
         const R = R0() * sz * 1.05, k = 1.4;
         sphere(cnt(120 * sz), (dx, dy) => {
           const j = rand(0.92, 1.04);
@@ -772,6 +1078,245 @@
           const j = rand(0.93, 1.04), swap = Math.random() < 0.5;
           star(x, y, dx * R * k * j, dy * R * k * j, swap ? c1 : c2, rand(1.7, 2.1), { drag: k, size: 2.4, color2: swap ? c2 : c1, change: rand(0.45, 0.6), glitter: 0.15 });
         });
+      },
+    },
+    // ---- Real-show shells (research/fireworks-videos): PGI, Malta, Yokohama, Lonestar and the biggest shells of 2020-24.
+    dahlia: {
+      label: 'Dahlia', icon: '🌺',
+      fn(x, y, sz, c1) { layers(x, y, sz, [{ n: 42, col: c1, life: 2.7, size: 3.4, drag: 1.2, glitter: 0.2 }]); },
+    },
+    pistil: {
+      label: 'Pistil', icon: '🏵️',
+      fn(x, y, sz, c1, c2) {
+        layers(x, y, sz, [
+          { r: 0.38, n: 50, col: c2, life: 1.15, size: 2.4, drag: 1.7 },
+          { r: 1, n: 85, col: '#f2f4ff', life: 2.2, drag: 1.5, tail: 0.6, glitter: 0.3, gcol: '#e8ecff' },
+        ]);
+      },
+    },
+    doublepetal: {
+      label: 'Double petal', icon: '🌹',
+      fn(x, y, sz, c1, c2) {
+        layers(x, y, sz, [
+          { r: 0.34, n: 45, col: c1, life: 1.2, size: 2.4 },
+          { r: 0.7, n: 70, col: c2, life: 1.7 },
+          { r: 1.05, n: 95, col: Math.random() < 0.5 ? c1 : '#fff4e0', life: 2.35, glitter: 0.15 },
+        ]);
+      },
+    },
+    brocade: {
+      label: 'Brocade', icon: '👑',
+      fn(x, y, sz, c1) {
+        const tip = palette === PALETTES.classic ? (Math.random() < 0.5 ? '#ff3b3b' : '#4a7dff') : c1;
+        layers(x, y, sz * 0.95, [{ n: 110, col: '#ffcf6b', col2: tip, changeT: 2.1, life: 3.1, drag: 1.3, grav: 0.9, size: 2, glitter: 1.4, gcol: '#ffd98a', tail: 0.7, fade: 0.5 }]);
+      },
+    },
+    kingwillow: {
+      label: 'King willow', icon: '🌳',
+      fn(x, y, sz) {
+        layers(x, y, sz * 1.15, [{ n: 140, col: '#ffb54a', col2: '#ff4433', changeT: 4.6, life: 5.6, drag: 1.25, grav: 0.7, size: 1.9, glitter: 1, gcol: '#ffcf85', tail: 0.8, fade: 0.4 }]);
+        addLight('#ffb54a', sz);
+      },
+    },
+    colorchange: {
+      label: 'Colour change', icon: '🎨',
+      fn(x, y, sz, c1, c2) {
+        const twinkle = (p) => star(p.x, p.y, p.vx * 0.3, p.vy * 0.3, '#f4f6ff', rand(0.8, 1.1), { drag: 2.2, grav: 0.4, size: 1.8, strobe: 11, L: p.L });
+        const R = R0() * sz, k = 1.5;
+        sphere(cnt(90 * sz), (dx, dy) => star(x, y, dx * R * k, dy * R * k, '#ffcf55', 1.75, { drag: k, size: 2.4, color2: c2 === c1 ? '#33ff88' : c2, changeT: 0.85, onDeath: twinkle }));
+      },
+    },
+    ghost: {
+      label: 'Ghost', icon: '👻',
+      fn(x, y, sz, c1, c2) {
+        // The colour seems to travel round the sphere: each star changes a little later than its neighbour clockwise.
+        const R = R0() * sz, k = 1.5, off = Math.random() * TAU;
+        if (c2 === c1) c2 = '#5ff0ff';
+        sphere(cnt(110 * sz), (dx, dy) => {
+          const a = (Math.atan2(dy, dx) - off + TAU * 2) % TAU;
+          star(x, y, dx * R * k, dy * R * k, c1, 2.6, { drag: k, size: 2.3, color2: c2, changeT: 0.45 + (a / TAU) * 1.4, glitter: 0.1 });
+        });
+      },
+    },
+    fish: {
+      label: 'Fish', icon: '🐟',
+      fn(x, y, sz, c1) {
+        // A small break whose stars become wriggling go-getters.
+        const swim = (p) => { for (let i = 0; i < 2; i++) star(p.x, p.y, p.vx * 0.4 + rand(-40, 40) * U, p.vy * 0.4 + rand(-40, 40) * U, '#fff1c8', rand(1.3, 1.9), { drag: 0.9, grav: 0.25, size: 1.6, wig: 2600, tail: 0.6, glitter: 0.3, L: p.L }); };
+        const R = R0() * sz * 0.8, k = 1.5;
+        sphere(cnt(36 * sz), (dx, dy) => star(x, y, dx * R * k, dy * R * k, c1, rand(0.55, 0.7), { drag: k, size: 2.4, onDeath: swim }));
+      },
+    },
+    timerain: {
+      label: 'Time rain', icon: '🌧️',
+      fn(x, y, sz) {
+        const R = R0() * sz * 0.9, k = 1.4;
+        const tick = (p) => { if (Math.random() < 0.4) { crackleBurst(p.x, p.y); Sound.crackle(pan(p.x)); } };
+        sphere(cnt(70 * sz), (dx, dy) => star(x, y, dx * R * k, dy * R * k, '#ffd27a', rand(2.6, 3.4), { drag: k, grav: 0.35, size: 1.4, wig: 900, glitter: 0.9, gcol: '#ffe7b0', tail: 0.5, onDeath: tick }));
+      },
+    },
+    senrin: {
+      label: 'Senrin', icon: '✨',
+      fn(x, y, sz) {
+        // "A thousand flowers": the shell scatters little pellets that pop, one after another, into tiny chrysanthemums.
+        const col = Math.random() < 0.6 ? '#fff4e0' : '#ffd27a';
+        const bloom = (p) => {
+          sphere(cnt(14), (dx, dy) => star(p.x, p.y, dx * 70 * U, dy * 70 * U, col, rand(0.7, 0.95), { drag: 2.4, size: 1.6, glitter: 0.6, gcol: '#ffe7b0', L: p.L }));
+          flash(p.x, p.y, col, 0.3); Sound.pop(pan(p.x));
+        };
+        const R = R0() * sz, k = 1.5;
+        sphere(Math.max(10, Math.round(28 * sz * Q().count)), (dx, dy) => star(x, y, dx * R * k * rand(0.5, 1), dy * R * k * rand(0.5, 1), '#ffcf85', rand(0.45, 1.25), { drag: k, size: 1.2, onDeath: bloom }));
+      },
+    },
+    shellofshells: {
+      label: 'Shell of shells', icon: '💐',
+      fn(x, y, sz, c1, c2) {
+        const kind = Math.random() < 0.35 ? 'spider' : 'peony';
+        const sub = (p) => {
+          if (kind === 'spider') for (let i = 0; i < 12; i++) { const a = (i / 12) * TAU; star(p.x, p.y, Math.cos(a) * 160 * U, Math.sin(a) * 160 * U, '#ffd27a', 0.9, { drag: 1.6, grav: 0.3, size: 1.5, tail: 0.6, L: p.L }); }
+          else sphere(cnt(22), (dx, dy) => star(p.x, p.y, dx * 110 * U, dy * 110 * U, p.color, rand(0.9, 1.15), { drag: 2, size: 2, L: p.L }));
+          flash(p.x, p.y, p.color, 0.45); Sound.pop(pan(p.x));
+        };
+        const R = R0() * sz * 0.75, k = 1.5, n = Math.max(8, Math.round(13 * Math.sqrt(sz) * Q().count));
+        sphere(n, (dx, dy) => star(x, y, dx * R * k, dy * R * k, Math.random() < 0.5 ? c1 : c2, rand(0.55, 0.75), { drag: k, size: 1.4, onDeath: sub }));
+      },
+    },
+    multibreak: {
+      label: 'Multi-break', icon: '🎆',
+      fn(x, y, sz, c1, c2) {
+        // A huge flash, then breaks climbing one after another, then a curtain of silver rain (Del Vicario 16").
+        addLight('#ffffff', 1.4);
+        const breaks = Math.max(3, Math.round(4 + 2 * sz));
+        for (let i = 0; i < breaks; i++) {
+          after(0.35 + i * 0.32, () => {
+            const bx = x + rand(-0.5, 0.5) * R0() * sz, by = y - i * R0() * 0.18 + rand(-20, 20) * U, col = i % 2 ? c1 : c2;
+            flash(bx, by, col, 0.6); Sound.pop(pan(bx));
+            layers(bx, by, sz * 0.45, [{ n: 40, col, life: 1.2, drag: 1.7, size: 2.2, glitter: 0.2 }]);
+          });
+        }
+        after(0.35 + breaks * 0.32, () => {
+          layers(x, y - breaks * R0() * 0.09, sz, [{ n: 120, col: '#e8ecff', life: 3.6, drag: 1.4, grav: 1, size: 1.6, glitter: 1.2, gcol: '#ffffff', tail: 0.6, fade: 0.55 }]);
+          addLight('#e8ecff', sz);
+        });
+      },
+    },
+    spider: {
+      label: 'Spider', icon: '🕷️',
+      fn(x, y, sz) {
+        const R = R0() * sz * 1.2, n = Math.max(24, Math.round(46 * Q().count * Math.sqrt(sz))), col = Math.random() < 0.5 ? '#fff2d0' : '#ffd27a', off = Math.random() * TAU;
+        for (let i = 0; i < n; i++) {
+          const a = off + (i / n) * TAU + rand(-0.04, 0.04), v = R * 1.1 * rand(0.92, 1.05);
+          star(x, y, Math.cos(a) * v, Math.sin(a) * v, col, rand(1.6, 1.9), { drag: 1, grav: 0.22, size: 1.6, tail: 0.9, fade: 0.4 });
+        }
+      },
+    },
+    rondelle: {
+      label: 'Rondelle', icon: '💥',
+      fn(x, y, sz) {
+        // A flat ring of salute pellets that bang one after another round the ring (single or spiral).
+        const n = Math.max(8, Math.round(12 * Math.sqrt(sz))), R = R0() * sz * 0.85, sq = rand(0.25, 0.5), tilt = rand(-0.3, 0.3), spiral = Math.random() < 0.4;
+        const bang = (p) => { flash(p.x, p.y, '#ffffff', 0.5); crackleBurst(p.x, p.y); crackleBurst(p.x, p.y); Sound.pop(pan(p.x)); if (Math.random() < 0.3) Sound.bang(pan(p.x)); };
+        const pts = [];
+        for (let i = 0; i < n; i++) { const a = (i / n) * TAU, r = spiral ? R * (0.45 + 0.55 * i / n) : R; pts.push([Math.cos(a) * r, Math.sin(a) * r * sq]); }
+        rotate(pts, tilt).forEach((p, i) => star(x, y, p[0] * 1.8, p[1] * 1.8, '#fff4e0', 0.45 + (i / n) * 1.3, { drag: 1.8, grav: 0.2, size: 1.6, flicker: false, onDeath: bang }));
+      },
+    },
+    barrel: {
+      label: 'Barrel', icon: '🛢️',
+      fn(x, y, sz, c1, c2) {
+        // Stars laid on a cylinder, seen tilted.
+        const R = R0() * sz * 0.8, rows = 5, per = cnt(18 * Math.sqrt(sz)), tilt = rand(-0.6, 0.6), pts = [];
+        for (let r = 0; r < rows; r++) { const h = (r / (rows - 1)) * 2 - 1; for (let i = 0; i < per; i++) { const a = (i / per) * TAU; pts.push([Math.cos(a) * R, h * R * 0.75 + Math.sin(a) * R * 0.22]); } }
+        shape(x, y, rotate(pts, tilt), (p) => (p[1] < 0 ? c1 : c2), { drag: 1.6, life: 1.9, size: 2.3 });
+      },
+    },
+    sunflower: {
+      label: 'Sunflower', icon: '🌻',
+      fn(x, y, sz, c1) {
+        // Ring stars whose trails curl the same way, so the break seems to spin like a wheel.
+        const R = R0() * sz * 0.85, k = 1.4, n = cnt(48 * Math.sqrt(sz)), dir = Math.random() < 0.5 ? 1 : -1;
+        for (let i = 0; i < n; i++) { const a = (i / n) * TAU; star(x, y, Math.cos(a) * R * k, Math.sin(a) * R * k, '#ffcf6b', 2, { drag: k, grav: 0.4, size: 2, tail: 0.8, swirl: dir * 1.6, glitter: 0.5 }); }
+        sphere(cnt(26), (dx, dy) => star(x, y, dx * R * 0.35 * k, dy * R * 0.35 * k, c1, 1.4, { drag: k, size: 2.4 }));
+      },
+    },
+    bouquet: {
+      label: 'Bouquet', icon: '💮',
+      fn(x, y, sz, c1, c2) {
+        // Three effects in one break: a strobing pistil, a crossette petal and a brocade ring.
+        layers(x, y, sz, [{ r: 0.35, n: 30, col: '#f4f6ff', life: 1.8, strobe: 10, grav: 0.5 }]);
+        TYPES.crossette.fn(x, y, sz * 0.8, c1);
+        layers(x, y, sz, [{ r: 1.05, n: 60, col: '#ffcf6b', life: 2.2, glitter: 1, gcol: '#ffd98a', ring: { squash: rand(0.35, 0.7) } }]);
+      },
+    },
+    twotone: {
+      label: 'Two-tone', icon: '🔮',
+      fn(x, y, sz) {
+        const R = R0() * sz, k = 1.5, head = palette === PALETTES.classic ? '#8a7bff' : color();
+        sphere(cnt(95 * sz), (dx, dy) => star(x, y, dx * R * k, dy * R * k, head, rand(1.8, 2.2), { drag: k, size: 2.4, glitter: 1.2, gcol: '#ffcf6b', fade: 0.45 }));
+      },
+    },
+    doublering: {
+      label: 'Double ring', icon: '🪐',
+      fn(x, y, sz, c1, c2) {
+        if (c2 === c1) c2 = '#5ff0ff';
+        const tilt = rand(0, TAU), sq = rand(0.28, 0.45);
+        if (Math.random() < 0.3) layers(x, y, sz, [0.5, 0.8, 1.1].map((r, i) => ({ r, n: 46, col: i % 2 ? c2 : c1, life: 1.7, size: 2.3, ring: { squash: sq, tilt } })));
+        else layers(x, y, sz, [{ n: 60, col: c1, life: 1.8, size: 2.4, ring: { squash: sq, tilt } }, { n: 60, col: c2, life: 1.8, size: 2.4, ring: { squash: sq, tilt: tilt + Math.PI / 2 } }]);
+      },
+    },
+    whistle: {
+      label: 'Whistler', icon: '🎶', whistle: true,
+      fn(x, y, sz, c1, c2) {
+        const sub = (p) => { sphere(cnt(20), (dx, dy) => star(p.x, p.y, dx * 95 * U, dy * 95 * U, p.color, rand(0.9, 1.2), { drag: 2, size: 2, L: p.L })); flash(p.x, p.y, p.color, 0.4); Sound.pop(pan(p.x)); };
+        const R = R0() * sz * 0.7, k = 1.5, n = Math.max(6, Math.round(8 * Math.sqrt(sz) * Q().count));
+        sphere(n, (dx, dy) => star(x, y, dx * R * k, dy * R * k, Math.random() < 0.5 ? c1 : c2, rand(0.5, 0.8), { drag: k, size: 1.6, onDeath: sub }));
+      },
+    },
+    // ---- Picture shells (research/fireworks-videos/PROMPT-flags.md): stars fly to a flag's or an animal's points,
+    // hold the picture for a moment, then droop and fade. Real fireworks can't draw these; drones do in real shows.
+    flagindia: {
+      label: 'India flag', icon: '🇮🇳',
+      fn(x, y, sz) {
+        const pts = flagIndiaPts(sz);
+        let k = 0;
+        shape(x, y, pts.map((p) => [p[0], p[1]]), () => pts[k++][2], { drag: 2.4, life: 3.4, hold: 1.8, grav: 0.55, size: 2.3 });
+        addLight('#ff9933', 0.8); addLight('#2fd25a', 0.6);
+      },
+    },
+    tiger: {
+      label: 'Tiger', icon: '🐯',
+      fn(x, y, sz) {
+        tigerCinema(x, y, sz, null);
+        addLight('#ff8a2b', 0.9);
+      },
+    },
+    india: {
+      label: 'India', icon: '🐅',
+      fn(x, y, sz) { countryShow(x, y, sz, flagIndiaPts(sz), 'tiger'); }, // the tricolour, then the Bengal tiger
+    },
+    bangladesh: { label: 'Bangladesh', icon: '🐅', fn(x, y, sz) { countryShow(x, y, sz, flagPts('bangladesh', sz), 'tiger'); } }, // the Bengal tiger
+    usa: { label: 'USA', icon: '🦅', fn(x, y, sz) { countryShow(x, y, sz, flagPts('usa', sz), 'eagle'); } }, // the bald eagle
+    uk: { label: 'UK', icon: '🦁', fn(x, y, sz) { countryShow(x, y, sz, flagPts('uk', sz), 'lion'); } }, // the lion
+    china: { label: 'China', icon: '🐼', fn(x, y, sz) { countryShow(x, y, sz, flagPts('china', sz), 'panda'); } }, // the giant panda
+    brazil: { label: 'Brazil', icon: '🐆', fn(x, y, sz) { countryShow(x, y, sz, flagPts('brazil', sz), 'jaguar'); } }, // the jaguar
+    grandshow: {
+      label: 'Grand show', icon: '🎇',
+      fn(x, y, sz, c1, c2) {
+        // The opening shell breaks where it was sent; the show director takes it from there.
+        TYPES.peony.fn(x, y, sz * 0.8, c1, c2);
+        if (gameTime >= directorUntil) directShow({ len: 15 }); // fits a 30 s shared video; taps mid-show add a shell, not a show
+      },
+    },
+    salute: {
+      label: 'Salute', icon: '💥',
+      fn(x, y, sz) {
+        // A white flash, a bang and a shockwave ring: no colour, all light and sound.
+        flash(x, y, '#ffffff', 1.6 * sz); addLight('#ffffff', 2.2 * sz);
+        const n = cnt(36);
+        for (let i = 0; i < n; i++) { const a = (i / n) * TAU, v = 420 * U * sz; star(x, y, Math.cos(a) * v, Math.sin(a) * v * 0.9, '#ffffff', 0.32, { drag: 3.2, grav: 0, size: 1.6, flicker: false }); }
+        for (let i = 0; i < 6; i++) crackleBurst(x + rand(-30, 30) * U, y + rand(-20, 20) * U);
+        Sound.bang(pan(x)); Sound.thump(pan(x));
+        shake = Math.max(shake, 0.35 * sz); buzz(50);
       },
     },
     heart: {
@@ -891,15 +1436,25 @@
     bomb: 5, laddi: 5, mine: 5, shell: 5, basket: 5, multishot: 5,
     cake: 10, rocketcombo: 10, finale: 25, sutli: 5, twosound: 3,
     // The Sivakasi crackers: gems since the Hazaar ladi became the Premium one (Build 31).
+    fancake: 10, minerow: 10, chrysline: 10, cometchain: 5, cometburst: 5, silvertower: 5, starwheel: 5, kingsalute: 5, // the real-show pieces
+    singleshot: 1, chakri: 1, firecracker: 1, popper: 1, smoke: 1, snake: 1, // 1 gem: note shower, rang pencil, flower pot, anar, bijili, kuruvi and the sparkler stay free
     anilvedi: 2, // the Sivakasi Premium five (PREMIUM_ITEMS) have no gem price: they are Premium's, with one free try each
   };
   // The Sky list mirrors the Ground one: three Premium shells (a crown, one free try each, like PREMIUM_ITEMS) and four
   // that cost gems, seen right after Random and Peony; the classics after them stay free, so the sky is still where
   // everyone starts. A Premium shell has no gem price (the crown and the gem badge share a corner).
-  const PREMIUM_SHELLS = new Set(['peacock', 'butterfly', 'wand']);
-  const SHELL_GEM_COST = { heart: 3, kamuro: 3, star: 2, smile: 2 };
-  const DOCK_ORDER = ['random', 'peony', 'peacock', 'butterfly', 'wand', 'heart', 'kamuro', 'star', 'smile', 'chrysanthemum', 'willow', 'palm', 'ring', 'crossette', 'crackle', 'strobe', 'horsetail', 'kaleido'];
-  const WEIGHTS = { peony: 3, chrysanthemum: 3, willow: 2, palm: 2, ring: 2, crossette: 2, crackle: 2, strobe: 1.4, horsetail: 1.4, kamuro: 1.6, kaleido: 2, heart: 0.6, star: 0.6, butterfly: 0.5, peacock: 0.8, wand: 0.5, smile: 0.3 };
+  // The real-show kings (research/fireworks-videos) join them: King willow, Multi-break, Shell of shells and Ghost.
+  const PREMIUM_SHELLS = new Set(['grandshow', 'peacock', 'butterfly', 'wand', 'kingwillow', 'multibreak', 'shellofshells', 'ghost']);
+  const SHELL_GEM_COST = { heart: 3, kamuro: 3, star: 2, smile: 2, dahlia: 2, brocade: 3, senrin: 3, spider: 2, rondelle: 3,
+    pistil: 2, doublepetal: 2, colorchange: 3, fish: 2, timerain: 3, barrel: 2, sunflower: 3, bouquet: 3, twotone: 2, doublering: 2, whistle: 2, flagindia: 2, tiger: 2, india: 3, bangladesh: 3, usa: 3, uk: 3, china: 3, brazil: 3,
+    willow: 1, palm: 1, crossette: 1, crackle: 1, horsetail: 1, kaleido: 1 }; // 1 gem: Random, Peony, Chrysanthemum, Ring and Strobe stay free
+  // Random and Peony, then the Premium shells, then every gem shell (the real-show ones among them), then the free classics.
+  const DOCK_ORDER = ['random', 'peony', 'grandshow', 'peacock', 'butterfly', 'wand', 'kingwillow', 'multibreak', 'shellofshells', 'ghost', 'heart', 'kamuro', 'star', 'smile',
+    'dahlia', 'brocade', 'senrin', 'spider', 'rondelle', 'pistil', 'doublepetal', 'colorchange', 'fish', 'timerain', 'barrel', 'sunflower', 'bouquet', 'twotone', 'doublering', 'whistle', 'flagindia', 'tiger', 'india', 'bangladesh', 'usa', 'uk', 'china', 'brazil',
+    'willow', 'palm', 'crossette', 'crackle', 'horsetail', 'kaleido', 'chrysanthemum', 'ring', 'strobe'];
+  const WEIGHTS = { peony: 3, chrysanthemum: 3, willow: 2, palm: 2, ring: 2, crossette: 2, crackle: 2, strobe: 1.4, horsetail: 1.4, kamuro: 1.6, kaleido: 2, heart: 0.6, star: 0.6, butterfly: 0.5, peacock: 0.8, wand: 0.5, smile: 0.3,
+    dahlia: 1, pistil: 1.2, doublepetal: 1.2, brocade: 1, kingwillow: 0.5, colorchange: 1, ghost: 0.5, fish: 0.8, timerain: 0.8, senrin: 0.9,
+    shellofshells: 0.5, multibreak: 0.4, spider: 0.8, rondelle: 0.6, barrel: 0.6, sunflower: 0.8, bouquet: 0.8, twotone: 1, doublering: 0.9, whistle: 0.7 };
   // Dock artwork (assets/crackers/<name>.webp, .jpg fallback). Crackers without artwork keep their drawn icon.
   const CRACKER_ART = {
     flowerpot: 'flower-pot', anar: 'anar', fountain: 'fountain', chakri: 'ground-spinner', heli: 'chakra', rocket: 'rocket', rocketcombo: 'rocket-combo',
@@ -1015,6 +1570,7 @@
   const safeTop = () => parseFloat(document.documentElement.style.getPropertyValue('--safe-t')) || 0;
   const pan = (x) => (x / W) * 2 - 1;
 
+  const shellTally = {}; // shells sent up, by type (for the tests)
   function launchShell(o = {}) {
     // In play, shells come from taps, a ground show's crackers, or crackers the sparkler lit (no show of their own).
     if (mode === 'play' && !rush.on && !o.tap && !(runningGroundEffect === 'swept' || (runningGroundEffect && launch.sequence && launch.sequence.ground))) return;
@@ -1041,10 +1597,15 @@
       x: sx, y: sy, px: sx, py: sy, vx: (tx - sx) / t, vy, g, age: 0,
       type: o.type, size: sz * z, z, c1: o.c1, c2: o.c2, text: o.text, textH: o.textH, hold: o.hold, user: !!o.user,
       img: o.img, r: o.r, L: o.L || 0, aim: o.aim, tint: !!o.tint,
+      // How it rises: 'gold' sparks (default), a fat white 'comet' head with a brocade trail, or a 'crackle' tail.
+      lift: o.lift || (TYPES[o.type] && TYPES[o.type].lift) || 'gold',
+      // A dark beat at the top before the break (not in Rocket Rush, whose rockets are aimed at targets).
+      apex: rush.on || o.type === 'text' || o.type === 'photo' || o.fast ? 0 : rand(0.12, 0.26),
       // In a 3D world a shell is pinned far out along its path, so it keeps its place in the sky as you look around.
       an: o.an !== undefined ? o.an : w3dShown() ? anchorAt(tx, ty, 150) : null,
     });
-    Sound.lift(pan(sx), t, o.whistle);
+    shellTally[o.type || 'random'] = (shellTally[o.type || 'random'] || 0) + 1;
+    Sound.lift(pan(sx), t, o.whistle || !!(TYPES[o.type] && TYPES[o.type].whistle));
   }
 
   function burstShell(s) {
@@ -1057,13 +1618,15 @@
     curAnchor = s.an || null;
     flash(s.x, s.y, c1, special ? 1.4 : s.size);
     curDim = Math.min(1, 0.45 + 0.55 * z);
+    if (!special) curHang = 1 + 0.3 * clamp(s.size - 1, 0, 1.5);
     if (s.type === 'text') textBurst(s.x, s.y, s);
     else if (s.type === 'photo') photoBurst(s.x, s.y, s);
     else TYPES[resolveType(s.type)].fn(s.x, s.y, s.size, c1, c2, s);
-    curDim = 1;
+    curDim = 1; curHang = 1;
+    if (!special) breakSmoke(s.x, s.y, s.size * z);
     addLight(c1, (special ? 1.5 : s.size) * z, s.x, s.y);
     // Heard a moment after it is seen: farther in 3D, higher on the flat sky (0.1 s low down, 0.4 s at the top).
-    Sound.burst(special ? 1.3 : s.size, pan(s.x), w3dShown() ? Math.max(0, (1 - z) * 0.6) : 0.1 + 0.3 * clamp(1 - s.y / (H * 0.6), 0, 1));
+    Sound.burst(special ? 1.3 : s.size, pan(s.x), w3dShown() ? Math.max(0, (1 - z) * 0.6) : 0.15 + 0.4 * clamp(1 - s.y / (H * 0.6), 0, 1) + 0.1 * clamp(s.size - 1, 0, 1));
     if (w3dShown()) w3d.startle(s.an ? { x: s.an.wx, y: s.an.wy, z: s.an.wz } : null, s.size, 'sky'); // a fist shaken at it from the forecourt
     curAnchor = was;
     onBurst(s);
@@ -1088,6 +1651,20 @@
       if (l.kind) { g.globalAlpha = 0.16 * Math.min(1, l.age / 0.25) * (1 - t) * l.dim; SPR.draw(g, l.s, SPR.SOFT, l.x, l.y, l.R); continue; }
       if (l.age < 0.06) { g.globalAlpha = 0.8 * (1 - l.age / 0.06) * l.dim; SPR.draw(g, white, SPR.SOFT, l.x, l.y, l.R * (0.3 + l.age * 3)); }
       g.globalAlpha = 0.4 * (1 - t) ** 2 * l.dim; SPR.draw(g, l.s, SPR.SOFT, l.x, l.y, l.R * (1 + 0.6 * t));
+    }
+    // On a water world each burst's light shimmers in the water below the landmark, squashed and dimmer.
+    const wy = world.waterY;
+    if (wy && !w3dShown() && Q().bloom) {
+      glx.save(); glx.beginPath(); glx.rect(0, wy, W, H - wy); glx.clip();
+      glx.translate(0, wy * 1.55); glx.scale(1, -0.55);
+      for (const l of fxLights) {
+        if (l.L || !l.kind || l.y > wy) continue;
+        const t = l.age / l.life;
+        glx.globalAlpha = 0.22 * Math.min(1, l.age / 0.25) * (1 - t) * l.dim * (0.8 + 0.2 * Math.random());
+        SPR.draw(glx, l.s, SPR.SOFT, l.x, l.y, l.R * 0.8);
+        glowUsed = true;
+      }
+      glx.restore();
     }
     glx.globalAlpha = ictx.globalAlpha = 1;
     glx.globalCompositeOperation = ictx.globalCompositeOperation = 'source-over';
@@ -1557,7 +2134,7 @@
   const COMBOS = [[20, 'Legendary!'], [12, 'Sky on fire!'], [8, 'Spectacular!'], [5, 'Brilliant!'], [3, 'Triple!'], [2, 'Double!']];
   let showBest = 0, showBestTimer = 0;
   function onBurst(s) {
-    if (rush.on) { if (s.user) rushBurst(s); return; } // a Lantern Rush scores its own way
+    if (rush.on) { if (s.user && rush.kind !== 'duel') rushBurst(s); return; } // a Lantern Rush scores its own way (a Sky Duel scores its taps)
     if (mode !== 'play') return;
     if (s.user) {
       combo = gameTime - lastUserBurst < 1.3 ? combo + 1 : 1;
@@ -1616,10 +2193,12 @@
       s.age += dt; s.px = s.x; s.py = s.y;
       s.vy += s.g * dt; s.x += s.vx * dt; s.y += s.vy * dt;
       curLayer = s.L; curAnchor = s.an || null;
-      if (Math.random() < 0.85) spark(s.x, s.y, rand(-25, 25) * U, rand(10, 70) * U, '#ffc987', rand(0.25, 0.55));
+      if (s.vy >= -25 * U) { // at the top: the lift goes dark for a moment, then it breaks
+        s.vy = -25 * U; s.vx = 0; s.y = s.py; s.x = s.px; s.dark = true;
+        if ((s.apex = (s.apex || 0) - dt) <= 0) { shells.splice(i, 1); curLayer = 0; curAnchor = null; burstShell(s); continue; }
+      } else liftTrail(s);
       curLayer = 0; curAnchor = null;
-      if (s.vy >= -25 * U) { shells.splice(i, 1); burstShell(s); }
-      else if (s.age > 8 || !Number.isFinite(s.y)) shells.splice(i, 1); // never in flight for ever, whatever launched it
+      if (s.age > 8 || !Number.isFinite(s.y)) shells.splice(i, 1); // never in flight for ever, whatever launched it
     }
 
     const glit = Q().glitter;
@@ -1632,9 +2211,16 @@
         release(starPool, p);
         continue;
       }
+      if (p.fol) {
+        const q = p.fol(p);
+        if (q) { p.px = p.x; p.py = p.y; p.vx = (q[0] - p.x) / dt; p.vy = (q[1] - p.y) / dt; p.x = q[0]; p.y = q[1]; continue; }
+        p.fol = null; p.vx *= 0.1; p.vy *= 0.1; p.hold = 0;
+      }
       const e = Math.exp(-p.k * dt);
       p.vx *= e; p.vy *= e;
       if (p.age > p.hold) p.vy += g * p.grav * p.sc * dt;
+      if (p.wig) { p.vx += (Math.random() - 0.5) * p.wig * dt; p.vy += (Math.random() - 0.5) * p.wig * dt; }
+      if (p.sw) { const c = Math.cos(p.sw * dt), si = Math.sin(p.sw * dt), vx = p.vx; p.vx = vx * c - p.vy * si; p.vy = vx * si + p.vy * c; }
       p.px = p.x; p.py = p.y;
       p.x += p.vx * dt; p.y += p.vy * dt;
       if (p.floorY && p.y > p.floorY) { p.y = p.floorY; p.vy *= -0.3; p.vx *= 0.75; }
@@ -1687,7 +2273,7 @@
       g.fillRect(0, 0, W, H);
     }
     // Low-alpha fades can leave faint residue; wipe once the sky has been empty for a moment.
-    if (!stars.length && !sparks.length && !shells.length && !smokes.length && !groundItems.length && !confettis.length && !pen) {
+    if (!stars.length && !sparks.length && !shells.length && !smokes.length && !hazes.length && !groundItems.length && !confettis.length && !pen) {
       idleClear += dt;
       if (idleClear > 1.5) { ctx.clearRect(0, 0, W, H); gctx.clearRect(0, 0, W, H); idleClear = 0; gfxBlank = true; }
     } else { idleClear = 0; gfxBlank = false; }
@@ -1806,11 +2392,12 @@
     for (const p of stars) {
       if (p.strobe && p.age > 0.35 && ((p.age * p.strobe) | 0) % 2) continue;
       let a = Math.min(1, (p.life - p.age) / (p.life * p.fade));
+      if (p.fl && a < 0.6) a *= 0.45 + 0.55 * Math.random();
       if (p.twinkle) a *= 0.6 + Math.random() * 0.4;
       if (p.sp && p.age > p.life * 0.72 && Math.random() < 0.35) a *= 0.15;
       a *= p.dim;
       if (p.rg !== SPR.gen) { p.rp = ramp(p.color, p.kind); p.rp2 = p.color2 ? ramp(p.color2, p.kind) : null; p.rg = SPR.gen; }
-      const rp = p.rp2 && p.age > p.life * p.change ? p.rp2 : p.rp;
+      const rp = p.rp2 && p.age > p.chT ? p.rp2 : p.rp;
       // Letters keep their own colour once lit (white-hot only at first): crisp, and fewer buckets in a card.
       const st = p.halo === 'core' && p.kind === 'k' ? (p.age < 0.05 ? 0 : 2) : Math.min(rp.length - 1, stageOf(p));
       const wc = p.halo === 'core' ? 4 + Math.round(p.w * 2) : wcOf(p.w);
@@ -1898,6 +2485,7 @@
     if (!rush.on) return requestFire();
     const [dx, dy] = layerShift(VIEW_DEPTH.fx);
     x -= dx; y -= dy;
+    if (rush.kind === 'duel') { if (duelHooks.tap) duelHooks.tap(x / W, clamp(y, H * 0.08, H * 0.72) / H); return; } // duel.js picks the shell
     // In a Lantern Rush the shell flies fast and bursts exactly where you tapped, so aiming is fair over every landmark.
     // The lanterns under your finger when you tap are the ones you aimed at: they still count when the shell bursts,
     // though they have floated on a little while it flew.
@@ -1937,6 +2525,7 @@
       const hit = hitItem((e.clientX - arPan.x), (e.clientY - arPan.y));
       pointer.kind = 'item';
       pointer.item = hit || placeItem(settings.item, (e.clientX - arPan.x), (e.clientY - arPan.y));
+      if (!pointer.item) { pointer = null; return; } // Pataka Chor: only the crackers you find go down
       pointer.fresh = !hit;
       pointer.oy = pointer.item.y - (e.clientY - arPan.y);
       return;
@@ -2047,7 +2636,7 @@
   }
   function lightFuse(it) {
     const sky = playMode === 'sky', label = sky ? (TYPES[it.shellId || settings.shell] || {}).label || 'Shell' : ITEMS[it.type].label;
-    const cost = premium.active ? 0 : sky ? SHELL_GEM_COST[it.shellId || settings.shell] || 0 : GEM_COST[it.type] || 0;
+    const cost = premium.active || chor.on ? 0 : sky ? SHELL_GEM_COST[it.shellId || settings.shell] || 0 : GEM_COST[it.type] || 0;
     if (cost > gems()) { if (!lighter.need) lighter.need = { cost, label }; return; } // short of gems: the sheet opens on release
     // A Premium cracker or shell a free player lights uses its free try; with none left it stays unlit and the offer
     // opens on release.
@@ -2328,6 +2917,34 @@
       heart() { const pts = [[20,31],[12,22],[10,15],[15,11],[20,15],[25,11],[30,15],[28,22]]; for (let i = 0; i < pts.length; i++) streak(pts[i][0], pts[i][1], pts[(i + 1) % pts.length][0], pts[(i + 1) % pts.length][1], '#ff5fa2', 1.5); pts.forEach(([x, y]) => drawSpark(x, y, 1.8, '#ff5fa2')); },
       star() { for (let i = 0; i < 5; i++) { const a = -Math.PI / 2 + i * TAU / 5; streak(20, 20, 20 + Math.cos(a) * 14, 20 + Math.sin(a) * 14, '#ffd36b', 1.6); } drawSpark(20, 20, 2.3, '#fff4e0'); },
       smile() { this.ring(); drawSpark(16, 17, 1.7, '#fff4e0'); drawSpark(24, 17, 1.7, '#fff4e0'); streak(14, 24, 26, 24, '#ffd36b', 1.3); },
+      dahlia() { for (let i = 0; i < 9; i++) { const a = i / 9 * TAU; comet(20, 20, 20 + Math.cos(a) * 13, 20 + Math.sin(a) * 13, '#ff5f7a'); } },
+      pistil() { burst(20, 20, 15, 18, ['#f2f4ff', '#dfe6ff']); burst(20, 20, 6, 10, ['#ff5fa2', '#ff8ac0'], { w: 1.2 }); },
+      doublepetal() { burst(20, 20, 15, 20, ['#ffd36b']); burst(20, 20, 10, 14, ['#5ff0ff'], { w: 1 }); burst(20, 20, 5, 8, ['#ff5fa2'], { w: 0.9 }); },
+      brocade() { for (let i = 0; i < 13; i++) { const a = -Math.PI + i / 12 * Math.PI; streak(20, 15, 20 + Math.cos(a) * 15, 15 + Math.sin(a) * 6 + 14, '#ffcf6b', 1.4, 0.95); drawSpark(20 + Math.cos(a) * 15, 15 + Math.sin(a) * 6 + 14, 1.4, '#ff3b3b'); } },
+      kingwillow() { for (let i = 0; i < 17; i++) { const a = -Math.PI + i / 16 * Math.PI; streak(20, 11, 20 + Math.cos(a) * 17, 13 + Math.sin(a) * 6 + 18, '#ffb54a', 1.3, 0.9); } drawSpark(20, 11, 2.6, '#fff4e0'); },
+      colorchange() { burst(20, 20, 14, 16, ['#ffcf55', '#33ff88'], { rot: 0.2 }); },
+      ghost() { burst(20, 20, 14, 18, ['#ff5fa2', '#ff8ac0', '#b56bff', '#5ff0ff', '#4df29a', '#ffd36b']); },
+      fish() { for (let i = 0; i < 6; i++) { const x = 9 + i * 4.5, y = 12 + (i % 3) * 7; streak(x, y, x + 4, y + 3 * Math.sin(i), '#fff1c8', 1.2); drawSpark(x + 4, y + 3 * Math.sin(i), 1.5, '#ffd36b'); } },
+      timerain() { for (let i = 0; i < 14; i++) { const x = 7 + (i * 9) % 27, y = 8 + (i * 13) % 24; streak(x, y, x + 2, y + 5, '#ffd27a', 1, 0.8); } },
+      senrin() { for (const [x, y] of [[12, 12], [27, 13], [18, 22], [30, 26], [10, 28], [22, 31]]) burst(x, y, 4, 7, ['#fff4e0', '#ffd27a'], { w: 0.7 }); },
+      shellofshells() { for (const [x, y, c] of [[20, 10, '#ff5fa2'], [11, 18, '#ffd36b'], [29, 18, '#5ff0ff'], [14, 29, '#4df29a'], [26, 29, '#b56bff']]) burst(x, y, 5, 8, [c], { w: 0.8 }); },
+      multibreak() { for (const [x, y, r, c] of [[20, 31, 4, '#ff5fa2'], [20, 23, 5, '#ffd36b'], [20, 14, 6, '#5ff0ff']]) burst(x, y, r, 8, [c], { w: 0.8 }); for (let i = 0; i < 8; i++) streak(10 + i * 3, 6, 10 + i * 3, 12, '#e8ecff', 0.8, 0.6); },
+      spider() { for (let i = 0; i < 24; i++) { const a = i / 24 * TAU; streak(20, 20, 20 + Math.cos(a) * 17, 20 + Math.sin(a) * 17, '#fff2d0', 0.8, 0.9); } },
+      rondelle() { for (let i = 0; i < 10; i++) { const a = i / 10 * TAU; drawSpark(20 + Math.cos(a) * 14, 20 + Math.sin(a) * 5, i < 6 ? 2.6 : 1.2, '#ffffff', i < 6 ? 1 : 0.5); } },
+      barrel() { for (let r = 0; r < 4; r++) for (let i = 0; i < 9; i++) { const a = i / 9 * TAU; drawSpark(20 + Math.cos(a) * 11, 9 + r * 7 + Math.sin(a) * 2.5, 1.3, r < 2 ? '#ff5fa2' : '#5ff0ff', 0.9); } },
+      sunflower() { for (let i = 0; i < 12; i++) { const a = i / 12 * TAU, b = a + 0.5; streak(20 + Math.cos(a) * 7, 20 + Math.sin(a) * 7, 20 + Math.cos(b) * 15, 20 + Math.sin(b) * 15, '#ffcf6b', 1.3); } drawSpark(20, 20, 3, '#ff8a2b'); },
+      bouquet() { this.ring(); burst(20, 20, 7, 4, ['#ff5fa2'], { w: 1.3 }); drawSpark(20, 20, 2.4, '#ffffff'); },
+      twotone() { for (let i = 0; i < 14; i++) { const a = i / 14 * TAU; streak(20 + Math.cos(a) * 5, 20 + Math.sin(a) * 5, 20 + Math.cos(a) * 13, 20 + Math.sin(a) * 13, '#ffcf6b', 1.2); drawSpark(20 + Math.cos(a) * 14, 20 + Math.sin(a) * 14, 1.8, '#8a7bff'); } },
+      doublering() { for (let i = 0; i < 16; i++) { const a = i / 16 * TAU; drawSpark(20 + Math.cos(a) * 14, 20 + Math.sin(a) * 6, 1.5, '#ffd36b'); drawSpark(20 + Math.sin(a) * 6, 20 + Math.cos(a) * 14, 1.5, '#5ff0ff'); } },
+      flagindia() { for (const [y, c] of [[12, '#ff9933'], [20, '#fff4e6'], [28, '#2fd25a']]) for (let x = 6; x <= 34; x += 3.5) drawSpark(x, y, 1.3, c, 0.9); for (let i = 0; i < 12; i++) { const a = i / 12 * TAU; drawSpark(20 + Math.cos(a) * 3.4, 20 + Math.sin(a) * 3.4, 0.9, '#5b7bff'); } },
+      tiger() { for (let i = 0; i < 22; i++) { const a = i / 22 * TAU; drawSpark(20 + Math.cos(a) * 14, 21 + Math.sin(a) * 12, 1.1, '#ff8a2b', 0.9); } drawSpark(14, 18, 1.6, '#c6ff4d'); drawSpark(26, 18, 1.6, '#c6ff4d'); drawSpark(20, 24, 1.6, '#ff5f7a'); for (const x of [16, 20, 24]) streak(x, 9, x, 13, '#ffd36b', 1.2); },
+      india() { this.flagindia(); for (let i = 0; i < 10; i++) { const a = i / 10 * TAU; drawSpark(31 + Math.cos(a) * 5, 9 + Math.sin(a) * 4.5, 0.9, '#ff8a2b'); } },
+      ...Object.fromEntries(['bangladesh', 'usa', 'uk', 'china', 'brazil'].map((id) => [id, () => { // a small waving flag
+        const F = FLAGS[id];
+        for (let r = 0; r < 6; r++) for (let c = 0; c < 9; c++) { const u = (c + 0.5) / 9, v = (r + 0.5) / 6; drawSpark(5 + u * 30, 20 - 16 * F.ar + v * 32 * F.ar, 1.25, F.at(u, v), 0.9); }
+      }])),
+      grandshow() { burst(11, 14, 7, 9, ['#ff3355']); burst(29, 14, 7, 9, ['#4a7dff']); burst(20, 25, 9, 12, ['#ffcf6b', '#fff4e0']); for (let i = 0; i < 5; i++) drawSpark(6 + i * 7, 36, 1.4, '#fff4e0', 0.8); },
+      whistle() { burst(20, 22, 11, 10, ['#ff5fa2', '#ffd36b']); for (let i = 0; i < 3; i++) streak(8 + i * 3, 6 + i * 2, 12 + i * 3, 4 + i * 2, '#fff4e0', 1, 0.7); },
     };
     (map[type] || map.random).call(map);
     return c.toDataURL();
@@ -2643,7 +3260,11 @@
     const was = nativeRecording;
     nativeRecording = event.detail;
     const active = nativeRecording === 'recording';
-    if (was === 'recording' && nativeRecording === 'idle') setTimeout(() => adBreak('break'), 800); // a video saved: a natural break
+    if (was === 'recording' && nativeRecording === 'idle') {
+      setTimeout(() => adBreak('break'), 800); // a video saved: a natural break
+      // A card's video is saved, however it was recorded (Save video, or the top Record/Share): its button says so
+      if (mode === 'card' && currentCard) { currentCard.saved = true; markSaved(); }
+    }
     document.body.classList.toggle('native-capture', active || nativeRecording === 'requesting');
     if (!active) endCardEl.hidden = true;
     document.body.classList.toggle('recording', active);
@@ -2764,7 +3385,11 @@
     if (c.o === 'birthday') return `🎂 Happy Birthday${name ? `, ${name}` : ''}! A fireworks wish from Light Up the Skies 🎆\nMake your own: ${link}${get}`;
     return `✨ ${c.h || 'A fireworks greeting'}${name ? ` for ${name}` : ''}, made with Light Up the Skies 🎆\nMake your own: ${link}${get}`;
   }
-  const shotCaption = () => `🪔 Happy Diwali! I lit up the sky with Light Up the Skies 🎆\nLight yours: ${appLink()}${getApp('share')}`;
+  const shotCaption = () => {
+    if (chor.on) return `🧨 I sneaked crackers past Seth-ji in Pataka Chor, Light Up the Skies 🎆\nCatch me if you can: ${appLink()}${getApp('chor')}`;
+    if (document.body.classList.contains('dueling')) return `⚔️ A Sky Duel in Light Up the Skies: whose fireworks win? 🎆\nDuel me: ${appLink()}${getApp('duel')}`;
+    return `🪔 Happy Diwali! I lit up the sky with Light Up the Skies 🎆\nLight yours: ${appLink()}${getApp('share')}`;
+  };
   let shotShare = null; // set while a single shot is being recorded for sharing
   function shareShow() {
     if (mode === 'card' && currentCard) { setShareCaption(cardCaption(currentCard)); recordShow(currentCard); return; }
@@ -2954,6 +3579,7 @@
     { id: 'getwell', label: '🌻 Get well', head: 'Get Well Soon', msg: 'Sending you healing wishes and a sky full of light. Get well soon!', theme: 'festive', show: ['butterfly', 'butterfly', 'peony', 'smile'] },
     { id: 'justbecause', label: '🌈 Just because', head: 'Thinking of You', msg: 'No reason at all. You just deserve a sky full of light.', theme: 'rainbow', show: ['butterfly', 'butterfly', 'kaleido', 'smile'] },
     { id: 'mothersday', label: '💐 Mother’s Day', head: 'Happy Mother’s Day', msg: 'Thank you for your endless love and care. Happy Mother’s Day!', theme: 'rose', show: ['heart', 'heart', 'peony', 'butterfly'], on: [5, 0, 2] },
+    { id: 'independence', label: '🇮🇳 Independence Day', head: 'Happy Independence Day', msg: 'Free skies, bright hearts. Jai Hind!', theme: 'tricolor', show: ['peony', 'willow', 'peony', 'star'], on: [8, 15] },
     { id: 'fathersday', label: '👔 Father’s Day', head: 'Happy Father’s Day', msg: 'Thank you for your strength, your guidance and your love. Happy Father’s Day!', theme: 'ocean', show: ['crossette', 'crossette', 'palm', 'star'], on: [6, 0, 3] },
     { id: 'friendship', label: '🤝 Friendship Day', head: 'Happy Friendship Day', msg: 'Thank you for being my friend through every up and down. Happy Friendship Day!', theme: 'rainbow', show: ['smile', 'smile', 'kaleido', 'heart'], on: [8, 0, 1] },
     { id: 'teachersday', label: '📚 Teachers’ Day', head: 'Happy Teachers’ Day', msg: 'Thank you for teaching, guiding and believing in us. Happy Teachers’ Day!', theme: 'gold', show: ['star', 'star', 'chrysanthemum', 'wand'], on: [9, 5] },
@@ -2964,7 +3590,7 @@
     { id: 'fest', label: 'Festivals', ids: ['diwali', 'holi', 'pongal', 'onam', 'eid', 'christmas', 'navratri', 'durgapuja', 'rakhi', 'bhaidooj', 'karwachauth', 'ganesh', 'newyear'] },
     { id: 'life', label: 'Life', ids: ['birthday', 'anniversary', 'wedding', 'baby', 'housewarming', 'graduation', 'newjob', 'retirement', 'goodluck'] },
     { id: 'feel', label: 'Feelings', ids: ['love', 'thanks', 'sorry', 'missyou', 'getwell', 'congrats', 'justbecause'] },
-    { id: 'days', label: 'Special days', ids: ['mothersday', 'fathersday', 'friendship', 'teachersday', 'valentine'] },
+    { id: 'days', label: 'Special days', ids: ['mothersday', 'fathersday', 'independence', 'friendship', 'teachersday', 'valentine'] },
   ];
   const SHOW_DEFAULT = ['chrysanthemum', 'chrysanthemum', 'kamuro', 'heart']; // Thank you, Custom and Light someone up
   const TEMPLATE_HEADS = new Set(OCCASIONS.map((o) => o.head));
@@ -4103,6 +4729,19 @@
       special: ['Just because you came to mind, and you made me smile.'],
     },
     // ----- Special days -----
+    independence: {
+      any: ['Free skies, bright hearts. Happy Independence Day! Jai Hind!'],
+      parent: ['Happy Independence Day! You taught me to love this country and stand tall.'],
+      grandparent: ['Happy Independence Day! Thank you for the stories of the freedom you lived through.'],
+      partner: ['Happy Independence Day! Free to dream, and dreaming with you.'],
+      child: ['Happy Independence Day! May you grow up proud, free and kind.'],
+      sibling: ['Happy Independence Day! Kites, flags and you: the best kind of holiday.'],
+      relative: ['Happy Independence Day to our whole family! Jai Hind!'],
+      friend: ['Happy Independence Day, friend! Here’s to freedom, and to us.'],
+      teacher: ['Happy Independence Day! Thank you for teaching us to think freely.'],
+      work: ['Happy Independence Day to the team! Proud to build with you.'],
+      special: ['Happy Independence Day! Free skies, bright hearts, and you in mine.'],
+    },
     mothersday: {
       any: ['To every mother who makes the world brighter: happy Mother’s Day.'],
       parent: [
@@ -5007,8 +5646,79 @@
     const { img, imgFull, friend, id, rel, pg, rm, ...data } = c; // the link carries the card, not this device's own bookkeeping (nor your reminder)
     if (rel) data.rel = rel; // Anyone adds nothing to the link
     if (pagesOf(c).length) data.pg = pagesOf(c); // nor does a card without reasons
-    return `${linkBase()}#card=${encodeCard(data)}${img ? `&photo=${toB64url(img)}` : ''}`;
+    return `${linkBase()}#card=${encodeCard(data)}${img ? `&photo=${toB64url(img)}` : ''}${watchCode(id)}`;
   }
+  // "Your sky was watched": a card you send carries a random code (&w=); opening it marks seen/<code> on Firebase with
+  // only the time (no names, no message), and the sender's phone checks its recent cards' codes now and then.
+  const SEEN_DB = window.LUTS_RTDB || 'https://light-up-the-skies-default-rtdb.asia-southeast1.firebasedatabase.app';
+  function watchCode(id) {
+    const e = id && myCards.find((x) => x.id === id && x.kind === 'made');
+    if (!e) return '';
+    if (!e.w) { const a = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789', r = crypto.getRandomValues(new Uint8Array(12)); e.w = Array.from(r, (n) => a[n % a.length]).join(''); saveCards(); }
+    return `&w=${e.w}&u=${myId()}`;
+  }
+  // Sky streaks with one person: this device's random id travels in your links (&u=) and in the watched mark, so each
+  // side learns the other's. A day counts once a sky passed between you and was opened, either way; days in a row
+  // (ending today or yesterday) make the streak, the same number on both phones. { id: { n: name, days: { day: 1 } } }
+  const PAIRS_KEY = 'luts:pairs';
+  const ID_RE = /^[A-Za-z0-9]{12}$/;
+  function myId() {
+    let id = '';
+    try { id = localStorage.getItem('luts:me') || ''; } catch (e) { /* ignore */ }
+    if (!ID_RE.test(id)) {
+      const a = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789', r = crypto.getRandomValues(new Uint8Array(12));
+      id = Array.from(r, (n) => a[n % a.length]).join('');
+      try { localStorage.setItem('luts:me', id); } catch (e) { /* ignore */ }
+    }
+    return id;
+  }
+  const loadPairs = () => { try { const p = JSON.parse(localStorage.getItem(PAIRS_KEY) || '{}'); return p && typeof p === 'object' ? p : {}; } catch (e) { return {}; } };
+  function pairDay(id, name, at = Date.now()) {
+    if (!ID_RE.test(id || '') || id === myId()) return 0;
+    const all = loadPairs(), p = all[id] || { n: '', days: {} };
+    if (name) p.n = clean(name, 20);
+    p.days[dayKey(new Date(at))] = 1;
+    const keys = Object.keys(p.days).sort();
+    for (const old of keys.slice(0, Math.max(0, keys.length - 400))) delete p.days[old];
+    all[id] = p;
+    try { localStorage.setItem(PAIRS_KEY, JSON.stringify(all)); } catch (e) { /* ignore */ }
+    return pairStreak(p);
+  }
+  function pairStreak(p) {
+    const d = new Date();
+    if (!p.days[dayKey(d)]) d.setDate(d.getDate() - 1);
+    let n = 0;
+    while (p.days[dayKey(d)]) { n++; d.setDate(d.getDate() - 1); }
+    return n;
+  }
+  // Streaks still alive, longest first: { n: name, streak, today: kept today }
+  const pairStreaks = () => Object.values(loadPairs()).map((p) => ({ n: p.n, streak: pairStreak(p), today: !!p.days[dayKey()] })).filter((p) => p.streak >= 2).map((p) => ({ ...p, n: p.n || 'a friend' })).sort((a, b) => b.streak - a.streak);
+  function markWatched() {
+    const m = location.hash.match(/[&#]w=([A-Za-z0-9]{12})\b/);
+    if (!m || myCards.some((e) => e.w === m[1])) return; // never your own card
+    const u = (location.hash.match(/[&#]u=([A-Za-z0-9]{12})\b/) || [])[1];
+    if (u && u !== myId()) { const n = pairDay(u, incoming && incoming.f); if (n >= 2) toast(`🔥 ${n} days in a row with ${clean(incoming.f, 20)}`, 3600); }
+    fetch(`${SEEN_DB}/seen/${m[1]}.json`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ at: Date.now(), ...(u ? { u: myId() } : {}) }) }).catch(() => {});
+  }
+  let seenAt = 0;
+  async function checkWatched() {
+    if (Date.now() - seenAt < 60e3) return;
+    seenAt = Date.now();
+    const wait = myCards.filter((e) => e.w && !e.seen && Date.now() - e.updated < 30 * 864e5).slice(0, 12);
+    for (const e of wait) {
+      try {
+        const v = await fetch(`${SEEN_DB}/seen/${e.w}.json`).then((r) => r.json());
+        if (!v || !Number.isFinite(v.at)) continue;
+        e.seen = v.at; saveCards();
+        const n = typeof v.u === 'string' ? pairDay(v.u, e.c.t, v.at) : 0;
+        toast(n >= 2 ? `💖 ${e.c.t} watched your sky · 🔥 ${n} days in a row` : `💖 ${e.c.t} watched your sky`, 4200);
+        celebrate();
+        if (!$('#cardsModal').hidden) renderCards();
+      } catch (err) { /* offline: next time */ }
+    }
+  }
+  setTimeout(checkWatched, 4000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkWatched(); });
 
   async function copyText(text) {
     try { await navigator.clipboard.writeText(text); return true; } catch (e) {
@@ -5100,6 +5810,7 @@
   // Android's Back button asks the page first (NativeBridge.BACK_PRESS_SCRIPT): inside the card creator it goes back a
   // step, like any step-by-step screen. Anything else (closing a panel, leaving the app) stays with the app shell.
   window.LUTSBack = () => {
+    if (window.PatakaChor && window.PatakaChor.back()) return true; // a throw being aimed, or a card open
     if (window.DiyaPath && window.DiyaPath.back()) return true;
     if (window.RocketRush && window.RocketRush.back()) return true;
     if (!$('#rewardsPanel').hidden) { closeRewards(); return true; }
@@ -5162,7 +5873,7 @@
     currentCard = c;
     mode = 'card';
     freeShowResources(false);
-    achieve('card');
+    if (window.LUTSGoals) LUTSGoals.tick('card'); achieve('card');
     document.body.classList.add('card-mode');
     $('#greeting').hidden = true;
     clearTimers('card');
@@ -5210,8 +5921,10 @@
     $('#gCard').classList.toggle('has-photo', !!c.img);
     // Your card: Save video leads. A card you received: Send one back leads, Save video moves to the tools.
     const received = !c.own && !joy, sender = clean(c.f, 20);
-    // Android records the full card through the shared top Record control.
-    $('#btnRecordCard').hidden = received || nativeRecorder;
+    // Save video leads on Android too: it replays the card under the screen recorder (recordShow), then the share sheet.
+    $('#btnRecordCard').hidden = received;
+    // Already recorded: the big gold button is done; a small "Record again" stays for a second take.
+    markSaved();
     $('#btnSendBack').hidden = !received;
     $('#btnSendBack').lastChild.textContent = c.lit ? (sender ? `Light ${sender} back` : 'Light someone up too')
       : sender ? `Send one back to ${sender}` : 'Make one of your own';
@@ -5346,6 +6059,11 @@
   // The first time a show plays, its video is made in the background, so Save video is instant afterwards (no second
   // wait while the show replays). Skipped on Low quality, where recording during play could slow the show down.
   let readyVideo = null; // { card, blob, name, type, want }
+  function markSaved() {
+    const b = $('#btnRecordCard'), saved = !!(currentCard && currentCard.saved);
+    b.classList.toggle('done', saved);
+    b.lastChild.textContent = saved ? '✓ Video saved · record again' : 'Save video';
+  }
   function playAndKeep(c) {
     readyVideo = null;
     if (nativeRecorder || !canRecord() || settings.quality === 'low') { playCard(c); return; }
@@ -5364,7 +6082,7 @@
     Sound.resume();
     setShareCaption(cardCaption(currentCard)); // the card's own greeting and the Play link, never the last show's
     const ready = readyVideo && readyVideo.card === currentCard ? readyVideo : null;
-    if (ready && ready.blob) { deliverVideo(ready.blob, ready.name, ready.type); return; }
+    if (ready && ready.blob) { currentCard.saved = true; markSaved(); deliverVideo(ready.blob, ready.name, ready.type); return; }
     if (ready && rec && rec.quiet) { ready.want = true; toast('Your video is almost ready…', 2200); return; }
     readyVideo = null;
     recordShow(currentCard);
@@ -5374,6 +6092,7 @@
   const REPLY = { o: 'thanks', h: 'Thank You', m: 'Thank you for the lovely wishes! Sending a sky full of light right back to you.', p: 'gold' };
   $('#btnSendBack').addEventListener('click', () => {
     const to = currentCard ? clean(currentCard.f, 20) : '';
+    if (window.LUTSGoals) LUTSGoals.tick('back');
     // A dedication someone sent you: light them back, through Light someone up, with Thank you picked.
     if (currentCard && currentCard.lit) { exitCardMode(); openLightBack(to); return; }
     if (currentCard && currentCard.got) markBack(currentCard.got); // My Cards shows it was lit back
@@ -5414,6 +6133,7 @@
   $('#btnOpenCard').addEventListener('click', () => {
     Sound.resume();
     hideOverlay($('#envelope'));
+    markWatched();
     playAndKeep(incoming);
   });
   window.addEventListener('hashchange', () => {
@@ -5473,6 +6193,29 @@
       window.open(playLink('viewer'), '_blank', 'noopener');
     }, true);
   }
+  // On an Android phone's browser, a challenge or room link opens the app itself (lightuptheskies://open?h=<the #…>,
+  // AndroidManifest), with Google Play as the fallback when it isn't installed. Anywhere else: Google Play.
+  // The website's way to a challenge: on an Android phone a card with Open in the app (browsers open apps only on a
+  // tap), elsewhere straight to Google Play.
+  function toApp(src) {
+    const url = appOrPlay(src);
+    if (!/^intent:/.test(url)) { location.href = url; return; }
+    let box = document.getElementById('openApp');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'openApp'; box.className = 'open-app';
+      box.innerHTML = '<div class="open-app-box"><b>You’re invited!</b><p>Open it in Light Up the Skies to play.</p><a class="btn primary" id="openAppGo">Open in the app</a><a class="btn ghost" id="openAppPlay">Get it on Google Play</a></div>';
+      document.body.append(box);
+    }
+    box.querySelector('#openAppGo').href = url;
+    box.querySelector('#openAppPlay').href = playLink(src);
+    box.hidden = false;
+  }
+  const appOrPlay = (src) => {
+    const h = location.hash.slice(1);
+    if (window.LUTSNative || !/Android/i.test(navigator.userAgent) || !h) return playLink(src);
+    return `intent://open?h=${encodeURIComponent(h)}#Intent;scheme=lightuptheskies;package=${window.LUTS_APP_ID || 'com.stalinpusparaj.lightuptheskies'};S.browser_fallback_url=${encodeURIComponent(playLink(src))};end`;
+  };
   const appLink = () => (window.LUTSNative && window.LUTSNative.shareBase) || (location.origin === 'null' ? '' : location.origin + location.pathname);
   const initials = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 
@@ -5506,7 +6249,7 @@
     const c = e && typeof e.id === 'string' && (e.kind === 'made' || e.kind === 'got') && e.c ? cardFields(e.c) : null;
     if (!c) return null;
     const created = Number.isFinite(e.created) ? e.created : Date.now();
-    return { id: e.id.slice(0, 32), kind: e.kind, created, updated: Number.isFinite(e.updated) ? e.updated : created, c, ...(e.back ? { back: 1 } : {}) };
+    return { id: e.id.slice(0, 32), kind: e.kind, created, updated: Number.isFinite(e.updated) ? e.updated : created, c, ...(e.back ? { back: 1 } : {}), ...(typeof e.w === 'string' && /^[A-Za-z0-9]{12}$/.test(e.w) ? { w: e.w } : {}), ...(Number.isFinite(e.seen) ? { seen: e.seen } : {}) };
   }
   let myCards = loadList(CARDS_KEY).map(readCardEntry).filter(Boolean).slice(0, CARDS_MAX);
   // Saved quietly. When the device is full, the older cards are kept without their photos.
@@ -5626,6 +6369,19 @@
     $('#cardsList').innerHTML = '';
     for (const e of rows) $('#cardsList').append(cardRow(e));
     renderCardsSoon();
+    renderPairs();
+  }
+  // Sky streaks: one chip each, "🔥 5 days with Amma", and a nudge on the ones not kept today
+  function renderPairs() {
+    const box = $('#cardsPairs'), list = pairStreaks();
+    box.hidden = !list.length;
+    box.innerHTML = '';
+    for (const p of list.slice(0, 6)) {
+      const b = document.createElement('span');
+      b.className = `pair-chip${p.today ? '' : ' risk'}`;
+      b.textContent = p.today ? `🔥 ${p.streak} days with ${p.n}` : `🔥 ${p.streak} days with ${p.n} · send one today`;
+      box.append(b);
+    }
   }
   // Upcoming: the nearest reminder within a week, with its card one tap from sending.
   function renderCardsSoon() {
@@ -5691,6 +6447,7 @@
     sm.append(occ, ` · ${niceDate(dayKey(new Date(e.created)))}`);
     const pages = pagesOf(c).length;
     if (pages) { const r = document.createElement('span'); r.className = 'row-pages'; r.textContent = pages === 1 ? '1 reason' : `${pages} reasons`; sm.append(' · ', r); }
+    if (e.seen) { const w = document.createElement('span'); w.className = 'card-badge seen'; w.textContent = '👀 Watched'; sm.append(' ', w); }
     if (e.back) { const lit = document.createElement('span'); lit.className = 'card-badge'; lit.textContent = 'Lit back'; sm.append(' ', lit); }
     const next = e.kind === 'made' && nextRemind(c);
     if (next) { const r = document.createElement('span'); r.className = 'row-remind'; r.textContent = `⏰ ${shortDate(next.date)}`; r.title = 'Reminder'; sm.append(' · ', r); }
@@ -5794,7 +6551,7 @@
   }
   // What a launch costs: one cracker, or every cracker waiting on the street for Burst all. Sparkler writing is free.
   function gemCost(s) {
-    if (!s || s.writing || premium.active) return 0; // Premium: every cracker is free
+    if (!s || s.writing || premium.active || chor.on) return 0; // Premium: every cracker is free; Pataka Chor's are found
     if (s.multi) return waitingItems().slice(0, burstMax()).reduce((sum, it) => sum + (GEM_COST[it.type] || 0), 0);
     if (s.ground || s.id.startsWith('item:')) return GEM_COST[s.type] || 0;
     return SHELL_GEM_COST[s.type] || 0;
@@ -6145,8 +6902,20 @@
     let lit = '';
     try { lit = joys.length ? joys.reduce((a, j) => (j.d > a ? j.d : a), '') : ''; } catch (e) { /* not loaded yet at start-up */ }
     // The evening reminder's words in the player's language (the phone falls back to English without them).
-    if (lit) lines.push(`#evening\t${lit}\t\t${inLang('🪔 Who will you light up tonight?')}\t${inLang('Write someone you love across the sky and keep your diya burning')}`);
-    else if (wallet.remind && wallet.day) lines.push(`#evening\t${wallet.day}\tgift\t${inLang('🎁 Your daily gems are waiting')}\t${inLang('Collect today’s gift and play the Daily Sky before midnight to keep your streak')}`);
+    // The evening reminder's hook changes each day (tomorrow's, since it is set tonight): the week's heist, the Daily
+    // Diya, the goals, the Love Sky Wall, Mela Night, and the player's own (their diya or their gift) in between.
+    const own = lit ? [inLang('🪔 Who will you light up tonight?'), inLang('Write someone you love across the sky and keep your diya burning')]
+      : [inLang('🎁 Your daily gems are waiting'), inLang('Collect today’s gift and play the Daily Sky before midnight to keep your streak')];
+    const tr = window.PatakaChor && PatakaChor.treasure ? PatakaChor.treasure() : null;
+    const hooks = [own,
+      tr ? [inLang(`${tr[2]} The ${tr[1]} is still in Seth-ji's vault`), inLang('Find the 9 key pieces and steal it before the week ends')] : own,
+      [inLang('🪔 Today’s Diya Path puzzle is waiting'), inLang('A new board for everyone. Can you solve it in fewer moves?')],
+      [inLang('🎯 Four new goals today'), inLang('Two are about the people you love. Claim the gems before midnight')],
+      [inLang('💌 Someone could use a love note tonight'), inLang('Pick a reason to love, light it in the sky, and send the video')],
+      [inLang('🛕 Fireworks with friends tonight?'), inLang('Up to four at a temple on Mela Night. Most hearts wins')]];
+    const t = new Date(Date.now() + 864e5), h = hooks[(t.getFullYear() * 400 + t.getMonth() * 31 + t.getDate()) % hooks.length];
+    if (lit) lines.push(`#evening\t${lit}\t\t${h[0]}\t${h[1]}`);
+    else if (wallet.remind && wallet.day) lines.push(`#evening\t${wallet.day}\tgift\t${h[0]}\t${h[1]}`);
     window.LUTSNative.reminders(lines.join('\n'));
   }
 
@@ -6603,7 +7372,7 @@
       festCheck(); // Choti Diwali's challenge
       $('#joyText').value = ''; $('#joyNote').value = '';
       const n = joyStreak();
-      achieve('joy1');
+      if (window.LUTSGoals) LUTSGoals.tick('joy'); achieve('joy1');
       festPoints('joy', 40);
       gratitudeLit();
       postScores(joyScores());
@@ -6647,11 +7416,11 @@
         const r = reasonOf(j);
         const blob = shareCard({ art: worldArt(j.w, 'assets/menu/daily-joy.jpg'), kicker: `${r.icon} Lit up in fireworks`, title: `${r.label} ${j.t}`, line: `Day ${day || joyStreak()} of lighting up someone` });
         if (!(await shareThing({ title: 'Light someone up', text, url, blob, name: 'light-someone-up.png', src: 'dedication' }))) return;
-        achieve('share');
+        if (window.LUTSGoals) LUTSGoals.tick('share'); achieve('share');
         joyGems(); // gems for sharing who you lit up, once a day
         return;
       }
-      achieve('share');
+      if (window.LUTSGoals) LUTSGoals.tick('share'); achieve('share');
       joyGems();
       countLight();
     } catch (e) { /* cancelled */ }
@@ -6678,6 +7447,9 @@
     if (!seen) setTimeout(() => { if (mode === 'play') openSheet($('#welcomeModal')); }, 900);
   }
   $('#btnWelcome').addEventListener('click', () => closeSheet($('#welcomeModal')));
+  $('#btnWelcomeX').addEventListener('click', () => closeSheet($('#welcomeModal')));
+  $('#btnTrialX').addEventListener('click', () => { $('#crackerTrial').hidden = true; });
+  $('#btnArSafeX').addEventListener('click', () => { $('#btnArSafeCancel').click(); $('#arSafety').hidden = true; });
   // A saved birthday today or tomorrow: a gentle pill on the play screen, once a day, straight to their video.
   let nudgeFriend = null, nudgeTimer = 0;
   function maybeNudge() {
@@ -6787,7 +7559,7 @@
   }
 
   function updateRush(dt) {
-    if (!rush.on) return;
+    if (!rush.on || rush.kind === 'duel') return; // a Sky Duel keeps its own clock (duel.js)
     rush.t += dt;
     if (rush.t < 0) {
       const c = Math.ceil(-rush.t);
@@ -6893,6 +7665,11 @@
   function endRush(quit) {
     if (!rush.on) return;
     rush.on = false;
+    if (rush.kind === 'duel') { // left mid-duel (Home, another mode) or duel.js ended it
+      document.body.classList.remove('rushing', 'dueling');
+      if (quit && duelHooks.quit) duelHooks.quit();
+      return;
+    }
     document.body.classList.remove('rushing');
     $('#rushHud').hidden = true;
     rush.live = []; rush.pops = [];
@@ -6913,7 +7690,7 @@
     if (r.kind === 'daily') festCheck(); // a festival night's challenge
     rush.last = r;
     if (r.kind === 'daily') { postScores(`daily:${r.score}`); festPoints('daily', starsFor(r.score) * 100); }
-    achieve('rush');
+    if (window.LUTSGoals) LUTSGoals.tick('rush'); achieve('rush');
     if (r.kind === 'daily' && dailyStreak(st) >= 7) achieve('daily7');
     const won = r.vs && r.score > r.vs.s;
     if (won) { achieve('rival'); festPoints('rival', 50); }
@@ -7000,6 +7777,7 @@
     if (src && !/play\.google\.com/.test(url || '')) { // apps put a separate url last, so it goes into the text, before the Play line
       text = `${url ? `${text}\n${url}` : text}${getApp(src)}`; url = '';
     }
+    if (window.LUTSGoals && src !== 'wall') LUTSGoals.tick('share');
     const file = blob ? new File([blob], name, { type: 'image/png' }) : null;
     if (file) setShareCaption(url ? `${text}\n${url}` : text); // the Android app sends it with the picture
     try {
@@ -7333,7 +8111,29 @@
     Object.assign(m, { x, y, vx: vx * k, vy: vy * k, col, r0: r0 * k, r1: r1 * k, life: Math.min(life, 3), a: a * curDim, age: 0, an: curAnchor });
     smokes.push(m);
   }
+  // Break smoke: drifting banks left by sky shells, nearly invisible until a later burst lights them in its colour.
+  const hazes = [];
+  function breakSmoke(x, y, sz) {
+    if (!Q().bloom || w3dShown()) return; // low tier and the 3D view (whose camera moves) go without
+    const n = Math.min(3, Math.round(1 + 1.5 * sz));
+    for (let i = 0; i < n && hazes.length < Q().smoke >> 1; i++) {
+      const R = R0() * sz;
+      hazes.push({ x: x + rand(-0.45, 0.45) * R, y: y + rand(-0.35, 0.45) * R, vx: rand(4, 14) * U, vy: rand(-6, 4) * U,
+        r0: R * 0.3, r1: R * rand(0.7, 1), age: 0, life: rand(6, 9), an: curAnchor });
+    }
+  }
+  const hazeSprites = {};
+  function hazeTint() { // the sky light's colour, in steps of 32 so the sprite cache stays small
+    const q = (v) => Math.min(255, (Math.round(v / 32) * 32) | 0);
+    const key = '#' + [q(gR), q(gG), q(gB)].map((v) => v.toString(16).padStart(2, '0')).join('');
+    return hazeSprites[key] || (hazeSprites[key] = smokeSprite(key));
+  }
   function updateSmoke(dt) {
+    for (let i = hazes.length - 1; i >= 0; i--) {
+      const h = hazes[i];
+      if ((h.age += dt) >= h.life) { hazes[i] = hazes[hazes.length - 1]; hazes.pop(); continue; }
+      h.x += h.vx * dt; h.y += h.vy * dt; h.vy *= Math.exp(-0.4 * dt);
+    }
     for (let i = smokes.length - 1; i >= 0; i--) {
       const m = smokes[i];
       m.age += dt;
@@ -7344,6 +8144,19 @@
     }
   }
   function drawSmoke() {
+    if (hazes.length) { // drawn every frame into the fading sky canvas: a per-frame alpha of target x fadeA settles at target
+      const fa = fadeA || 0.2, lit = Math.min(1, gI * 0.5 + gPop), tint = lit > 0.04 ? hazeTint() : null;
+      const [lx, ly] = gWX >= 0 ? [gWX, gWY] : [W / 2, H * 0.3], fall = (W * 0.45) ** 2;
+      for (const h of hazes) {
+        const t = h.age / h.life, r = h.r0 + (h.r1 - h.r0) * Math.sqrt(t), env = Math.min(1, h.age / 0.6) * (1 - t);
+        if (!tint) continue; // unlit smoke is lost in the night sky; only light makes it show
+        const d2 = (h.x - lx) ** 2 + (h.y - ly) ** 2, al = 0.2 * lit * env * fa / (1 + d2 / fall);
+        if (al < 0.002) continue;
+        ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = al;
+        ctx.drawImage(tint, h.x - r, h.y - r, r * 2, r * 2);
+      }
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    }
     gctx.globalCompositeOperation = 'source-over';
     for (const m of smokes) {
       const t = m.age / m.life, r = m.r0 + (m.r1 - m.r0) * Math.sqrt(t);
@@ -7509,7 +8322,7 @@
   // A cracker's sprite units to pixels at its depth (it.s): it.s * U * IS. IS draws every cracker (and its fuse, grab
   // area and the spots its pops come from) a quarter bigger than it used to be, for phones and a TV across the room,
   // while the distances its sparks fly (which use it.s alone) stay as they were and on screen.
-  const IS = 1.3 * 1.25;
+  const IS = 1.3 * 1.25 * 1.3; // and 30% more (Oct 2026): the crackers read better on a phone
   const groundItems = [];
   const GOLD = ['#ffcf6b', '#fff3d6', '#ffb347'];
   const ITEMS = {
@@ -7559,7 +8372,7 @@
       ignite(it) {
         const S = it.s * U * IS;
         it.fired = true;
-        launchShell({ sx: it.x, sy: it.y - 60 * S, x: it.x + rand(-80, 80) * U, y: rand(H * 0.12, H * 0.34), size: rand(0.55, 0.75), L: 1, whistle: true });
+        launchShell({ sx: it.x, sy: it.y - 60 * S, x: it.x + rand(-80, 80) * U, y: rand(H * 0.12, H * 0.34), size: rand(0.55, 0.75), L: 1, whistle: true, lift: Math.random() < 0.4 ? 'crackle' : undefined });
         smoke(it.x, it.y - 30 * S, 0, -20 * U, '#a9a4b8', 8 * U, 40 * U, 2.2, 0.08);
       },
       run() {},
@@ -7720,12 +8533,13 @@
       label: 'Star mine', fuse: 0.9, dur: 0.05, keep: 1.5,
       tip: [0, -24],
       ignite(it) {
-        const [tx, ty] = tipPos(it), n = cnt(55), c1 = color(), c2 = color();
+        const silver = Math.random() < 0.35; // sometimes a cone of silver comets whose glitter falls back (Lonestar)
+        const [tx, ty] = tipPos(it), n = cnt(silver ? 34 : 55), c1 = silver ? '#eef2ff' : color(), c2 = silver ? '#ffffff' : color();
         const crackleEnd = (p) => { curLayer = 1; crackleBurst(p.x, p.y); curLayer = 0; Sound.crackle(pan(p.x)); };
         for (let i = 0; i < n; i++) {
           const ang = -Math.PI / 2 + rand(-0.45, 0.45), v = rand(480, 820) * U * (0.8 + it.s * 0.25), c = i % 2 ? c1 : c2;
           star(tx, ty, Math.cos(ang) * v, Math.sin(ang) * v, c, rand(1.1, 1.6),
-            { drag: 1.1, grav: 1, size: 2.6, glitter: 0.5, gcol: c, onDeath: Math.random() < 0.3 ? crackleEnd : null });
+            { drag: 1.1, grav: 1, size: silver ? 3 : 2.6, glitter: silver ? 1.4 : 0.5, gcol: c, tail: silver ? 0.4 : 0, onDeath: Math.random() < 0.3 ? crackleEnd : null });
         }
         flash(tx, ty, c1, 0.9, gctx);
         for (let i = 0; i < 4; i++) smoke(tx, ty, rand(-30, 30) * U, -rand(30, 60) * U, '#8d8898', 10 * U, 45 * U, 2.4, 0.08);
@@ -7882,7 +8696,8 @@
         // A mortar: one big aerial shell, high and wide.
         const S = it.s * U * IS, mx = it.x, my = it.y - 44 * S;
         it.fired = true;
-        launchShell({ sx: mx, sy: my, x: mx + rand(-40, 40) * U, y: rand(H * 0.1, H * 0.22), size: rand(1.2, 1.45), type: pick(['chrysanthemum', 'peony', 'kamuro', 'willow']), L: 1 });
+        // (a tube carrying a chosen shell, as Pataka Chor's found sky shells do, sends up that one)
+        launchShell({ sx: mx, sy: my, x: mx + rand(-40, 40) * U, y: rand(H * 0.1, H * 0.22), size: rand(1.2, 1.45), type: it.shellId && TYPES[it.shellId] ? it.shellId : pick(['chrysanthemum', 'peony', 'kamuro', 'willow']), L: 1 });
         flash(mx, my, '#ffd9a0', 0.8, gctx);
         for (let i = 0; i < 6; i++) smoke(mx, my, rand(-30, 30) * U, -rand(30, 70) * U, '#8d8898', 10 * U, 50 * U, 2.6, 0.09);
         Sound.thump(pan(mx));
@@ -7958,7 +8773,7 @@
       },
     },
     finale: {
-      label: 'Grand finale', fuse: 0.8, dur: 5.2, keep: 1.2,
+      label: 'Grand finale', fuse: 0.8, dur: 6, keep: 1.2,
       tip: [0, -26],
       ignite() {},
       run(it, a) {
@@ -7975,9 +8790,195 @@
           if (i % 2 === 0) flash(it.x, it.y - 26 * S, '#ffd9a0', 0.3, gctx);
           Sound.thump(pan(it.x));
         }
+        if (!it.wall && a > total * 0.18 + 0.45) { // then a titanium wall: white salutes across the sky, left to right
+          it.wall = true;
+          for (let k = 0; k < 7; k++) after(k * 0.07, () => launchShell({ sx: it.x + rand(-14, 14) * S, sy: it.y - 26 * S, x: W * (0.12 + 0.76 * k / 6), y: H * rand(0.26, 0.32), exact: true, size: 0.55, type: 'salute', L: 1, fast: 1.6 }));
+        }
       },
     },
   });
+  // ---------- Real-show ground pieces (research/fireworks-videos: Malta, Lonestar, Yokohama, PGI) ----------
+  const COMET = (x, y, ang, v, col, o = {}) => star(x, y, Math.cos(ang) * v, Math.sin(ang) * v, col, o.life || rand(1.2, 1.5),
+    { drag: 0.6, grav: 1.1, size: o.size || 3.2, glitter: 1.3, gcol: o.gcol || '#ffe7b0', tail: 0.4, swirl: o.swirl || 0, onDeath: o.onDeath || null, floorY: o.floorY });
+  const FAN_PATTERNS = ['sweep', 'V', 'W', 'zigzag', 'heart'];
+  Object.assign(ITEMS, {
+    fancake: {
+      label: 'Fan cake', fuse: 0.6, dur: 3.2, keep: 1,
+      tip: [0, -26],
+      ignite(it) { it.pat = pick(FAN_PATTERNS); it.col = Math.random() < 0.5 ? '#eef2ff' : it.color; },
+      run(it, a) {
+        // Comets fired at fixed angles, one every 0.2 s, in a pattern: a sweep, a V, a W, a zig-zag or a heart.
+        const n = 14, want = Math.min(n, Math.floor(a / 0.2) + 1), [tx, ty] = tipPos(it), D = Math.PI / 180;
+        while (it.shots < want) {
+          const i = it.shots++, f = i / (n - 1), v = rand(560, 640) * U * (0.8 + it.s * 0.25);
+          const shot = (deg, sw) => { COMET(tx, ty, -Math.PI / 2 + deg * D, v, it.col, { swirl: sw }); flash(tx, ty, it.col, 0.25, gctx); };
+          curLayer = 1;
+          if (it.pat === 'sweep') shot(-60 + 120 * f);
+          else if (it.pat === 'V') { shot(-(10 + 50 * f)); shot(10 + 50 * f); }
+          else if (it.pat === 'W') shot([-55, -18, 18, 55][i % 4] + rand(-4, 4));
+          else if (it.pat === 'zigzag') shot((i % 2 ? 1 : -1) * (55 - 40 * f));
+          else { shot(-(15 + 30 * f), 1.1); shot(15 + 30 * f, -1.1); } // two mirrored fans that curl in: a heart
+          curLayer = 0;
+          if (i % 2 === 0) smoke(tx, ty, rand(-10, 10) * U, -rand(20, 45) * U, '#8d8898', 6 * U, 30 * U, 1.8, 0.07);
+          Sound.thump(pan(tx)); addLight(it.col, 0.4);
+        }
+      },
+    },
+    cometchain: {
+      label: 'Dancing comets', fuse: 0.5, dur: 2.6, keep: 1,
+      tip: [0, -24],
+      ignite(it) { it.ph = rand(0, TAU); },
+      run(it, a) {
+        // Comets in a quick sequence, each aimed a little further round and curling the other way: a snake in the sky.
+        const n = 12, want = Math.min(n, Math.floor(a / 0.15) + 1), [tx, ty] = tipPos(it);
+        while (it.shots < want) {
+          const i = it.shots++, ang = -Math.PI / 2 + Math.sin(it.ph + i * 0.7) * 0.85;
+          curLayer = 1; COMET(tx, ty, ang, rand(520, 600) * U * (0.8 + it.s * 0.25), i % 3 ? '#ffcf6b' : it.color, { swirl: i % 2 ? 1.6 : -1.6, size: 2.6 }); curLayer = 0;
+          Sound.pop(pan(tx));
+        }
+      },
+    },
+    silvertower: {
+      label: 'Silver tower', fuse: 0.5, dur: 6,
+      tip: [0, -30],
+      ignite(it) { Sound.hiss(it.dur, 4600, 0.2, pan(it.x)); },
+      run(it, a, dt) {
+        // A white-hot gerb three times the height of an anar, throwing silver arcs to the sides like a willow.
+        const k = Math.min(1, a / 0.5) * Math.min(1, (it.dur - a) / 1.2);
+        const [tx, ty] = tipPos(it), n = k * 560 * dt * Q().count;
+        for (let i = 0; i < n; i++) {
+          const ang = -Math.PI / 2 + rand(-0.13, 0.13), v = rand(700, 1150) * U * it.s * (0.6 + 0.4 * k);
+          star(tx, ty, Math.cos(ang) * v, Math.sin(ang) * v, Math.random() < 0.8 ? '#f4f6ff' : '#ffe7b0', rand(0.8, 1.4), { drag: 0.85, grav: 1.6, size: 1.3, glitter: 0.3, gcol: '#ffffff', floorY: it.y + 2 });
+        }
+        if (Math.random() < dt * 5 * k) {
+          const side = Math.random() < 0.5 ? -1 : 1, ang = -Math.PI / 2 + side * rand(0.9, 1.25);
+          curLayer = 1; COMET(tx, ty - 20 * U * it.s, ang, rand(380, 480) * U * it.s, '#eef2ff', { size: 2, life: 1.9, gcol: '#ffffff', floorY: it.y + 2 }); curLayer = 0;
+        }
+        glowAt(tx, ty, '#f4f6ff', 90 * U * it.s, 0.45 * k, 2.4);
+        addLight('#e8ecff', dt * 1.8 * k);
+      },
+    },
+    minerow: {
+      label: 'Mine row', fuse: 0.7, dur: 1.6, keep: 1.2,
+      tip: [0, -24],
+      ignite(it) { it.dir = Math.random() < 0.5 ? 1 : -1; },
+      run(it, a) {
+        // Five mines in a row, left to right (or back), each a cone of silver comets whose glitter falls back.
+        const want = Math.min(5, Math.floor(a / 0.25) + 1), S = it.s * U * IS, [, ty] = tipPos(it);
+        while (it.shots < want) {
+          const i = it.shots++, mx = it.x + it.dir * (i - 2) * 26 * S, n = cnt(16);
+          curLayer = 1;
+          for (let j = 0; j < n; j++) { const ang = -Math.PI / 2 + rand(-0.32, 0.32); COMET(mx, ty, ang, rand(500, 820) * U * (0.8 + it.s * 0.25), '#eef2ff', { size: 2.2, life: rand(1, 1.4), gcol: '#ffffff' }); }
+          flash(mx, ty, '#ffffff', 0.6, gctx); curLayer = 0;
+          for (let j = 0; j < 2; j++) smoke(mx, ty, rand(-20, 20) * U, -rand(30, 60) * U, '#8d8898', 10 * U, 45 * U, 2.4, 0.08);
+          Sound.thump(pan(mx)); addLight('#e8ecff', 0.8);
+        }
+      },
+    },
+    cometburst: {
+      label: 'Comet to star', fuse: 0.5, dur: 2.6, keep: 1,
+      tip: [0, -26],
+      ignite() {},
+      run(it, a) {
+        // White comets that turn, at the top, into a little burst of red or magenta stars.
+        const n = 6, want = Math.min(n, Math.floor(a / 0.4) + 1), [tx, ty] = tipPos(it);
+        const pop = (p) => { const c = Math.random() < 0.5 ? '#ff3355' : '#ff4fd8'; sphere(cnt(18), (dx, dy) => star(p.x, p.y, dx * 110 * U, dy * 110 * U, c, rand(0.9, 1.2), { drag: 2, size: 2.2, L: p.L })); flash(p.x, p.y, c, 0.45); Sound.pop(pan(p.x)); };
+        while (it.shots < want) {
+          it.shots++;
+          curLayer = 1; COMET(tx, ty, -Math.PI / 2 + rand(-0.25, 0.25), rand(620, 720) * U * (0.8 + it.s * 0.25), '#f4f6ff', { life: rand(0.95, 1.1), onDeath: pop }); curLayer = 0;
+          Sound.thump(pan(tx));
+        }
+      },
+    },
+    chrysline: {
+      label: 'Line of flowers', fuse: 0.6, dur: 0.4, keep: 1,
+      tip: [0, -26],
+      ignite(it) {
+        // Eight to ten little chrysanthemums breaking side by side at one height.
+        const n = 8 + ((Math.random() * 3) | 0), y = rand(H * 0.22, H * 0.32), S = it.s * U * IS, c = Math.random() < 0.6 ? '#ffb347' : color();
+        for (let i = 0; i < n; i++) launchShell({ sx: it.x, sy: it.y - 26 * S, x: W * (0.12 + 0.76 * i / (n - 1)), y, exact: true, size: 0.36, type: 'chrysanthemum', c1: c, L: 1 });
+        Sound.thump(pan(it.x)); flash(it.x, it.y - 26 * S, '#ffd9a0', 0.5, gctx);
+      },
+      run() {},
+    },
+    starwheel: {
+      label: 'Maltese wheel', fuse: 0.5, dur: 7, keep: 1,
+      tip: [0, -50],
+      ignite(it) { Sound.hiss(it.dur, 2200, 0.15, pan(it.x), { wobble: 5 }); },
+      run(it, a, dt) {
+        // A big wheel on a post with six star-fish arms, each spraying its own colour, changing as it turns.
+        it.rot += (2 + 9 * Math.min(1, a / 1)) * dt;
+        const S = it.s * U * IS, cx = it.x, cy = it.y - 50 * S, R = 20 * S;
+        for (let k = 0; k < 6; k++) {
+          const ang = it.rot + (k * TAU) / 6, ex = cx + Math.cos(ang) * R, ey = cy + Math.sin(ang) * R;
+          const col = palette[(k + ((a * 0.8) | 0)) % palette.length];
+          for (let i = 0; i < 2; i++) {
+            const d = ang + Math.PI / 2 + rand(-0.15, 0.15), v = rand(170, 330) * U * it.s;
+            star(ex, ey, Math.cos(d) * v, Math.sin(d) * v, Math.random() < 0.65 ? col : '#fff3d6', rand(0.4, 0.75), { drag: 1.3, grav: 1.2, size: 1.5, floorY: it.y + 3 });
+          }
+        }
+        glowAt(cx, cy, '#ffcf6b', 70 * U * it.s, 0.45);
+        addLight(palette[((a * 0.8) | 0) % palette.length], dt * 1.4);
+        if (!it.end && a >= it.dur - 0.06) { it.end = true; flash(cx, cy, '#ffffff', 0.8, gctx); sphere(cnt(40), (dx, dy) => star(cx, cy, dx * 200 * U, dy * 200 * U, '#ffd36b', rand(0.8, 1.2), { drag: 1.6, size: 1.8 })); Sound.pop(pan(cx)); }
+      },
+    },
+    kingsalute: {
+      label: 'King salute', fuse: 1.2, dur: 0.1, keep: 1,
+      tip: [0, -30],
+      ignite(it) {
+        // One shell, no colour: a flash that lights the whole sky and a bang that shakes it.
+        const S = it.s * U * IS;
+        launchShell({ sx: it.x, sy: it.y - 30 * S, x: it.x + rand(-40, 40) * U, y: H * rand(0.2, 0.28), size: 1.4, type: 'salute', L: 1, lift: 'crackle' });
+        smoke(it.x, it.y - 30 * S, 0, -20 * U, '#a9a4b8', 8 * U, 40 * U, 2.2, 0.08);
+        Sound.thump(pan(it.x));
+      },
+      run() {},
+    },
+  });
+  // ---------- Show director ----------
+  // A whole show from one Fire, built the way the six reference shows are (research/fireworks-videos): colour acts, a
+  // dark beat after each king, height layers (low comets and flowers, mid shells, high kings), mirrored and lined-up
+  // launch positions, a low piece followed by an aerial half a second later, and a finale that builds through gold
+  // kamuro and white senrin to a wall of salutes and one last king willow. Shells are the game's own (tap: true, not a
+  // player's, so no combos), scheduled with after() under the 'director' tag; the launch waits for directorUntil.
+  let directorUntil = 0;
+  const ACTS = [['#ff3355', '#ff8a8a'], ['#4a7dff', '#5ff0ff'], ['#ffcf6b', '#ffb347'], ['#33ff88', '#b6ff5f'], ['#b56bff', '#ff4fd8']];
+  const ACT_SHELLS = ['peony', 'doublepetal', 'pistil', 'dahlia', 'chrysanthemum', 'ring', 'doublering', 'crossette', 'brocade', 'palm', 'colorchange', 'sunflower'];
+  const LOW_SHELLS = ['spider', 'chrysanthemum', 'crackle', 'strobe'];
+  function directShow(o = {}) {
+    const len = o.len || 24, t0 = 0.6, actsEnd = len * 0.72;
+    const top = world.img && world.rect ? clamp(world.rect.roof - H * 0.08, H * 0.16, H * 0.42) : H * 0.42;
+    const band = (lo, hi) => H * 0.08 + rand(lo, hi) * (top - H * 0.08); // 0 = the top of the sky, 1 = just above the roofline
+    const X = [0.15, 0.32, 0.5, 0.68, 0.85];
+    const fire = (t, type, x, y, size, c1, c2, extra) => after(t, () => launchShell({ tap: true, type, x: W * x, y, size, c1, c2, exact: true, ...extra }), 'director');
+    const acts = [...ACTS].sort(() => Math.random() - 0.5).slice(0, 3);
+    let t = t0;
+    acts.forEach(([c1, c2], ai) => {
+      const end = t0 + ((ai + 1) / acts.length) * (actsEnd - t0);
+      const pool = [...ACT_SHELLS].sort(() => Math.random() - 0.5).slice(0, 3);
+      while (t < end) {
+        const kind = pick(['solo', 'mirror', 'line', 'sweep', 'pair', 'mirror', 'line']), type = pick(pool);
+        if (kind === 'solo') { fire(t, type, rand(0.3, 0.7), band(0, 0.25), 1.25, c1, c2); t += 1.9; } // a king, then a dark beat
+        else if (kind === 'mirror') { const d = rand(0.18, 0.3), y = band(0.2, 0.5); fire(t, type, 0.5 - d, y, 0.8, c1, c2); fire(t, type, 0.5 + d, y, 0.8, c1, c2); t += 1.1; }
+        else if (kind === 'line') { const y = band(0.25, 0.55); for (const x of X) fire(t, type, x, y, 0.6, c1, c2); t += 1.3; }
+        else if (kind === 'sweep') { const y = band(0.3, 0.6), back = Math.random() < 0.5; X.forEach((x, i) => fire(t + i * 0.16, type, back ? 1 - x : x, y, 0.6, c1, c2)); t += 1.4; }
+        else { const x = pick(X); fire(t, pick(LOW_SHELLS), x, band(0.75, 0.95), 0.5, c1, c2); fire(t + 0.5, type, x, band(0.05, 0.3), 1, c1, c2); t += 1.2; }
+      }
+    });
+    // The finale: gold kamuro across, a quickening build, white senrin, a wall of salutes, then the last king willow.
+    t = actsEnd;
+    X.forEach((x, i) => fire(t + i * 0.08, 'kamuro', x, band(0.1, 0.3), 1));
+    t += 1.6;
+    for (let i = 0; i < 12; i++) fire(t + i * (0.22 - i * 0.012), pick(ACT_SHELLS), rand(0.15, 0.85), band(0.1, 0.6), 0.7);
+    t += 2.2;
+    for (const x of [0.25, 0.5, 0.75]) fire(t, 'senrin', x, band(0.05, 0.25), 1, '#fff4e0');
+    t += 1.2;
+    X.forEach((x, i) => fire(t + i * 0.06, 'salute', x, band(0.35, 0.45), 0.6, null, null, { fast: 1.6 }));
+    t += 0.9;
+    fire(t, 'kingwillow', 0.5, band(0, 0.08), 1.3);
+    directorUntil = gameTime + t + 2;
+    return t + 6;
+  }
   // ---------- Sivakasi crackers ----------
   // Saravedi and Chorsa pop fast along the street. The single, double and seven shots throw their shots up one at a
   // time, in a beat you can count, and each bursts low over the street. Every pop and burst tears its paper casing
@@ -8000,7 +9001,7 @@
   tries.used = tries.used || {};
   const saveTries = () => { try { localStorage.setItem('luts:tries', JSON.stringify(tries)); } catch (e) { /* storage unavailable */ } };
   const isShellKey = (type) => typeof type === 'string' && type.startsWith('shell:');
-  const onTry = (type) => !premium.active && (isShellKey(type) ? PREMIUM_SHELLS.has(type.slice(6)) : PREMIUM_ITEMS.has(type)); // its lights come from the tries
+  const onTry = (type) => !premium.active && !chor.on && (isShellKey(type) ? PREMIUM_SHELLS.has(type.slice(6)) : PREMIUM_ITEMS.has(type)); // its lights come from the tries
   const crackerName = (type) => (isShellKey(type) ? TYPES[type.slice(6)] && shellLabel(type.slice(6)) : ITEMS[type] && ITEMS[type].label);
   const videoLight = (type) => tries.vday === dayKey() && tries.vfor === type;
   const tryLeft = (type) => !tries.used[type] || videoLight(type);
@@ -8555,6 +9556,19 @@
     state: () => ({ voices: Sound.voices ? Sound.voices.size : 0, cap: Sound.CAP, rapids: Sound.rapids.size, running: !!(Sound.ctx && Sound.ctx.state === 'running') }),
     bang: () => { const was = Sound.voices ? Sound.voices.size : 0; Sound.bang(0); return (Sound.voices ? Sound.voices.size : 0) > was; },
   };
+  // For the browser tests: fire a sky shell and read the realism engine (lift, apex beat, hang, colour change, smoke).
+  window.LUTSPyro = {
+    fire: (o) => launchShell({ tap: true, user: true, ...o }),
+    layers: (x, y, sz, list) => layers(x, y, sz, list),
+    state: () => ({
+      shells: shells.map((s) => ({ type: s.type, lift: s.lift, apex: s.apex, dark: !!s.dark, x: s.x, y: s.y })),
+      directorLeft: Math.max(0, directorUntil - gameTime), tally: { ...shellTally },
+      strokes: strokes.length,
+      trace: launch.sequence && launch.sequence.trace ? { i: launch.sequence.trace.i, done: launch.sequence.trace.done, of: strokes.length } : null,
+      hazes: hazes.length, waterY: world.waterY || 0, quality: settings.quality,
+      stars: stars.map((p) => ({ age: p.age, life: p.life, chT: p.chT, c2: !!p.color2, fl: p.fl })),
+    }),
+  };
   // For the browser tests: the fit, and how far each Sivakasi cracker on the street has got.
   window.LUTSFit = () => ({
     z: fit.z, target: fit.target, py: fit.py, byZoom: fitByZoom(), paper: confettis.length, W, H, U, top: fitTop(), t: gameTime,
@@ -8580,6 +9594,7 @@
     sutli: [15, 30], twosound: [9, 22], notes: [12, 16], pencil: [6, 50], hazaar: [22, 40],
   };
   const ITEM_ORDER = [...PREMIUM_FIRST, ...HOOKS, 'flowerpot', 'anar', ...SIVAKASI.filter((t) => !PREMIUM_ITEMS.has(t)), 'fountain', 'chakri', 'heli', 'rocket', 'rocketcombo', 'mine', 'multishot', 'roman', 'shell', 'cake', 'finale',
+    'fancake', 'minerow', 'cometchain', 'cometburst', 'chrysline', 'silvertower', 'starwheel', 'kingsalute',
     'basket', 'bomb', 'firecracker', 'laddi', 'sparkler', 'lantern', 'wheel', 'strobe', 'popper', 'smoke', 'snake'];
 
   // ---------- Confetti ----------
@@ -8682,6 +9697,7 @@
   const sortItems = () => groundItems.sort((a, b) => a.y - b.y);
   // world: a forecourt spot in metres ({ x, z }) for a 3D cracker placed out of view; (x, y) is then only its fallback.
   function placeItem(type, x, y, world) {
+    if (chor.on && !chor.placing && launch.state === 'READY') return null; // a launch re-places what is on the street
     if (!ITEMS[type]) type = 'flowerpot';
     const [px, py] = world && w3dShown() ? [x, y] : groundPoint(x, y);
     if (groundItems.length >= 22) {
@@ -8743,7 +9759,9 @@
     it.t = 0;
     queueBurstSync(); // one fewer waiting: Fire's label and Burst all's count follow
     atDepth(it, () => Sound.hiss(ITEMS[it.type].fuse + 0.1, 6000, 0.05, pan(it.x), { q: 0.4 }));
-    achieve('first');
+    if (window.LUTSGoals) LUTSGoals.tick('launch'); achieve('first');
+    // On a Pataka Chor street in a Mela Night race: the others (and anyone watching) see it go off too (rooms.js)
+    if (chor.on && it.an && window.PatakaChor && PatakaChor.onBang && !PatakaChor.quiet) PatakaChor.onBang(it.shellId ? `sky:${it.shellId}` : it.type, it.an.wx, it.an.wz);
     if (!tried.has(it.type)) {
       tried.add(it.type);
       try { localStorage.setItem('luts:tried', JSON.stringify([...tried])); } catch (e) { /* ignore */ }
@@ -8832,7 +9850,10 @@
     g.drawImage(img, -w / 2, -h, w, h);
     return true;
   }
+  // The real-show pieces stand on the street as the cracker they look like, until they have art of their own.
+  const LOOK = { fancake: 'cake', minerow: 'mine', cometchain: 'multishot', cometburst: 'roman', chrysline: 'shell', silvertower: 'fountain', starwheel: 'wheel', kingsalute: 'rocket' };
   function drawItemShape(g, type, S, it) {
+    type = LOOK[type] || type;
     const lit = it && it.lit, t = it ? it.t : 0;
     if (!(it && it.hy > 2)) {
       g.fillStyle = 'rgba(0,0,0,0.35)';
@@ -9489,14 +10510,14 @@
     drawConfetti();
   }
 
-  // Dock chips use the same drawings as the game.
-  function itemIcon(type) {
-    const c = document.createElement('canvas'), d = 2;
+  // Dock chips use the same drawings as the game (d: pixels per unit; Pataka Chor's shop draws them bigger, as pictures).
+  function itemIcon(type, d = 2) {
+    const c = document.createElement('canvas');
     c.width = c.height = 34 * d;
     const g = c.getContext('2d');
     g.scale(d, d);
     const S = { rocket: 0.42, roman: 0.62, laddi: 0.22, cake: 0.75, sparkler: 0.6, wheel: 0.52, lantern: 0.72, popper: 0.9, heli: 0.85,
-      anar: 0.82, fountain: 0.7, shell: 0.48, multishot: 0.7, firecracker: 0.9, rocketcombo: 0.48, finale: 0.6, saravedi: 0.17, sevenshot: 0.85, bijili: 1.3, lakshmivedi: 0.95, pencil: 0.58, sutli: 0.85, twosound: 1.05, hazaar: 0.135 }[type] || 0.95;
+      anar: 0.82, fountain: 0.7, shell: 0.48, multishot: 0.7, firecracker: 0.9, rocketcombo: 0.48, finale: 0.6, saravedi: 0.17, sevenshot: 0.85, bijili: 1.3, lakshmivedi: 0.95, pencil: 0.58, sutli: 0.85, twosound: 1.05, hazaar: 0.135 }[LOOK[type] || type] || 0.95;
     g.translate(type === 'hazaar' ? 12 : 17, type === 'laddi' || type === 'saravedi' ? 19 : type === 'hazaar' ? 31 : type === 'firecracker' || type === 'anilvedi' ? 24 : type === 'bijili' ? 22 : 30);
     drawItemShape(g, type, S, null);
     return c.toDataURL();
@@ -9506,7 +10527,7 @@
     if (launch.state !== 'READY') return;
     clearStreet();
     if (w3dShown()) placeInView3d(settings.item, 0.5, 0.5); // in 3D: the middle of the ground in view
-    else placeItem(settings.item, ...streetSpot(0.5, 0.58));
+    else placeItem(settings.item, ...streetSpot(0.5, 0.8));
   }
   // 3D: a cracker placed without a tap (a chip, Burst all's next one, the Sky tube) stands on the forecourt the player
   // can see, at fractions across (fx) and down (fy, 0 far, 1 near) that visible ground. When they have looked away from
@@ -9574,7 +10595,7 @@
       placeInView3d(settings.item, clamp(0.5 + r * Math.cos(a), 0, 1), clamp(0.5 + r * 0.8 * Math.sin(a), 0, 1));
       return;
     }
-    placeItem(settings.item, W * (0.14 + 0.72 * ((n * 0.618 + 0.5) % 1)), floorTop() + floorH() * (0.42 + 0.3 * ((n * 0.37) % 1)));
+    placeItem(settings.item, W * (0.14 + 0.72 * ((n * 0.618 + 0.5) % 1)), floorTop() + floorH() * (0.64 + 0.26 * ((n * 0.37) % 1)));
   }
   // The dock under the street grows and shrinks (Burst all appears, the list wraps): the street follows its edge, so the
   // waiting crackers keep their places on it and the landmark stays at its far side.
@@ -9696,6 +10717,8 @@
   });
   // Pays a launch's gems up front (refunded when it does not start), or opens the gem sheet when they fall short.
   function launchWithGems(s) {
+    // Pataka Chor: Fire lights the crackers you found and put down; with none on the street there is nothing to light.
+    if (chor.on && s.id && s.id.startsWith('item:') && !waitingItems().length) { toast('Find a cracker first, then put it down'); return false; }
     // Premium crackers and shells a free player lights here use their free tries (once the launch starts); one with
     // none left opens the offer instead.
     const items = s.id && s.id.startsWith('item:') ? (s.multi ? [...new Set(waitingItems().slice(0, burstMax()).map((it) => it.type))] : [s.type])
@@ -10101,6 +11124,24 @@
     syncDrawingAction();
   }
   // Turns the written light into a burst of fireworks.
+  function startTrace() {
+    pctx.clearRect(0, 0, W, H);
+    const dur = clamp(strokes.length / 250, 1.6, 3.5);
+    Sound.sparklerStart();
+    return { i: 1, f: 1, rate: strokes.length / dur, done: false };
+  }
+  function traceStep(t, dt) {
+    t.f += t.rate * dt;
+    const to = Math.min(strokes.length, Math.floor(t.f));
+    for (; t.i < to; t.i++) {
+      const a = strokes[t.i - 1], b = strokes[t.i];
+      if (a.id === b.id) paintSegment(a.x, a.y, b.x, b.y, b.c);
+    }
+    const head = strokes[Math.min(strokes.length, t.i) - 1];
+    penSparks(head.x, head.y, 4);
+    glowAt(head.x, head.y, '#fff1c8', 22 * U, 0.8, 2.4);
+    if (t.i >= strokes.length) { t.done = true; Sound.sparklerStop(); }
+  }
   function lightUpWriting() {
     if (!launch.sequence || launch.sequence.id !== 'spark:writing') return;
     if (!strokes.length) { toast('Write something first, then light it up'); return; }
@@ -10358,6 +11399,11 @@
     }).catch(() => { board.data[k] = 'error'; }).then(() => { if (`${board.cat}:${board.span}` === k) renderBoard(); });
   }
   $('#btnBoard').addEventListener('click', () => { openSheet($('#boardModal')); loadBoard(); });
+  // The home screen's Challenges row
+  $('#btnChBoards').addEventListener('click', () => $('#btnBoard').click());
+  $('#btnChRace').addEventListener('click', () => { Sound.resume(); if (window.PatakaChor) PatakaChor.raceFromHome(); });
+  $('#btnChRocket').addEventListener('click', () => { Sound.resume(); if (window.RocketRush) RocketRush.open(true); });
+  $('#btnChDiya').addEventListener('click', () => { Sound.resume(); if (window.DiyaPath) DiyaPath.open(true); });
   document.querySelectorAll('.board-cat').forEach((b) => b.addEventListener('click', () => {
     board.cat = b.dataset.cat; loadBoard();
     b.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: reduceMotion() ? 'auto' : 'smooth' });
@@ -10769,6 +11815,7 @@
   }
 
   function drawWorldSky(g) {
+    world.waterY = 0;
     const c = world.cfg, img = world.img, iw = img.naturalWidth, ih = img.naturalHeight, [fx, fy] = c.focus;
     g.save();
     g.imageSmoothingEnabled = true;
@@ -10807,6 +11854,7 @@
     // Below the landmark, a dimmed mirror image reads as water or a wet street under the controls.
     const base = dy + dh;
     if (base < H - 0.5) {
+      world.waterY = base; // burst lights mirror here (drawLights)
       g.save();
       g.beginPath(); g.rect(0, base, W, H - base); g.clip();
       g.translate(0, base * 2); g.scale(1, -1);
@@ -10885,7 +11933,7 @@
     document.querySelectorAll('.scene-fade').forEach((f) => f.remove()); // rapid switching: one fade at a time
     const fades = arOn || reduceMotion() || w3dWanted() ? [] : [snapshotLayer(skyC), snapshotLayer(moonC), snapshotLayer(cityC)];
     world.id = cfg.id; world.cfg = cfg; world.img = img;
-    world.blur = world.masked = null; world.maskKey = '';
+    world.blur = world.masked = null; world.maskKey = ''; world.waterY = 0;
     drawSky(); drawCity(); drawFloor();
     syncLiveSky();
     if (mode !== 'card' && mode !== 'envelope') palette = basePalette();
@@ -11533,7 +12581,9 @@
     const cost = gemCost(s);
     fire.textContent = busy ? labels[launch.state] : fireAll() ? fireAllLabel() : `Fire ${s.label}${cost ? ` · 💎${cost}` : usedSelection && !paid && points >= 50 ? ' · 50 pts' : ''}`;
     fire.disabled = busy || rewardBusy || sweepBusy();
-    fire.hidden = playMode === 'spark' || sparklerFires();
+    fire.hidden = playMode === 'spark' || (sparklerFires() && !chor.on); // Pataka Chor keeps Fire beside the sparkler
+    // Pataka Chor lights only what you found and put down: say how many are ready, not the shop's chosen cracker.
+    if (chor.on && !busy) { const n = waitingItems().length; fire.textContent = n ? `Fire · ${n}` : 'Find a cracker'; fire.classList.toggle('chor-idle', !n); }
     for (const b of document.querySelectorAll('#shellList button, #groundList button')) {
       const id = b.dataset.shell ? `shell:${b.dataset.shell}` : `item:${b.dataset.item}`;
       let status = b.querySelector('.trial-status');
@@ -11563,6 +12613,15 @@
   }
   function requestFire() {
     if (mode !== 'play' || rush.on || paused || document.hidden || rewardBusy || launch.state !== 'READY') return;
+    // Pataka Chor: Fire lights the crackers waiting on the street (and riding the donkey) where they are, as the
+    // sparkler does: found crackers, so no gems and no launch, and a cracker on the move keeps moving.
+    if (chor.on) {
+      const waiting = waitingItems();
+      if (!waiting.length) { toast('Find a cracker first, then put it down'); return; }
+      for (const it of waiting) { lightItem(it); it.swept = true; }
+      festLaunched(waiting.map((it) => it.type));
+      return;
+    }
     if (sweepBusy()) return; // what the sparkler lit is still going: Fire would clear it and fire it again
     const s = fireAll() ? allSelection() : selection();
     if (s.writing && !strokes.length) { toast('Write something first, then light it up'); return; }
@@ -11617,14 +12676,14 @@
         return it;
       });
       try { localStorage.setItem('luts:tried', JSON.stringify([...tried])); } catch (e) { /* ignore */ }
-      achieve('first');
+      if (window.LUTSGoals) LUTSGoals.tick('launch'); achieve('first');
     } else if (seq.launcher) {
       // A sky shell leaves from its tube on the ground: the very tube that was waiting, just where it stood.
       seq.item = seq.tube;
       groundItems.push(seq.item);
       [seq.sx, seq.sy] = tipPos(seq.item); seq.x = seq.sx; seq.y = seq.sy;
     } else if (seq.id.startsWith('item:')) {
-      seq.item = placeItem(seq.type, ...(seq.placed ? [seq.placed.x, seq.placed.y] : streetSpot(0.5, 0.58)));
+      seq.item = placeItem(seq.type, ...(seq.placed ? [seq.placed.x, seq.placed.y] : streetSpot(0.5, 0.8)));
       seq.item.dur = showDur(seq.item);
       if (seq.ground) armItem(seq.item);
       else { [seq.sx, seq.sy] = tipPos(seq.item); seq.x = seq.sx; seq.y = seq.sy; }
@@ -11640,8 +12699,8 @@
     while (stars.length) release(starPool, stars.pop());
     while (sparks.length) release(sparkPool, sparks.pop());
     while (smokes.length) release(smokePool, smokes.pop());
-    confettis.length = 0; groundItems.length = 0;
-    timers.length = 0; portrait = null; shake = shakeX = shakeY = 0;
+    confettis.length = 0; groundItems.length = 0; hazes.length = 0;
+    timers.length = 0; directorUntil = 0; portrait = null; shake = shakeX = shakeY = 0;
     for (const g of [ctx, glx, gctx, ictx, flightCtx]) g.clearRect(0, 0, W, H);
     fxLights.length = glowQ.length = 0;
   }
@@ -11692,7 +12751,8 @@
   // A show is stopped after 19 s in case something hangs; a long cracker in it (a Hazaar ladi) gets its whole run first.
   function showLimit(s) {
     const its = s.items || (s.item ? [s.item] : []);
-    return Math.max(19, ...its.map((it) => ITEMS[it.type].fuse + it.dur + (ITEMS[it.type].keep ?? 0.7) + 6)); // + the cascade and the fade
+    return Math.max(19, s.age + Math.max(0, directorUntil - gameTime) + 6, // a directed show runs as long as it is scheduled
+      ...its.map((it) => ITEMS[it.type].fuse + it.dur + (ITEMS[it.type].keep ?? 0.7) + 6)); // + the cascade and the fade
   }
   function updateLaunch(dt) {
     const s = launch.sequence;
@@ -11700,7 +12760,11 @@
     s.age += dt; s.since += dt;
     const change = (state) => { s.since = 0; launch.setState(state); };
     if (s.age > showLimit(s) + (s.hold || 0)) { abortLaunch(); toast('Launch ended. You can choose another cracker.'); return; }
-    if (launch.state === 'IGNITING' && s.since >= 0.6) {
+    // A recorded sparkler drawing (Share or Record) is first written again, start to end, by a moving sparkler: the
+    // video shows the signature being made, then it lights.
+    if (launch.state === 'IGNITING' && s.writing && s.trace === undefined) s.trace = (shotShare || (rec && !rec.quiet) || nativeRecording === 'recording') && strokes.length > 1 ? startTrace() : null;
+    if (s.trace && !s.trace.done) traceStep(s.trace, dt);
+    if (launch.state === 'IGNITING' && s.since >= 0.6 && (!s.trace || s.trace.done)) {
       if (s.ground || s.writing) {
         if (s.writing) lightUpWriting();
         change('BURSTING');
@@ -11741,7 +12805,7 @@
         if (it && (it.done || (it.lit && it.t >= it.dur))) change('FADING'); // not during its fuse (the Sutli's stalls)
       } else if (s.since >= 0.65) change('FADING');
     }
-    if (launch.state === 'FADING' && !stars.length && !sparks.length && !smokes.length && !confettis.length && !shells.length && s.since >= 0.8) {
+    if (launch.state === 'FADING' && !stars.length && !sparks.length && !smokes.length && !confettis.length && !shells.length && s.since >= 0.8 && gameTime >= directorUntil) {
       s.returnFrom = { ...camera };
       // Sky crackers end on Happy Diwali; the camera holds until it has faded, then glides back down.
       if (!s.ground && !s.writing && mode === 'play' && !rush.on) s.hold = showDiwaliReveal();
@@ -12022,6 +13086,13 @@
     w3dFailed = true;
     if (save) { settings.scene3d = false; saveSettings(); }
     syncViewToggle();
+    // Pataka Chor is 3D only: rather than wait on "loading" for ever (every button dead), it ends and you're home.
+    if (chor.on && window.PatakaChor) {
+      try { window.PatakaChor.stop(); } catch (e) { /* already ending */ }
+      if (mode !== 'intro') $('#btnHome').click();
+      toast('The street needs a rest. Open it again in a moment', 3600);
+      return;
+    }
     toast(message, 3600);
   }
   // A lost GPU context (or an error drawing the scene): the game carries on over the flat background and the scene is
@@ -12040,7 +13111,8 @@
     if (!w3d) return;
     // The horizon sits a band above the controls: enough forecourt for the crackers, the rest is landmark and sky.
     // While a show plays on a weak phone (lite3d) the scene renders at about half the pixels.
-    w3d.resize(W, H, DPR * (measuredTier ? 1 : 0.85) * (lite3d ? 0.6 : 1), (groundBottom() - H * 0.16) / H);
+    // Pataka Chor is about the street, not the sky: its horizon sits higher, so the street fills half the screen.
+    w3d.resize(W, H, DPR * (measuredTier ? 1 : 0.85) * (lite3d ? 0.6 : 1), chor.on ? 0.46 : (groundBottom() - H * 0.16) / H);
     if (w3dShown()) renderWorld3d();
   }
   // Sky mode: the chosen shell stands on the ground in its tube, ready for Fire or the sparkler (not in Lantern Rush or room AR, which places its own).
@@ -12049,6 +13121,7 @@
     clearStreet();
     // at the bottom of the ground, nearest you (in 3D, on the forecourt in view)
     const tube = w3dShown() ? placeInView3d('shell', 0.5, 1) : placeItem('shell', W * 0.5, groundBottom() - 4);
+    if (!tube) return; // (the 3D view not ready to place it yet: the next ready state does)
     tube.launcher = true; tube.shellId = settings.shell;
     // On the flat picture the bottom of the ground is the controls' edge: the tube stands lower still, just above
     // the world chip, in front of the hint, nearest you.
@@ -12112,7 +13185,9 @@
       w3d.setTilt(s && !s.ground && !s.writing && !reduceMotion() ? camera.travel : 0); // weak phones too: a show there is lite3d
       w3d.setMaxPitch(playMode === 'ground' ? 0.1 : 0.42); // in Ground mode you can't look so far up that the crackers go
       w3d.setFolk(playMode === 'ground', launch.state !== 'READY', groundItems); // the dog and the old man: Ground only, round its crackers
-      w3dMoved = w3d.update(dt);
+      if (chor.on && window.PatakaChor) window.PatakaChor.walk(dt); // Pataka Chor's step, in this frame, before it eases and draws
+      w3dMoved = w3d.update(dt) || w3d.version !== w3dVersion; // (a step on foot moves the camera without easing: it counts)
+      if (chor.on && window.PatakaChor) window.PatakaChor.place(); // its labels, from this frame's camera
     } catch (error) { world3dLost(error); return; }
     if (w3d.version !== w3dVersion) { w3dVersion = w3d.version; followAnchors(); }
     if (tubeCheck && !w3dMoved && !look3d) { tubeCheck = false; keepTubeInView(); }
@@ -12358,11 +13433,196 @@
     try { n = (+localStorage.getItem('luts:puzzles-done') || 0) + 1; localStorage.setItem('luts:puzzles-done', String(n)); } catch (e) { n = PUZZLE_AD_GRACE + 1; }
     if (n > PUZZLE_AD_GRACE) adBreak('break');
   }
+  // ----- Sky Duel (duel.js): a 30-second show on a landmark's sky, scored by the crowd, to challenge a friend -----
+  // It borrows the Lantern Rush round (rush.kind 'duel', no lanterns), so everything a Rush turns off stays off.
+  const duelHooks = { tap: null, quit: null };
+  window.LUTSDuel = {
+    hooks: duelHooks,
+    start(wid) {
+      startRush('duel', 0, wid);
+      $('#rushHud').hidden = true;
+      document.body.classList.add('dueling');
+    },
+    end() { endRush(false); restoreRushWorld(); },
+    get on() { return rush.on && rush.kind === 'duel'; },
+    // A shell bursting at a point given in fractions of the screen, so a friend's phone replays the same show.
+    fire(type, fx, fy) { launchShell({ x: fx * W, y: fy * H, type: TYPES[type] ? type : 'peony', user: true, exact: true, fast: 1.7, tap: true }); },
+    shells: () => DOCK_ORDER.filter((id) => id !== 'random' && TYPES[id]).map((id) => ({ id, label: shellLabel(id), icon: TYPES[id].icon || '🎆', art: CRACKER_ART[id] || '', gems: SHELL_GEM_COST[id] || 0, premium: PREMIUM_SHELLS.has(id) })),
+    premium: () => premium.active,
+    gems: () => gems(), spend: (n) => spendGems(n), openGems: (cost, label) => openGems({ cost, label }), openPremium: () => openPremium('duel'),
+    worlds: () => RUSH_WORLDS.map((id) => ({ id, name: placeName(id) })),
+    world: () => (rush.ownWorld ?? (world.pending || world.id)),
+    placeName, worldArt: (id) => worldArt(id, 'assets/menu/challenge.jpg'),
+    combo: (a, b) => showCombo(a, b), celebrate: () => celebrate(), toast: (t, ms) => toast(t, ms), achieve: (id) => achieve(id),
+    share: (o) => shareThing(o), card: (o) => shareCard(o), link: (h) => rushLink(h), encode: (o) => encodeCard(o), clean,
+    openSheet: (e) => { if (!sheets.includes(e)) sheets.push(e); openSheet(e); }, closeSheet: (e) => closeSheet(e),
+    home: () => { if (mode !== 'intro') $('#btnHome').click(); },
+    savedName,
+    // A Love Sky Wall note as a fireworks show (the love card's hearts and rose palette): written in the sky, recorded to share.
+    // Every occasion the love card has (Custom aside), grouped as its chips are, Love first: for the Love Sky Wall's sky show
+    // The wall's default occasion: the nearest big festival or day within a month (the ones most people celebrate), else Love
+    nextOccasion: () => {
+      const big = new Set(['diwali', 'newyear', 'christmas', 'holi', 'pongal', 'onam', 'eid', 'rakhi', 'valentine', 'mothersday', 'fathersday', 'independence', 'friendship']);
+      const today = new Date(), d0 = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const u = OCCASIONS.filter((o) => big.has(o.id)).map((o) => ({ o, date: occasionDate(o, d0) })).filter((x) => x.date).sort((a, b) => a.date - b.date)[0];
+      return u && (u.date - d0) / 864e5 <= 30 ? u.o.id : 'love';
+    },
+    occasions: () => ['love', ...OCC_CATS.flatMap((c) => c.ids).filter((id) => id !== 'love')].map((id) => OCC_BY_ID[id]).filter(Boolean).map((o) => [o.id, o.label]),
+    playLove(to, m, occ = 'love') {
+      closeSheets(); hideOverlay($('#intro'));
+      const oc = OCC_BY_ID[occ] || OCC_BY_ID.love;
+      playAndKeep({ kind: 'card', o: oc.id, t: clean(to || '', 20) || 'You', h: oc.head, m: cleanMsg(m || '', 120), f: savedName(), p: PALETTES[oc.theme] ? oc.theme : 'rose', w: world.pending || world.id || '', img: '', own: true });
+    },
+    addGems: (n, why) => addGems(n, why),
+    native: () => !!(window.LUTSNative || window.LUTS_DUEL_ANYWHERE), playLink: (src) => playLink(src), toApp: (src) => toApp(src), // the web sends duels to the app
+  };
   window.LUTSGame = {
     // For tests: the 3D forecourt's dog and old man (where they are, what they are up to), or null.
     get folk() { return w3d ? w3d.folk : null; },
     // For tests: the shell types the card show on screen has launched so far.
     get cardShells() { return cardShells.slice(); },
+    // ----- Pataka Chor (chor.js): Ground mode on the bazaar street, with only the crackers the player finds -----
+    chor: {
+      get on() { return chor.on; },
+      start() {
+        w3dFailed = false; w3dLosses = []; // Pataka Chor needs 3D: each time it opens, 3D gets another try
+        Sound.resume();
+        abortLaunch();
+        if (rush.on) endRush(true);
+        closeDrawer(); closeCardModal(); closeSheets();
+        hideOverlay($('#intro'));
+        mode = 'play';
+        chor.on = true;
+        document.body.classList.add('chor');
+        clearScene();
+        setPlayMode('ground');
+        syncWorld3d(); syncLaunchUi();
+      },
+      stop() {
+        if (!chor.on) return;
+        chor.on = false;
+        document.body.classList.remove('chor');
+        clearStreet();
+        syncWorld3d(); syncLaunchUi();
+      },
+      // The street's 3D view once it is on screen (views, stashes, project()), or null while it loads.
+      get w3d() { return chor.on && w3dShown() ? w3d : null; },
+      // Puts a found cracker down at a point on the street (metres), ready to light. False when it can't go there.
+      place(type, x, z) {
+        if (!chor.on || !w3dShown() || launch.state !== 'READY') return false;
+        const sky = skyOf(type); type = sky ? 'shell' : type;
+        const p = w3d.project(x, 0, z);
+        if (!p) return false;
+        chor.placing = true;
+        let it = null;
+        settings.item = type; // Fire lights this one (the choice isn't saved: it is the found cracker, not the player's pick)
+        try { it = placeItem(type, p[0], p[1], { x, z }); } finally { chor.placing = false; }
+        if (it && sky) it.shellId = sky;
+        syncLaunchUi();
+        return !!it;
+      },
+      // A thrown cracker going off where it hit, at once (a wall, a roof, a tree, the dog, the old man): a flash, a ring of
+      // sparks, light on the scene and the bang. size about 1 for an everyday cracker. False when that spot is out of view.
+      bang(x, y, z, size = 1) {
+        if (!chor.on || !w3dShown()) return false;
+        const p = w3d.project(x, y, z);
+        if (!p) return false;
+        const k = clamp(size * w3d.ppm(p[2]) / 70, 0.25, 1.6);
+        flash(p[0], p[1], '#ffd27a', k);
+        for (let i = 0; i < 40; i++) {
+          const a = Math.random() * TAU, v = rand(140, 420) * U * k;
+          star(p[0], p[1], Math.cos(a) * v, Math.sin(a) * v - 80 * U * k, Math.random() < 0.7 ? pick(GOLD) : color(), rand(0.35, 0.8), { drag: 0.88, grav: 1.6, size: 1.2, glitter: 0.3 });
+        }
+        w3d.light('#ffb347', 1.1 * size, { x, y, z });
+        Sound.burst(Math.min(1, 0.5 + size * 0.4), pan(p[0]));
+        return true;
+      },
+      waiting: () => waitingItems().length,
+      // A cracker's own picture (assets/ground), to draw it flying through the air; null for one drawn in code only.
+      art(type) { const img = groundArt[skyOf(type) ? 'shell' : type]; return img && img.complete && img.naturalWidth ? img : null; },
+      // The picture the Sky and Ground lists show for a cracker (its dock chip's: the tube photo, the cut-out, the artwork
+      // or the drawing), for Seth-ji's shop; the drawing, big, if the chip has none yet.
+      pic(type) {
+        const sky = skyOf(type), chip = sky ? shellList.querySelector(`[data-shell="${sky}"]`) : document.querySelector(`[data-item="${type}"]`);
+        const img = chip && chip.querySelector('img');
+        return img && img.src && !img.src.startsWith('data:') ? img.src : itemIcon(sky ? 'shell' : type, 6); // a drawn one: drawn again, big and sharp
+      },
+      waiting: () => waitingItems().length,
+      // A thrown cracker going off where it hit, as itself (an anar sprays from the roof it landed on, a rocket leaves the
+      // wall): placed at that world point and lit at once. Null when that spot can't take it (out of view).
+      throwLight(type, x, y, z) { const h = this.ride(type, x, y, z); if (h) h.fire(); return h; },
+      // A found cracker riding something that moves (the donkey's basket) at a world point (metres, y up): placed there,
+      // ready to light. Returns { move(x, y, z), lit, done }, or null when it can't go down now.
+      ride(type, x, y, z) {
+        if (!chor.on || !w3dShown()) return null;
+        const sky = skyOf(type); type = sky ? 'shell' : type;
+        const p = w3d.project(x, y, z);
+        if (!p) return null;
+        chor.placing = true;
+        let it = null;
+        settings.item = type;
+        try { it = placeItem(type, p[0], p[1], { x, z }); } finally { chor.placing = false; }
+        if (!it) return null;
+        if (sky) it.shellId = sky;
+        const q = [];
+        const move = (mx, my, mz) => {
+          const a = it.an;
+          if (!a || !w3d) return;
+          a.wx = mx; a.wy = my; a.wz = mz;
+          const r = w3d.project(mx, my, mz, q);
+          if (!r) return;
+          it.x = a.ax = r[0]; it.y = a.ay = r[1]; a.d = r[2];
+          it.s = itemSize3d(r[2]); it.z = depth3d(r[2]);
+        };
+        move(x, y, z);
+        syncLaunchUi();
+        // spent: a rocket that has flown leaves only its empty bottle, which needn't ride on; remove() takes it off.
+        const remove = () => { const i = groundItems.indexOf(it); if (i >= 0) groundItems.splice(i, 1); it.done = true; };
+        const fire = () => { if (!it.armed && !it.done) { lightItem(it); it.swept = true; festLaunched([it.type]); } };
+        return { move, remove, fire, get lit() { return it.armed; }, get spent() { return !!it.fired; }, get done() { return it.done || !groundItems.includes(it); } };
+      },
+      // Which street to play on: the scene loads in its place (chor.js waits for it). The Premium ones need Premium.
+      get street() { return chor.street; },
+      setStreet(id) { if (id === chor.street) return; chor.street = id; clearStreet(); syncWorld3d(); },
+      // A rewarded video (to slip away when caught): whether one can play now, and playing it. Resolves true once the
+      // video was watched to the end and its reward confirmed (once per receipt).
+      canVideo: () => premium.active || (videoOk(rewardsProvider()) && !rewardBusy),
+      async watchVideo(tag) {
+        if (premium.active) return true; // Premium: no ads, the reward without the video
+        const provider = rewardsProvider();
+        if (!provider || rewardBusy) return false;
+        rewardBusy = true;
+        try {
+          const receipt = await rewardTimeout(() => provider.watchAd({ chor: tag }));
+          if (!receipt || receipt.kind !== 'ad' || await provider.verifyReceipt(receipt) !== true || wallet.tx.includes(`ad:${receipt.id}`)) return false;
+          wallet.tx.push(`ad:${receipt.id}`); saveWallet();
+          if (provider.acknowledgeReceipt) { try { await provider.acknowledgeReceipt(receipt); } catch (_) { /* deduplicated by id */ } }
+          return true;
+        } catch (error) { toast(videoMiss(error)); return false; } finally { rewardBusy = false; }
+      },
+      gems: () => gems(),
+      // A thrown cracker lights as it lands (with any others waiting on the street).
+      fire: () => requestFire(),
+      ready: () => launch.state === 'READY' && !paused,
+      // A night's chaos score, for its Play Games board once one is set up (GameAchievements.LEADERBOARDS "chor").
+      score(n) { if (n > 0) postScores(`chor:${Math.round(n)}`); },
+      // The crackers that may be found: every ground cracker but the drawing hooks; the Premium ones only in rare stashes.
+      types: () => ITEM_ORDER.filter((t) => ITEMS[t] && !HOOKS.includes(t)),
+      premiumItem: (t) => PREMIUM_ITEMS.has(t),
+      gemItem: (t) => (GEM_COST[t] || 0) > 0, // costs gems to light in the show (found crackers light free)
+      gemCost: (t) => GEM_COST[t] || 0,
+      label: (t) => (skyOf(t) ? `${shellLabel(skyOf(t))} shell` : crackerName(t) || t),
+      // Sky shells found on the street ("sky:<shell>"): a tube that sends up that shell. Everyday ones, and the Premium.
+      skyTypes: () => Object.keys(WEIGHTS).filter((k) => TYPES[k] && !PREMIUM_SHELLS.has(k)),
+      premiumSky: () => [...PREMIUM_SHELLS].filter((k) => TYPES[k]),
+      addGems: (n) => addGems(n),
+      premium: () => premium.active,
+      // A rare stash opens with Premium, or for gems; short of gems, the shop opens.
+      spend(n, label) { if (premium.active || spendGems(n)) return true; openGems({ cost: n, label }); return false; },
+      openPremium: () => openPremium({ levels: true }),
+      toast, buzz, dayKey,
+      tick: () => Sound.tick(0),
+    },
     enter() {
       abortLaunch();
       if (rush.on) endRush(true);
@@ -12418,8 +13678,8 @@
       return () => { if (rec !== r) return; r.outro = performance.now(); setTimeout(() => { if (rec === r) stopRecording(); }, 2000); };
     },
     // A finished level's picture card to the share sheet, the same way Daily Sky results are shared.
-    shareResult({ kicker = '', title = '', stars = -1, line = '', text = '', name = 'light-up-the-skies.png', art = 'assets/menu/diya-path.png' }) {
-      return shareThing({ title, text, url: appLink(), blob: shareCard({ art, kicker, title, stars, line }), name, src: 'level' });
+    shareResult({ kicker = '', title = '', big = '', stars = -1, line = '', text = '', name = 'light-up-the-skies.png', art = 'assets/menu/diya-path.png' }) {
+      return shareThing({ title, text, url: appLink(), blob: shareCard({ art, kicker, title, big, stars, line }), name, src: 'level' });
     },
     // A puzzle's own recorded clip to the share bar, the same way a recorded show is offered.
     shareVideo(blob, name, type, caption) {
@@ -12451,6 +13711,7 @@
       // Festival Points: 20 per new star; the day's daily puzzle (Diya or Rocket) 60 the first time it is solved.
       if (daily) { if (!had && stars) festPoints('puzzleDaily', 60); }
       else festPoints('puzzle', Math.max(0, stars - had) * 20);
+      if (stars && window.LUTSGoals) LUTSGoals.tick('puzzle');
       return { gain, chest };
     },
     // A rewarded video doubles a chest: true once Google confirms the video was watched.
@@ -12471,9 +13732,12 @@
       return dailyStreak(st);
     },
     dailyStreak: () => dailyStreak(),
-    videoReady() { const p = rewardsProvider(); return videoOk(p); },
+    // True once today's Daily Sky, Diya or Rocket is played (the streak is safe for today).
+    playedToday() { const st = loadRush(), k = dayKey(); return (st.days || {})[k] !== undefined || !!(st.diya || {})[k] || !!(st.rocket || {})[k]; },
+    videoReady() { if (premium.active) return true; const p = rewardsProvider(); return videoOk(p); },
     // A rewarded video for more hints: true once Google confirms it was watched (each receipt counts once).
     async watchVideo() {
+      if (premium.active) return true; // Premium: no ads, the reward without the video
       const provider = rewardsProvider();
       if (hintBusy || rewardBusy || !this.videoReady()) return false;
       hintBusy = true;

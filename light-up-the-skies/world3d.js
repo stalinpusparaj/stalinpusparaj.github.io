@@ -23,11 +23,12 @@ export const ngon = (n, r, cx = 0, cz = 0, rot = 0) => Array.from({ length: n },
 // The scenes there are (world3d-<scene>.js); the game maps its worlds onto them.
 const SCENES = ['taj', 'india-gate', 'hawa-mahal', 'gateway-of-india', 'charminar', 'konark-sun-temple', 'golden-temple',
   'victoria-memorial', 'red-fort', 'mysore-palace', 'meenakshi-amman-temple', 'brihadeeswarar-temple', 'vivekananda-rock-memorial',
-  'velankanni-basilica', 'cross-by-the-sea', 'golden-manor'];
+  'velankanni-basilica', 'cross-by-the-sea', 'golden-manor', 'chor-street', 'chor-lane', 'chor-charminar', 'chor-redfort', 'chor-hawamahal', 'chor-gateway', 'chor-mysore', 'chor-taj', 'chor-indiagate', 'chor-victoria', 'chor-manor', 'chor-konark', 'chor-goldentemple', 'chor-meenakshi', 'chor-thanjavur', 'chor-velankanni', 'chor-cross', 'chor-kanyakumari', 'chor-shop'];
 
 // Where crackers may stand: the ground in front of you (metres; the camera looks towards -z). A scene may narrow it.
 export const ZONE = { x0: -11, x1: 11, z0: -30, z1: -5 };
-const EYE = 3.4; // eye height: a raised viewpoint, so pools and lawns show
+const EYE = 3.4;
+const EASED = [['yaw', 'tYaw'], ['pitch', 'tPitch'], ['z', 'tZ'], ['x', 'tX'], ['eye', 'tEye'], ['base', 'tBase']]; // eye height: a raised viewpoint, so pools and lawns show
 const CAM_Z = { near: 7, far: 15, start: 11 };
 // Flat ground layers stand this far apart, so far ones never fight for depth (no shimmer as the view turns).
 export const LAYER = 0.08;
@@ -160,11 +161,12 @@ export async function create({ canvas, scene: id = 'taj', tier = 1, onLost, onFo
   if (!SCENES.includes(id)) id = 'taj';
   // The renderer first: a phone without WebGL fails here, before any scene is built.
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: tier >= 2, powerPreference: 'default', alpha: false, stencil: false });
-  let def, folkModule;
+  let def, folkModule, donkeyModule = null;
   try {
     const folkLoad = import('./world3d-folk.js').catch(() => null); // the scene goes on without them
-    def = (await import(`./world3d-${id}.js`)).build({ tier });
+    def = await (await import(`./world3d-${id}.js`)).build({ tier });
     folkModule = await folkLoad;
+    if (def.donkey) donkeyModule = await import('./world3d-donkey.js').catch(() => null); // Pataka Chor's, if the scene has one
   } catch (error) { renderer.dispose(); renderer.forceContextLoss(); throw error; }
   const scene = new THREE.Scene();
   const sky = def.sky || ['#02030b', '#08092a', '#1a1640', '#2c2048'];
@@ -192,6 +194,11 @@ export async function create({ canvas, scene: id = 'taj', tier = 1, onLost, onFo
   }
 
   const dot = dotTexture(), spots = def.spots.slice();
+  // Pataka Chor's streets are dressed for the festival (lanterns, marigolds, bunting, diyas, a rangoli).
+  if (id.startsWith('chor-') && def.zone) {
+    const d = (await import('./world3d-chor-dress.js')).dress(THREE, def, tier, id);
+    def.objects.push(...d.objects); spots.push(...d.spots);
+  }
   // Every scene's rangoli is ringed with diyas.
   for (const o of def.objects) if (o.userData.rangoli) for (let i = 0; i < 36; i++) { const a = (i / 36) * Math.PI * 2; spots.push([o.position.x + Math.cos(a) * 3.8, 0.2, o.position.z + Math.sin(a) * 3.8, '#ffa63c']); }
   const stars = starPoints(dot, def.stars ?? (tier ? 700 : 350));
@@ -209,12 +216,81 @@ export async function create({ canvas, scene: id = 'taj', tier = 1, onLost, onFo
       tier, zone, ground: (floor ? floor.point.y : 2 * LAYER) + 0.01,
       view: { project: (x, y, z, out) => api.project(x, y, z, out), ppm: (d) => api.ppm(d), frame: () => ({ w: W, bottom: (horizon + 0.16) * H }), floor: (sx, sy) => api.ground(sx, sy) },
       sound: (name, x, y, z) => { const p = onFolk && api.project(x, y, z); if (p) onFolk(name, clamp((p[0] / W) * 2 - 1, -1, 1), p[2]); },
+      patrols: def.patrols || null,
     });
     scene.add(...folk.objects);
   }
+  // Pataka Chor's stashes as cracker boxes on the street: little coloured boxes, stacked, in one instanced mesh (one draw
+  // call however many are out). setLoot() lays them out.
+  let loot = null, wareMesh = null, panelMesh = null, labelMesh = null, labelSprites = [];
+  if (def.stashes) {
+    const geo = new THREE.BoxGeometry(0.46, 0.3, 0.36);
+    loot = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: '#ffffff', emissive: '#2a1408' }), 96);
+    loot.count = 0; loot.frustumCulled = false;
+    scene.add(loot);
+  }
+  const LOOT_COLOURS = ['#d6332f', '#f2b233', '#2f9a5f', '#3b6fd6', '#e0559a', '#ff7a2b'].map((c) => new THREE.Color(c));
+  const lootGold = new THREE.Color('#ffd34d'), lootM = new THREE.Matrix4(), lootQ = new THREE.Quaternion(), lootE = new THREE.Euler(), lootV = new THREE.Vector3(), lootS = new THREE.Vector3(1, 1, 1);
+  // Pataka Chor's donkey, on its route (world3d-donkey.js).
+  let donkey = null;
+  if (donkeyModule && def.donkey) {
+    donkey = donkeyModule.build({ tier, route: def.donkey.route, kind: def.donkey.kind, ground: 2 * LAYER + 0.01, view: { project: (x, y, z, out) => api.project(x, y, z, out), ppm: (d) => api.ppm(d) } });
+    scene.add(...donkey.objects);
+  }
 
   // Camera: you stand on the forecourt and look around (yaw, pitch) and step forward or back (pinch).
-  const look = { yaw: 0, pitch: 0, z: CAM_Z.start, tYaw: 0, tPitch: 0, tZ: CAM_Z.start, tilt: 0, maxPitch: 0.42 };
+  // A scene with fixed viewpoints (def.views, e.g. Pataka Chor's street) moves you between them: x, eye height and the
+  // base yaw ease there too, and pinching does nothing.
+  const views = def.views || null;
+  const look = { yaw: 0, pitch: 0, z: CAM_Z.start, tYaw: 0, tPitch: 0, tZ: CAM_Z.start, tilt: 0, maxPitch: 0.42,
+    x: 0, tX: 0, eye: EYE, tEye: EYE, base: 0, tBase: 0 };
+  let view = 0;
+  function toView(i, now) {
+    const v = views[view = clamp(i | 0, 0, views.length - 1)];
+    look.tX = v.x; look.tZ = v.z; look.tEye = v.eye ?? EYE; look.tBase = v.yaw || 0; look.tYaw = look.tPitch = 0;
+    if (now) for (const [a, b] of EASED) look[a] = look[b];
+  }
+  if (views) toView(0, true);
+  // Walking (Pataka Chor on a phone that can take it): you go where you like on foot, at eye height, turning freely,
+  // kept out of the buildings and props by the scene's colliders (def.colliders, world space, from Pilgrim's kit) and
+  // inside def.bounds.
+  let walking = false, aerial = false; // aerial: up in the drone view (where you stood, to come back down to)
+  let lens = 1; // pinch zoom with viewpoints: the field of view's share of its usual width
+  const baseFov = () => (W > H ? 46 : 60);
+  const WALK_EYE = 1.7, BODY = 0.45, colliders = def.colliders || [], bounds = def.bounds || null;
+  function collide(x, z) {
+    for (let pass = 0; pass < 2; pass++) {
+      for (const c of colliders) {
+        if (c.kind === 'box') {
+          const cy = c.center[1] - c.half[1];
+          if (cy > WALK_EYE || c.center[1] + c.half[1] < 0.3) continue; // overhead or underfoot
+          const cs = Math.cos(c.rotY), sn = Math.sin(c.rotY), dx = x - c.center[0], dz = z - c.center[2];
+          const lx = dx * cs - dz * sn, lz = dx * sn + dz * cs; // into the box's own frame
+          const px = clamp(lx, -c.half[0], c.half[0]), pz = clamp(lz, -c.half[2], c.half[2]);
+          let ox = lx - px, oz = lz - pz;
+          const d = Math.hypot(ox, oz);
+          if (d >= BODY) continue;
+          if (d < 1e-6) { // inside: out through the nearest face
+            const fx = c.half[0] - Math.abs(lx), fz = c.half[2] - Math.abs(lz);
+            if (fx < fz) { ox = Math.sign(lx) || 1; oz = 0; } else { ox = 0; oz = Math.sign(lz) || 1; }
+            const nl = (fx < fz ? c.half[0] : c.half[2]) + BODY;
+            const nx = fx < fz ? ox * nl : lx, nz = fx < fz ? lz : oz * nl;
+            x = c.center[0] + nx * cs + nz * sn; z = c.center[2] - nx * sn + nz * cs;
+          } else {
+            const k = BODY / d, nx = px + ox * k, nz = pz + oz * k;
+            x = c.center[0] + nx * cs + nz * sn; z = c.center[2] - nx * sn + nz * cs;
+          }
+        } else {
+          const r = (c.radius || 0) + BODY, dx = x - c.center[0], dz = z - c.center[2], d = Math.hypot(dx, dz);
+          if (d >= r || (c.kind === 'cylinder' && c.center[1] - c.height / 2 > WALK_EYE)) continue;
+          const k = d > 1e-6 ? r / d : 0;
+          if (k) { x = c.center[0] + dx * k; z = c.center[2] + dz * k; } else x += r;
+        }
+      }
+    }
+    if (bounds) { x = clamp(x, bounds.x0, bounds.x1); z = clamp(z, bounds.z0, bounds.z1); }
+    return [x, z];
+  }
   let W = 1, H = 1, horizon = 0.45, dirty = true, version = 0, lost = false;
   const v3 = new THREE.Vector3(), ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
   const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -222,8 +298,8 @@ export async function create({ canvas, scene: id = 'taj', tier = 1, onLost, onFo
     const fov = (camera.fov * Math.PI) / 180;
     // Look down just enough that the horizon sits at `horizon` (a fraction of the screen height), above the controls.
     const base = Math.atan(((horizon - 0.5) / 0.5) * Math.tan(fov / 2));
-    camera.position.set(0, EYE, look.z);
-    camera.rotation.set(base + look.pitch + look.tilt * 0.62, look.yaw, 0);
+    camera.position.set(look.x, look.eye, look.z);
+    camera.rotation.set(base + look.pitch + look.tilt * 0.62, look.base + look.yaw, 0);
     camera.updateMatrixWorld();
   }
   // Only a loss the system caused is reported (dispose() frees the context on purpose); the game rebuilds the scene on a
@@ -250,20 +326,80 @@ export async function create({ canvas, scene: id = 'taj', tier = 1, onLost, onFo
       renderer.setPixelRatio(dpr);
       renderer.setSize(w, h, false);
       camera.aspect = w / h;
-      camera.fov = w > h ? 46 : 60;
+      camera.fov = baseFov() * lens;
       camera.updateProjectionMatrix();
       place(); dirty = true; version++;
     },
     // Drag to look around: relative turns, in radians.
     turn(dYaw, dPitch) {
+      // On foot you look freely up and down (to the top shelves, down to the floor), whatever the mode's limit.
+      if (walking) { look.base += dYaw; look.tBase = look.base; look.tPitch = clamp(look.tPitch + dPitch, -0.7, 0.7); place(); dirty = true; version++; return; }
       look.tYaw = clamp(look.tYaw + dYaw, -1.05, 1.05);
       look.tPitch = clamp(look.tPitch + dPitch, -0.12, look.maxPitch);
     },
     // How far up you may look: little in Ground mode, so the crackers stay in view.
     setMaxPitch(v) { look.maxPitch = v; look.tPitch = Math.min(look.tPitch, v); },
     // Pinch: >1 steps forward.
-    zoom(f) { look.tZ = clamp(look.tZ / f, CAM_Z.near, CAM_Z.far); },
-    reset() { look.tYaw = look.tPitch = 0; look.tZ = CAM_Z.start; },
+    // With viewpoints (a street, the shop), pinching zooms the lens in and out instead, joystick or not.
+    zoom(f) {
+      if (!views) { look.tZ = clamp(look.tZ / f, CAM_Z.near, CAM_Z.far); return; }
+      lens = clamp(lens / f, 0.45, 1.3); camera.fov = baseFov() * lens; camera.updateProjectionMatrix(); dirty = true; version++;
+    },
+    reset() { if (views) toView(view); else { look.tYaw = look.tPitch = 0; look.tZ = CAM_Z.start; } },
+    // Fixed viewpoints (def.views): their names and where they stand, which one you are at, and easing to another.
+    views: views && views.map((v) => ({ ...v })),
+    get view() { return view; },
+    goView(i) { aerial = false; if (views) toView(i); if (walking) { look.tEye = WALK_EYE; look.tYaw = 0; } },
+    // The drone: up high over the start of the street, looking down along it, the whole street and its stashes in view.
+    // Any step on foot brings you back down where you were.
+    drone() {
+      const b = bounds || { x0: -10, x1: 10, z0: -60, z1: 10 }, len = b.z1 - b.z0;
+      aerial = { x: look.x, z: look.z };
+      look.tX = (b.x0 + b.x1) / 2; look.tZ = b.z1 + len * 0.08; look.tEye = Math.max(22, len * 0.36); look.tBase = 0; look.tYaw = 0; look.tPitch = -0.62;
+      dirty = true; version++;
+    },
+    get aerial() { return !!aerial; },
+    // The show camera (Mela Night visitors): 'burst' frames a cracker going off at (x, z) from a little down the street,
+    // low and looking up, the way fireworks are filmed; 'glide' drifts along the street at rooftop height between bangs.
+    showCam(x, z, mode = 'burst') {
+      const b = bounds || { x0: -10, x1: 10, z0: -60, z1: 10 }, mid = (b.x0 + b.x1) / 2;
+      if (!aerial) aerial = { x: look.x, z: look.z };
+      if (mode === 'glide') { look.tX = mid; look.tZ = clamp(z, b.z0 + 6, b.z1 + 4); look.tEye = 9; look.tPitch = -0.22; }
+      else { look.tX = clamp(x * 0.55 + mid * 0.45, b.x0 + 1, b.x1 - 1); look.tZ = clamp(z + 16, b.z0 + 4, b.z1 + 6); look.tEye = 4.5; look.tPitch = Math.min(look.maxPitch || 0.42, 0.16); }
+      look.tBase = 0; look.tYaw = 0;
+      dirty = true; version++;
+    },
+    get bounds() { return bounds; },
+    // Walking (see collide): on or off (off: back to the nearest viewpoint), whether you are, which way you face, and a
+    // step: forward and right in metres a second (a joystick or the keys), for dt seconds.
+    setWalk(on) {
+      if (!views || on === walking) return;
+      walking = on;
+      // On foot you come right up to walls: a near plane well inside your body keeps them solid (and a nearer far
+      // plane keeps depth precise; the street's fog ends long before it).
+      camera.near = on ? 0.25 : 1.5; camera.far = on ? 600 : 3000; camera.updateProjectionMatrix(); dirty = true;
+      if (on) { look.base += look.yaw; look.yaw = look.tYaw = 0; look.tBase = look.base; look.tEye = WALK_EYE; }
+      else {
+        let best = 0, bd = Infinity;
+        views.forEach((v, i) => { if (v.hide) return; const d = Math.hypot(v.x - look.x, v.z - look.z); if (d < bd) { bd = d; best = i; } });
+        toView(best);
+      }
+    },
+    get walking() { return walking; },
+    get heading() { return look.base + look.yaw; },
+    get tier() { return tier; },
+    step(fwd, right, dt) {
+      if (!walking || (!fwd && !right)) return;
+      if (aerial) { look.x = look.tX = aerial.x; look.z = look.tZ = aerial.z; look.tEye = WALK_EYE; look.tPitch = 0; aerial = false; } // (down from the drone)
+      const h = look.base, nx = look.x + (-Math.sin(h) * fwd + Math.cos(h) * right) * dt, nz = look.z + (-Math.cos(h) * fwd - Math.sin(h) * right) * dt;
+      [look.x, look.z] = collide(nx, nz);
+      look.tX = look.x; look.tZ = look.z;
+      place(); dirty = true; version++;
+    },
+    // Hiding places a scene offers for things to find (def.stashes: [x, z] on the ground).
+    stashes: (def.stashes || []).map(([x, z]) => ({ x, z })),
+    // What a scene lets you set off (def.targets: kind, name, points, x, y, z, reach r), for Pataka Chor's throws.
+    targets: (def.targets || []).map((t) => ({ ...t })),
     // Tells an animated scene what the game is doing (e.g. 'launch' when a show starts).
     cue(name) { if (def.cue) def.cue(name, env); },
     // The forecourt's dog and old man (world3d-folk.js): shown or put away, whether a show is on and the crackers standing
@@ -278,20 +414,124 @@ export async function create({ canvas, scene: id = 'taj', tier = 1, onLost, onFo
     dogDrag(sx, sy) { if (folk) folk.dragBall(sx, sy); },
     dogThrow(sx, sy) { if (folk) folk.throwBall(sx, sy); },
     get folk() { return folk && folk.state; },
+    // Pataka Chor's watchers (world3d-folk.js patrols): who is where and facing which way; one noticing you, coming
+    // after you, catching you, calling it off; who a screen point is on; a cracker going off on one of them.
+    get watchers() { return folk && folk.watchers ? folk.watchers : []; },
+    notice(name, x, z) { if (folk && folk.notice) folk.notice(name, x, z); },
+    hunt(name, x, z, speed) { if (folk && folk.hunt) folk.hunt(name, x, z, speed); },
+    nab(name) { if (folk && folk.nab) folk.nab(name); },
+    calm(name) { if (folk && folk.calm) folk.calm(name); },
+    lure(x, z) { if (folk && folk.lure) folk.lure(x, z); },
+    // Pataka Chor's donkey: on screen at (sx, sy)?, where a cracker on its back sits, a cracker loaded or not, its
+    // cracker burning, and where it is.
+    /** Seth-ji's shop: the crackers on display, each its painted picture (src) standing on a step, always facing you:
+     *  [{ x, y, z, type, src, stage }]. */
+    /** Labels drawn in the world (Pataka Chor's gift and gem markers, the shop's tags): [{ x, y, z, img (a canvas), h
+     *  (height in metres), anchorY (0 bottom … 1 top) }]. Being in the scene, they move with it as you walk, never apart. */
+    setLabels(list) {
+      if (labelMesh) { scene.remove(labelMesh); labelMesh.traverse((o) => { if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } }); }
+      labelMesh = new THREE.Group();
+      labelSprites = list.map((o) => {
+        // Sharp: no mipmaps (a marker is never far smaller than its picture), so it isn't blurred down.
+        const t = new THREE.CanvasTexture(o.img); t.colorSpace = THREE.SRGBColorSpace; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter;
+        // o.screen: a fixed size on screen (a share of its height), so a gift far down the street still reads; else o.h metres.
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, transparent: true, depthTest: false, depthWrite: false, toneMapped: false, sizeAttenuation: !o.screen }));
+        const h = o.screen || o.h;
+        sp.center.set(0.5, o.anchorY ?? 0.5); sp.scale.set(h * (o.img.width / o.img.height), h, 1); sp.position.set(o.x, o.y, o.z); sp.renderOrder = 20;
+        labelMesh.add(sp); return sp;
+      });
+      scene.add(labelMesh); dirty = true;
+    },
+    // One label shown or hidden, how solid, and (a delivery riding the donkey) where it is now.
+    showLabel(i, on, alpha = 1, x, y, z) {
+      const sp = labelSprites[i];
+      if (!sp) return;
+      if (x != null && (sp.position.x !== x || sp.position.y !== y || sp.position.z !== z)) { sp.position.set(x, y, z); dirty = true; }
+      if (sp.visible !== on || sp.material.opacity !== alpha) { sp.visible = on; sp.material.opacity = alpha; dirty = true; }
+    },
+    /** Pictures hung on the walls (Seth-ji's street adverts): [{ x, y, z, ry, w, h, src }], each in a gold frame. */
+    setPanels(list) {
+      if (panelMesh) { scene.remove(panelMesh); panelMesh.traverse((o) => { if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } if (o.geometry) o.geometry.dispose(); }); }
+      panelMesh = new THREE.Group();
+      const loader = new THREE.TextureLoader();
+      for (const o of list) {
+        const frame = new THREE.Mesh(new THREE.PlaneGeometry(o.w + 0.16, o.h + 0.16), new THREE.MeshBasicMaterial({ color: '#e8b04a' }));
+        const t = loader.load(o.src, () => { dirty = true; }); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+        const pic = new THREE.Mesh(new THREE.PlaneGeometry(o.w, o.h), new THREE.MeshBasicMaterial({ map: t, toneMapped: false }));
+        pic.position.z = 0.01;
+        const g = new THREE.Group(); g.add(frame, pic); g.position.set(o.x, o.y, o.z); g.rotation.y = o.ry || 0;
+        panelMesh.add(g);
+      }
+      scene.add(panelMesh); dirty = true;
+    },
+    ads: def.ads || null, // (where the shop's adverts hang)
+    setWares(list) {
+      if (wareMesh) { scene.remove(wareMesh); wareMesh.traverse((o) => { if (o.material) { if (o.material.map) o.material.map.dispose(); o.material.dispose(); } if (o.geometry) o.geometry.dispose(); }); }
+      wareMesh = new THREE.Group();
+      const loader = new THREE.TextureLoader(), maps = new Map();
+      for (const o of list) {
+        if (!o.src) continue; // (chor.js gives every cracker a picture)
+        // Each picture keeps its own shape (a rocket is tall and thin, a cake box near square): sized once it loads.
+        if (!maps.has(o.src)) { const sps = []; const t = loader.load(o.src, (tx) => { const k = tx.image.width / tx.image.height; for (const sp of sps) sp.scale.x = sp.scale.y * k; dirty = true; }); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; maps.set(o.src, { t, sps }); }
+        const m = maps.get(o.src), sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: m.t, transparent: true, alphaTest: 0.05, toneMapped: false }));
+        const h = o.stage ? 0.95 : 0.5, img = m.t.image; sp.center.set(0.5, 0); sp.scale.set(img && img.width ? h * img.width / img.height : h, h, 1); sp.position.set(o.x, o.y - 0.26, o.z);
+        m.sps.push(sp); wareMesh.add(sp);
+      }
+      scene.add(wareMesh); dirty = true;
+    },
+    /** The stashes' boxes: [{ x, y (default: on the ground), z, n (boxes, stacked two to a pile), rare }]. */
+    setLoot(list) {
+      if (!loot) return;
+      let k = 0;
+      list.forEach((o, i) => {
+        for (let b = 0; b < Math.min(8, o.n || 1) && k < 96; b++, k++) {
+          const pile = b >> 1, up = b & 1, a = (i * 1.7 + b * 0.6) % 1;
+          lootV.set(o.x + (pile % 2) * 0.5 - 0.25 * Math.min(1, (o.n || 1) > 2), (o.y != null ? o.y : 2 * LAYER) + 0.15 + up * 0.3, o.z + Math.floor(pile / 2) * 0.42);
+          lootQ.setFromEuler(lootE.set(0, (a - 0.5) * 0.6, 0));
+          loot.setMatrixAt(k, lootM.compose(lootV, lootQ, lootS));
+          loot.setColorAt(k, o.rare ? lootGold : LOOT_COLOURS[(i + b) % LOOT_COLOURS.length]);
+        }
+      });
+      loot.count = k;
+      loot.instanceMatrix.needsUpdate = true;
+      if (loot.instanceColor) loot.instanceColor.needsUpdate = true;
+      dirty = true;
+    },
+    // Seth-ji's shop counter, where the night's big stash is (def.heist: { x, z }), or null.
+    heist: def.heist || null,
+    wares: def.wares || null, // (Seth-ji's shop: where each cracker sits on its shelf)
+    // The crackers a scene's stashes lean to (Pataka Chor's streets each have their own mix).
+    mix: def.mix || [],
+    donkeyAt(sx, sy) { return !!donkey && donkey.hit(sx, sy); },
+    donkeyBack() { return donkey ? donkey.back() : null; },
+    donkeyLoad(on) { if (donkey) donkey.load(on); },
+    donkeyExcite(sec) { if (donkey) donkey.excite(sec); },
+    get donkey() { return donkey && donkey.state; },
+    folkAt(sx, sy) { return folk && folk.hit ? folk.hit(sx, sy) : null; },
+    splat(name) { return folk && folk.splat ? folk.splat(name) : null; },
+    /** What the screen ray through (sx, sy) meets first in the scene (the buildings, trees, props and ground; not the
+     *  folk, the sky or the lights): its point { x, y, z } and distance, or null. */
+    pick(sx, sy) {
+      ndc.set((sx / W) * 2 - 1, -(sy / H) * 2 + 1);
+      ray.setFromCamera(ndc, camera);
+      const h = ray.intersectObjects(def.objects, true).find((o) => o.object.isMesh);
+      return h ? { x: h.point.x, y: h.point.y, z: h.point.z, dist: h.distance } : null;
+    },
     // A launch looks up after the rocket (0..1).
     setTilt(t) { if (Math.abs(t - look.tilt) > 1e-5) { look.tilt = t; place(); dirty = true; version++; } },
     /** Eases the camera and the burst light; returns true when the camera moved this frame. */
     update(dt) {
-      const k = 1 - Math.exp(-dt * 14);
+      const k = 1 - Math.exp(-dt * 14), walk = 1 - Math.exp(-dt * 2.2); // between viewpoints you walk, not snap
       let moved = false;
-      for (const [a, b] of [['yaw', 'tYaw'], ['pitch', 'tPitch'], ['z', 'tZ']]) {
+      for (const [a, b] of EASED) {
         const d = look[b] - look[a];
-        if (Math.abs(d) > 1e-5) { look[a] += d * k; moved = true; } else look[a] = look[b];
+        if (Math.abs(d) > 1e-4) { look[a] += d * (views && a !== 'yaw' && a !== 'pitch' ? walk : k); moved = true; } else look[a] = look[b];
       }
       if (moved) { place(); dirty = true; version++; }
       // An animated scene (a fountain, swaying trees, an evening drawing in) asks for a frame when it has changed.
       if (def.animate && def.animate(dt, env)) dirty = true;
       if (folk && folk.update(dt, camera)) dirty = true; // the dog and the old man, while they move on screen
+      if (donkey && donkey.update(dt, camera)) dirty = true;
       for (const L of lights) {
         if (L.I > 0.01) { L.I *= Math.exp(-dt * 2.6); L.l.intensity = L.I; dirty = true; }
         else if (L.I) { L.I = 0; L.l.intensity = 0; dirty = true; }
@@ -347,9 +587,10 @@ export async function create({ canvas, scene: id = 'taj', tier = 1, onLost, onFo
     /** Runs fn with the camera where it is easing to (after a drag or reset()), so a placement matches the view as it
      *  will settle; the camera is put back as it was. */
     atRest(fn) {
-      const was = [look.yaw, look.pitch, look.z];
-      look.yaw = look.tYaw; look.pitch = look.tPitch; look.z = look.tZ; place();
-      try { return fn(); } finally { [look.yaw, look.pitch, look.z] = was; place(); }
+      const was = EASED.map(([a]) => look[a]);
+      for (const [a, b] of EASED) look[a] = look[b];
+      place();
+      try { return fn(); } finally { EASED.forEach(([a], i) => { look[a] = was[i]; }); place(); }
     },
     /** Pixels per metre at distance d. */
     ppm(d) { return H / (2 * Math.tan((camera.fov * Math.PI) / 360) * Math.max(0.1, d)); },

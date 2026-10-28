@@ -8,8 +8,9 @@
   ];
   const KEY = 'luts:lang';
   const codes = LANGS.slice(1).map(([c]) => c);
-  let saved = 'auto';
-  try { saved = localStorage.getItem(KEY) || 'auto'; } catch (e) { /* storage blocked: follow the phone */ }
+  // English until you choose: a language you pick (or "Phone language") is stored and kept from then on.
+  let saved = 'en';
+  try { saved = localStorage.getItem(KEY) || 'en'; } catch (e) { /* storage blocked: English */ }
   const phone = (navigator.languages || [navigator.language || 'en']).map((l) => String(l).toLowerCase().split('-')[0]).find((l) => codes.includes(l)) || 'en';
   const lang = codes.includes(saved) ? saved : phone;
   window.LUTSLang = { langs: LANGS, chosen: codes.includes(saved) ? saved : 'auto', lang,

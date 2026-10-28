@@ -246,7 +246,7 @@
   const levelName = (lv) => (lv.daily ? `Daily Rocket #${lv.no}` : `${WORLDS[data.worlds[lv.world].id]} ${lv.index + 1}`);
   // Gems come from the game's shared puzzle rule (LUTSGame.reward). The last 3 worlds are Premium; free players can play
   // their first 5 levels. Premium also opens every world now, gives unlimited hints and every past daily.
-  const UNLOCK = 2 / 3, HINTS_A_DAY = 3, HINT_VIDEOS_A_DAY = 3, HINTS_PER_VIDEO = 2, PREMIUM_WORLDS = 3, TASTER = 5, ARCHIVE_DAYS = 14;
+  const UNLOCK = 2 / 3, HINTS_A_DAY = 1, HINT_VIDEOS_A_DAY = 3, HINTS_PER_VIDEO = 2, PREMIUM_WORLDS = 3, TASTER = 5, ARCHIVE_DAYS = 14;
   const TUTORIAL = [
     'Tap a rocket. It flies along its body and out the way its arrow points.',
     'A rocket flies only if its arrow’s lane is empty. A blocked tap burns a fuse.',
@@ -265,7 +265,7 @@
     if (!v || typeof v !== 'object') v = {};
     for (const k of ['stars', 'best', 'daily', 'vids']) v[k] = v[k] && typeof v[k] === 'object' ? v[k] : {};
     if (!Number.isFinite(v.hints)) v.hints = HINTS_A_DAY;
-    // Hints top back up to three every day.
+    // A free hint comes back every day; more cost gems (or a video, or Premium).
     if (v.hintDay !== today()) { v.hints = Math.max(v.hints, HINTS_A_DAY); v.hintDay = today(); for (const d of Object.keys(v.vids)) if (d !== today()) delete v.vids[d]; }
     return v;
   }
@@ -368,6 +368,7 @@
       </div>
       <div class="diya-result" id="rrResult" hidden>
         <div class="diya-result-box">
+          <button class="icon-btn diya-res-close" id="rrResClose" type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
           <p class="diya-kicker" id="rrResKicker"></p>
           <h2 id="rrResTitle"></h2>
           <p class="diya-res-stars" id="rrResStars" aria-hidden="true"></p>
@@ -380,6 +381,7 @@
             <div class="rr-res-share">
               <button class="btn ghost" id="rrSave" type="button">Save my sky</button>
               <button class="btn ghost" id="rrShareVideo" type="button">Share video</button>
+              <button class="btn primary" id="rrChallenge" type="button">Challenge a friend</button>
             </div>
             <button class="btn ghost" id="rrAgain" type="button">Play again</button>
           </div>
@@ -388,8 +390,9 @@
       </div>
       <div class="diya-hintbox" id="rrHintBox" hidden>
         <div class="diya-result-box">
+          <button class="icon-btn diya-res-close" id="rrHintX" type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
           <h2>Out of hints</h2>
-          <p class="diya-res-line">Three hints come back every day.</p>
+          <p class="diya-res-line">A free hint comes back every day.</p>
           <div class="diya-res-actions">
             <button class="btn primary diya-gem-hint" id="rrHintGems" type="button"></button>
             <button class="btn ghost" id="rrHintVideo" type="button">Watch a video · +2 hints</button>
@@ -411,6 +414,8 @@
     $('#rrHint').addEventListener('click', useHint);
     $('#rrHintVideo').addEventListener('click', hintVideo);
     $('#rrHintClose').addEventListener('click', () => { el.hintBox.hidden = true; });
+    $('#rrResClose').addEventListener('click', () => { el.result.hidden = true; });
+    $('#rrHintX').addEventListener('click', () => { el.hintBox.hidden = true; });
     $('#rrHintGems').addEventListener('click', () => {
       const g = game();
       el.hintBox.hidden = true;
@@ -428,6 +433,7 @@
     $('#rrNext').addEventListener('click', () => { const nx = nextLevel(); if (nx) play(nx); else showMap(); });
     $('#rrSave').addEventListener('click', saveSky);
     $('#rrShareVideo').addEventListener('click', shareVideo);
+    $('#rrChallenge').addEventListener('click', shareChallenge);
     $('#rrAgain').addEventListener('click', () => play(current));
     $('#rrLevels').addEventListener('click', () => showMap());
     el.skip.addEventListener('pointerdown', (e) => { if (show && e.target.id !== 'rrSkipBtn') show.rate = 3; });
@@ -532,6 +538,46 @@
   // fly: rockets on their way out; shake: a blocked rocket; slide: the next wave coming in (0 → 1).
   let run = null, current = null, cell = 0, ox = 0, oy = 0, side = 0, dpr = 1, raf = 0, last = 0, secs = 0;
   let fly = [], shakes = [], sparks = [], smoke = [], hintAt = -1, hintId = -1, slide = null, award = null, chainTimer = 0, bannerTimer = 0;
+  // ----- Challenge a friend: a link with this level (or this day's Daily Rocket) and your score; it opens the same board
+  // for them with your score to beat (in the app; the web sends to Google Play). -----
+  let vs = null; // { id, n, s, day } a friend's challenge being played
+  function shareChallenge() {
+    const D = root.LUTSDuel, g = game();
+    if (!D || !run || !current) return;
+    const name = D.savedName(), score = run.score;
+    const link = D.link(`rrvs=${D.encode({ n: name, id: current.id, d: current.daily ? current.day : '', s: score })}`);
+    const text = `🚀 I scored ${score.toLocaleString('en-IN')} on ${levelName(current)} in Rocket Rush. Can you beat it? Same board:`;
+    const blob = D.card({ art: 'assets/menu/rocket-rush.png', kicker: name ? `${name} challenges you` : 'Rocket Rush challenge', title: levelName(current), big: score.toLocaleString('en-IN'), line: 'Rocket Rush · same board' });
+    D.share({ title: 'Rocket Rush challenge', text, url: link, blob, name: 'rocket-rush-challenge.png', src: 'rrvs' });
+  }
+  function readVs() {
+    const m = location.hash.match(/rrvs=([A-Za-z0-9_-]+)/);
+    if (!m) return null;
+    try {
+      let b = m[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b.length % 4) b += '=';
+      const v = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b), (ch) => ch.charCodeAt(0))));
+      const sc = Math.round(+v.s);
+      if (!(sc > 0 && sc < 1e7) || typeof v.id !== 'string') return null;
+      return { id: v.id.slice(0, 40), day: /^\d{4}-\d{2}-\d{2}$/.test(v.d) ? v.d : '', n: String(v.n || '').slice(0, 20), s: sc };
+    } catch (e) { return null; }
+  }
+  async function openVs() {
+    const v = readVs(), D = root.LUTSDuel;
+    if (!v) return;
+    if (D && !D.native()) { D.toApp('rrvs'); return; }
+    history.replaceState(null, '', location.pathname + location.search);
+    await open(false);
+    if (!data) return;
+    let lv = null;
+    if (v.day) lv = daily(v.day);
+    else data.worlds.forEach((wd, i) => wd.levels.forEach((l, j) => { if (l.id === v.id) lv = { ...l, world: i, index: j }; }));
+    if (!lv) { if (game()) game().toast('That level isn’t here. Update the app'); return; }
+    vs = { ...v, id: lv.id };
+    play(lv); // (a friend's level plays whatever it is: like a card you're sent)
+  }
+  root.addEventListener('hashchange', () => { if (/rrvs=/.test(location.hash)) openVs(); });
+  if (/rrvs=/.test(location.hash)) { const wait = () => (root.LUTSGame && root.LUTSDuel ? openVs() : setTimeout(wait, 300)); setTimeout(wait, 800); }
   function play(lv) {
     stopShow(); cancelFinale();
     if (!lv.daily) shownWorld = lv.world; // back on the map, this world stays open
@@ -542,7 +588,8 @@
     el.root.classList.remove('showing');
     el.play.hidden = false;
     $('#rrLevelName').textContent = levelName(lv);
-    const tip = !lv.daily && lv.world === 0 && lv.index < TUTORIAL.length ? TUTORIAL[lv.index] : '';
+    const dare = vs && vs.id === lv.id ? `Beat ${vs.n || 'your friend'}: ${vs.s.toLocaleString('en-IN')} points` : ''; // (a friend's challenge)
+    const tip = dare || (!lv.daily && lv.world === 0 && lv.index < TUTORIAL.length ? TUTORIAL[lv.index] : '');
     $('#rrTip').textContent = tip;
     $('#rrTip').hidden = !tip;
     layout();
@@ -781,7 +828,13 @@
       $('#rrSave').hidden = false;
       $('#rrShareVideo').hidden = false;
       $('#rrAgain').textContent = 'Play again';
+      if (vs && vs.id === current.id) { // against a friend's score
+        const d = r.score - vs.s;
+        $('#rrResLine').textContent = d > 0 ? `You beat ${vs.n || 'your friend'} by ${d.toLocaleString('en-IN')} points!` : d === 0 ? `A tie with ${vs.n || 'your friend'}!` : `${vs.n || 'Your friend'} scored ${(-d).toLocaleString('en-IN')} more. Try again!`;
+      }
     }
+    $('#rrChallenge').hidden = !!a.fail;
+    $('#rrChallenge').textContent = vs && vs.id === current.id ? 'Challenge back' : 'Challenge a friend';
     $('#rrResPremium').hidden = !game() || isPremium();
     el.result.hidden = false;
     $('#rrNext').hidden ? $('#rrAgain').focus() : $('#rrNext').focus();

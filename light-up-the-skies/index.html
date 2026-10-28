@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="robots" content="noindex">
   <!-- The public web copy only opens shared cards and challenges. Anyone else goes to the landing page and its demo. -->
-  <script>if (location.hostname === 'stalinpusparaj.github.io' && !/(card|vs)=|^#daily\b/.test(location.hash)) location.replace('/');</script>
+  <script>if (location.hostname === 'stalinpusparaj.github.io' && !/(card|vs|duel|heist|rrvs|dpvs|room)=|^#daily\b/.test(location.hash)) location.replace('/');</script>
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Light Up the Skies</title>
   <meta name="description" content="Choose a cracker, follow its flight, and enjoy fireworks over India's landmarks. Send a love card with a name written in light.">
@@ -225,12 +225,26 @@
       <img class="intro-icon" src="assets/icons/icon-192.png" alt="" width="88" height="88">
       <h1 class="title">Light Up<br>the Skies</h1>
       <p class="lead">Fireworks over India’s landmarks, and wishes written in the sky.</p>
+      <button type="button" class="home-today" id="homeToday" hidden></button>
+      <button type="button" class="home-rival" id="homeRival" hidden></button>
       <div class="intro-actions">
         <button class="btn primary" id="btnStart"><span class="btn-ico firework-glyph" aria-hidden="true"></span>Start the show</button>
         <button class="btn ghost" id="btnIntroCard">Create a love card</button>
         <!-- On the website only (never in the app): the free Android app, for a friend who opened a shared link -->
         <a class="btn ghost get-app" id="btnGetApp" target="_blank" rel="noopener" hidden><span aria-hidden="true">▶</span><span>Get it on Google Play</span></a>
       </div>
+      <!-- Challenges: every way to play against a friend, side by side (game.js, duel.js, chor.js, the puzzles) -->
+      <section class="home-ch" aria-labelledby="homeChHead">
+        <div class="home-ch-head"><h3 id="homeChHead">Challenges</h3><button class="home-ch-all" id="btnChBoards" type="button">Leaderboards</button></div>
+        <div class="home-ch-row">
+          <button class="ch-card mela-card" id="btnMela" type="button" style="--j: 255, 150, 60"><i aria-hidden="true">🛕</i><b>Mela Night</b><small id="melaCount">Up to 4 at a temple</small><em aria-hidden="true">LIVE</em></button>
+          <button class="ch-card" id="btnDuel" type="button" style="--j: 255, 95, 162"><i aria-hidden="true">⚔️</i><b>Sky Duel</b><small>Your show vs a friend’s</small><em aria-hidden="true">NEW</em></button>
+          <button class="ch-card" id="btnRush" type="button" style="--j: 80, 200, 150"><i aria-hidden="true">🏮</i><b>Score Challenge</b><small id="tileRush">Beat a friend’s score</small><em aria-hidden="true">VS</em></button>
+          <button class="ch-card" id="btnChRace" type="button" style="--j: 255, 120, 60"><i aria-hidden="true">⏱</i><b>Street Race</b><small>Find 9 stashes fastest</small></button>
+          <button class="ch-card" id="btnChRocket" type="button" style="--j: 255, 90, 78"><i aria-hidden="true">🚀</i><b>Daily Rocket</b><small>Same board for everyone</small></button>
+          <button class="ch-card" id="btnChDiya" type="button" style="--j: 255, 176, 70"><i aria-hidden="true">🪔</i><b>Daily Diya</b><small>Fewest moves wins</small></button>
+        </div>
+      </section>
       <div class="home-tiles">
         <!-- Diwali week: a challenge each day from Dhanteras to Bhai Dooj (game.js renderFest) -->
         <button class="home-tile wide fest-tile" id="btnFest" type="button" hidden>
@@ -251,11 +265,6 @@
           <span class="tile-text"><b>Daily Sky</b><small id="tileDaily">Today’s lanterns</small></span>
           <span class="tile-badge" id="badgeDaily">Today</span>
         </button>
-        <button class="home-tile" id="btnRush" type="button">
-          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/challenge.webp"><img src="assets/menu/challenge.png" alt="" width="40" height="40" decoding="async"></picture>
-          <span class="tile-text"><b>Challenge</b><small id="tileRush">Beat a friend’s score</small></span>
-          <span class="tile-badge" aria-hidden="true">VS</span>
-        </button>
         <button class="home-tile wide" id="btnDiya" type="button">
           <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/diya-path.webp"><img src="assets/menu/diya-path.png" alt="" width="40" height="40" decoding="async"></picture>
           <span class="tile-text"><b>Diya Path</b><small id="tileDiya">Join the diyas with light</small></span>
@@ -264,11 +273,22 @@
           <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/rocket-rush.webp"><img src="assets/menu/rocket-rush.png" alt="" width="40" height="40" decoding="async"></picture>
           <span class="tile-text"><b>Rocket Rush</b><small id="tileRocket">Launch the rockets in the right order</small></span>
         </button>
+        <button class="home-tile wide" id="btnChor" type="button">
+          <span class="tile-ico tile-art chor-ico" aria-hidden="true">🧨</span>
+          <span class="tile-text"><b>Pataka Chor</b><small id="tileChor">Sneak down the bazaar and find hidden crackers</small></span>
+          <span class="tile-badge" aria-hidden="true">New</span>
+        </button>
         <button class="home-tile wide" id="btnBoard" type="button">
           <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/achievements.webp"><img src="assets/menu/achievements.jpg" alt="" width="40" height="40" decoding="async"></picture>
           <span class="tile-text"><b>Leaderboard</b><small id="tileBoard">Who is winning the Daily Sky this week</small></span>
         </button>
       </div>
+      <nav class="home-bar" id="homeBar" aria-label="Home menu">
+        <button type="button" data-open="eventsModal"><i aria-hidden="true">🎯</i><span>Events</span><em id="homeBarEventsN" hidden></em></button>
+        <button type="button" id="homeBarCards"><i aria-hidden="true">💌</i><span>Cards</span></button>
+        <button type="button" class="on" aria-current="page"><i aria-hidden="true">🏠</i><span>Home</span></button>
+        <button type="button" data-open="storeModal"><i aria-hidden="true">🛍️</i><span>Store</span></button>
+      </nav>
       <p class="keys">Space pause · S sound · H hide controls</p>
     </div>
   </section>
@@ -501,6 +521,7 @@
   <div class="modal" id="arSafety" hidden>
     <section class="trial-box ar-safety" role="alertdialog" aria-modal="true" aria-labelledby="arSafetyTitle" aria-describedby="arSafetyText">
       <div class="ar-safety-ico" aria-hidden="true">⚠️</div>
+      <button class="icon-btn dlg-x" id="btnArSafeX" aria-label="Close" type="button"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       <h2 id="arSafetyTitle">Safety first in AR</h2>
       <ul id="arSafetyText">
         <li><b>Grown-ups nearby.</b> Children should use AR with a parent or adult watching.</li>
@@ -513,6 +534,7 @@
   </div>
   <div class="modal" id="crackerTrial" hidden>
     <section class="trial-box" role="dialog" aria-modal="true" aria-labelledby="trialTitle">
+      <button class="icon-btn dlg-x" id="btnTrialX" aria-label="Close" type="button"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       <h2 id="trialTitle">Keep the sky glowing</h2>
       <p>You’ve tried this cracker. Replay for 50 points, earn more launches, or unlock Premium.</p>
       <button class="btn primary" id="btnTrialRewards" type="button">Earn more launches</button>
@@ -814,6 +836,7 @@
   <!-- Welcome: shown once, the first time the show starts -->
   <div class="modal welcome-modal" id="welcomeModal" hidden>
     <div class="modal-box welcome-box" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
+      <button class="icon-btn dlg-x" id="btnWelcomeX" aria-label="Close" type="button"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       <h2 id="welcomeTitle">Three things to try</h2>
       <ul class="welcome-list">
         <li><span aria-hidden="true">👆</span><span><b>Your next firework</b><small>A little light, one moment at a time.</small></span></li>
@@ -821,6 +844,77 @@
         <li><span aria-hidden="true">💌</span><span><b>Send a wish</b><small>Tap Create a love card on the home screen to write their name in fireworks, then save the video for WhatsApp.</small></span></li>
       </ul>
       <button type="button" class="btn primary" id="btnWelcome">Let’s go</button>
+    </div>
+  </div>
+
+
+  <!-- Mela Night (rooms.js): fireworks together, up to four at a temple -->
+  <div class="modal sheet-modal" id="melaModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="melaTitle">
+      <header class="modal-head card-head"><button type="button" class="nav-back sheet-back" data-close="melaModal" aria-label="Back to home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Back</button><div><h2 id="melaTitle">Mela Night</h2><p id="melaSub">Fireworks together, up to four at a temple. Most hearts wins.</p></div></header>
+      <div class="modal-body sheet-body">
+        <section data-view="pick">
+          <p class="mela-online" id="melaOnline"></p>
+          <div class="mela-modes" id="melaModes" role="group" aria-label="Game"><button type="button" data-mode="show" aria-pressed="true">🎆 Fireworks show</button><button type="button" data-mode="race" aria-pressed="false">⏱ Street race</button></div>
+          <div class="mela-live" id="melaLive" hidden><h3>🔴 Live now</h3><ol></ol></div>
+          <div class="mela-places" id="melaPlaces"></div>
+          <button type="button" class="btn primary mela-go mela-big" id="melaOnlineBtn"><span aria-hidden="true">🌐</span> Play online</button>
+          <button type="button" class="btn primary mela-go mela-big mela-green" id="melaFriends"><span aria-hidden="true">👫</span> Play with friends</button>
+          <div class="mela-join"><input id="melaCodeIn" maxlength="4" placeholder="Room code" autocomplete="off" autocapitalize="characters"><button type="button" class="btn ghost mela-go" id="melaJoin">Join</button></div>
+          <button type="button" class="btn ghost mela-go" id="melaPractice"><span aria-hidden="true">🤖</span> Practice with computer players</button>
+        </section>
+        <section data-view="lobby" hidden>
+          <p class="mela-lobby-place" id="melaLobbyPlace"></p>
+          <p class="mela-code-line">Room code <b id="melaCode" translate="no"></b></p>
+          <ol class="mela-seats" id="melaSeats"></ol>
+          <p class="mela-watchers" id="melaWatchers"></p>
+          <p class="mela-note" id="melaLobbyNote"></p>
+          <button type="button" class="btn primary mela-big mela-green" id="melaInvite"><span aria-hidden="true">💬</span> Invite on WhatsApp</button>
+          <button type="button" class="btn primary mela-big" id="melaStart">Start the show</button>
+          <button type="button" class="btn ghost" id="melaBots">Add a computer player</button>
+          <button type="button" class="btn ghost" id="melaLeave">Leave the room</button>
+        </section>
+        <section data-view="result" hidden>
+          <h3 class="mela-res-title" id="melaResTitle"></h3>
+          <ol class="mela-rank" id="melaRank"></ol>
+          <p class="mela-res-gems" id="melaResGems"></p>
+          <button type="button" class="btn primary mela-big" id="melaAgain">Play again</button>
+          <button type="button" class="btn primary mela-big mela-green" id="melaShare"><span aria-hidden="true">💬</span> Share</button>
+          <button type="button" class="btn ghost" id="melaDone">Home</button>
+        </section>
+      </div>
+    </div>
+  </div>
+  <!-- Events and the Store (events.js), from the home screen's bottom bar -->
+  <div class="modal sheet-modal" id="eventsModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="eventsTitle">
+      <header class="modal-head card-head"><button type="button" class="nav-back sheet-back" data-close="eventsModal" aria-label="Back to home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Back</button><div><h2 id="eventsTitle">Today’s goals</h2><p>Four goals a day. Two are about the people you love.</p></div></header>
+      <div class="modal-body sheet-body">
+        <ol class="goal-list" id="goalList"></ol>
+        <button type="button" class="btn primary goal-bonus" id="goalBonus" disabled>🎁 All four done</button>
+        <div class="goal-links">
+          <button type="button" class="btn ghost" id="goalJoy">✨ Light someone up</button>
+          <button type="button" class="btn ghost" id="goalCard">💌 Make a card</button>
+        </div>
+        <p class="goal-note">New goals every day at midnight.</p>
+      </div>
+    </div>
+  </div>
+  <div class="modal sheet-modal" id="storeModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="storeTitle">
+      <header class="modal-head card-head"><button type="button" class="nav-back sheet-back" data-close="storeModal" aria-label="Back to home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Back</button><div><h2 id="storeTitle">Store</h2><p>Spin, watch, or get gems.</p></div></header>
+      <div class="modal-body sheet-body">
+        <section class="draw">
+          <h3>🎡 Lucky Draw</h3>
+          <div class="draw-wrap"><div class="draw-wheel" id="drawWheel"></div><i class="draw-pin" aria-hidden="true"></i></div>
+          <p class="draw-won" id="drawWon" aria-live="polite"></p>
+          <button type="button" class="btn primary" id="drawSpin">Spin free</button>
+          <p class="draw-odds" id="drawOdds"></p>
+        </section>
+        <button type="button" class="store-row" id="storeFree"><i aria-hidden="true">🎬</i><span><b>Free gems</b><small>Watch a short video: 💎 10 · <span id="storeFreeLeft">4 of 4 left today</span></small></span></button>
+        <button type="button" class="store-row" id="storeNoAds"><i aria-hidden="true">🚫</i><span><b>No ads</b><small>Premium: no ads, every cracker, every level</small></span></button>
+        <button type="button" class="store-row" id="storeGems"><i aria-hidden="true">💎</i><span><b>Gem shop</b><small>Packs of gems</small></span></button>
+      </div>
     </div>
   </div>
 
@@ -1073,6 +1167,7 @@
           <button type="button" role="tab" class="cards-tab" data-tab="made" aria-selected="true">Made</button>
           <button type="button" role="tab" class="cards-tab" data-tab="got" aria-selected="false">Received</button>
         </div>
+        <div class="cards-pairs" id="cardsPairs" hidden></div>
         <div class="sheet-row cards-soon" id="cardsSoon" hidden></div>
         <ul class="sheet-list" id="cardsList"></ul>
         <p class="sheet-empty" id="cardsEmpty" hidden></p>
@@ -1138,6 +1233,28 @@
   </div>
 
   <!-- Lantern Rush: the Daily Sky, a friend's challenge, a new round, or a result -->
+  <!-- Sky Duel (duel.js): set up, a friend's invite, your turn, the result -->
+  <div class="modal sheet-modal" id="duelModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="duelTitle">
+      <header class="modal-head card-head">
+        <button type="button" class="nav-back" id="btnDuelHome" aria-label="Back to home">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Home
+        </button>
+        <div>
+          <h2 id="duelTitle">Sky Duel</h2>
+          <p id="duelSub"></p>
+        </div>
+      </header>
+      <div class="modal-body sheet-body">
+        <div class="duel-card" id="duelCard"></div>
+      </div>
+      <footer class="modal-foot">
+        <button type="button" class="btn ghost" id="btnDuelSteal" hidden>Use their crackers</button>
+        <button type="button" class="btn ghost" id="btnDuelChallenge" hidden><span class="btn-ico share-glyph" aria-hidden="true"></span>Challenge a friend</button>
+        <button type="button" class="btn primary" id="btnDuelGo"><span class="btn-ico firework-glyph" aria-hidden="true"></span>Start the show</button>
+      </footer>
+    </div>
+  </div>
   <div class="modal sheet-modal" id="rushModal" hidden>
     <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="rushTitle">
       <header class="modal-head card-head">
@@ -1174,7 +1291,11 @@
   <script src="launch-controller.js"></script>
   <script src="diya-path.js"></script>
   <script src="rocket-rush.js"></script>
+  <script src="chor.js"></script>
   <script src="game.js"></script>
+  <script src="duel.js"></script>
+  <script src="events.js"></script>
+  <script src="rooms.js"></script>
   <script src="tv.js"></script>
 </body>
 </html>

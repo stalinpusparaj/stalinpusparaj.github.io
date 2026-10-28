@@ -187,7 +187,7 @@
   const levelName = (lv) => (lv.daily ? `Daily Diya #${lv.no}` : `${CHAPTERS[data.chapters[lv.chapter].id]} ${lv.index + 1}`);
   // Gems come from the game's shared puzzle rule (LUTSGame.reward). The last 3 chapters (8×8) are Premium; free players
   // can play their first 5 levels. Premium also opens every chapter now, gives unlimited hints and every past daily.
-  const UNLOCK = 2 / 3, HINTS_A_DAY = 3, HINT_VIDEOS_A_DAY = 3, HINTS_PER_VIDEO = 2, PREMIUM_CHAPTERS = 3, TASTER = 5, ARCHIVE_DAYS = 14;
+  const UNLOCK = 2 / 3, HINTS_A_DAY = 1, HINT_VIDEOS_A_DAY = 3, HINTS_PER_VIDEO = 2, PREMIUM_CHAPTERS = 3, TASTER = 5, ARCHIVE_DAYS = 14;
   const TUTORIAL = [
     'Drag from a diya to the diya of the same colour.',
     'Paths can’t cross. Fill every square for a perfect light.',
@@ -205,7 +205,7 @@
     if (!v || typeof v !== 'object') v = {};
     for (const k of ['stars', 'best', 'daily', 'vids']) v[k] = v[k] && typeof v[k] === 'object' ? v[k] : {};
     if (!Number.isFinite(v.hints)) v.hints = HINTS_A_DAY;
-    // Hints top back up to three every day.
+    // A free hint comes back every day; more cost gems (or a video, or Premium).
     if (v.hintDay !== today()) { v.hints = Math.max(v.hints, HINTS_A_DAY); v.hintDay = today(); for (const d of Object.keys(v.vids)) if (d !== today()) delete v.vids[d]; }
     return v;
   }
@@ -391,6 +391,7 @@
             <div class="diya-res-share">
               <button class="btn ghost" id="diyaShare" type="button">Share</button>
               <button class="btn ghost" id="diyaShareVideo" type="button">Share video</button>
+              <button class="btn primary" id="diyaChallenge" type="button">Challenge a friend</button>
             </div>
             <button class="btn ghost" id="diyaAgain" type="button">Play again</button>
           </div>
@@ -399,8 +400,9 @@
       </div>
       <div class="diya-hintbox" id="diyaHintBox" hidden>
         <div class="diya-result-box">
+          <button class="icon-btn diya-res-close" id="diyaHintX" type="button" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
           <h2>Out of hints</h2>
-          <p class="diya-res-line">Three hints come back every day.</p>
+          <p class="diya-res-line">A free hint comes back every day.</p>
           <div class="diya-res-actions">
             <button class="btn primary diya-gem-hint" id="diyaHintGems" type="button"></button>
             <button class="btn ghost" id="diyaHintVideo" type="button">Watch a video · +2 hints</button>
@@ -438,6 +440,7 @@
     });
     $('#diyaHintVideo').addEventListener('click', hintVideo);
     $('#diyaHintClose').addEventListener('click', () => { el.hintBox.hidden = true; });
+    $('#diyaHintX').addEventListener('click', () => { el.hintBox.hidden = true; });
     $('#diyaHintGems').addEventListener('click', () => {
       const g = game();
       el.hintBox.hidden = true;
@@ -459,6 +462,7 @@
     $('#diyaResClose').addEventListener('click', () => { el.result.hidden = true; });
     $('#diyaShare').addEventListener('click', shareLevel);
     $('#diyaShareVideo').addEventListener('click', shareVideo);
+    $('#diyaChallenge').addEventListener('click', shareChallenge);
     el.skip.addEventListener('pointerdown', () => { if (showTimer) { clearTimeout(showTimer); showTimer = 0; showResult(); } });
     const cv = el.canvas;
     cv.addEventListener('pointerdown', onDown);
@@ -563,6 +567,48 @@
 
   // ----- Playing a level -----
   let board = null, current = null, cell = 0, ox = 0, oy = 0, dpr = 1, raf = 0, last = 0, sparks = [], glowAt = [], finished = false, showTimer = 0;
+  // ----- Challenge a friend: a link with this level (or this day's Daily Diya) and your moves; it opens the same board
+  // for them with your moves to beat (in the app; the web sends to Google Play). -----
+  let vs = null; // { id, n, m, day } a friend's challenge being played
+  function shareChallenge() {
+    const D = root.LUTSDuel;
+    if (!D || !board || !current) return;
+    const name = D.savedName(), m = board.moves;
+    const link = D.link(`dpvs=${D.encode({ n: name, id: current.id, d: current.daily ? current.day : '', m })}`);
+    const text = `🪔 I lit ${levelName(current)} in ${m} moves in Diya Path. Can you do it in fewer? Same board:`;
+    const blob = D.card({ art: 'assets/menu/diya-path.png', kicker: name ? `${name} challenges you` : 'Diya Path challenge', title: levelName(current), big: `${m} moves`, line: 'Diya Path · same board' });
+    D.share({ title: 'Diya Path challenge', text, url: link, blob, name: 'diya-path-challenge.png', src: 'dpvs' });
+  }
+  function readVs() {
+    const mm = location.hash.match(/dpvs=([A-Za-z0-9_-]+)/);
+    if (!mm) return null;
+    try {
+      let b = mm[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b.length % 4) b += '=';
+      const v = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b), (ch) => ch.charCodeAt(0))));
+      const m = Math.round(+v.m);
+      if (!(m > 0 && m < 1000) || typeof v.id !== 'string') return null;
+      return { id: v.id.slice(0, 40), day: /^\d{4}-\d{2}-\d{2}$/.test(v.d) ? v.d : '', n: String(v.n || '').slice(0, 20), m };
+    } catch (e) { return null; }
+  }
+  async function openVs() {
+    const v = readVs(), D = root.LUTSDuel;
+    if (!v) return;
+    if (D && !D.native()) { D.toApp('dpvs'); return; }
+    history.replaceState(null, '', location.pathname + location.search);
+    await open(false);
+    if (!data) return;
+    let lv = null;
+    if (v.day) lv = dailyLevel(v.day);
+    else data.chapters.forEach((ch, i) => ch.levels.forEach((l, j) => { if (l.id === v.id) lv = { ...l, chapter: i, index: j }; }));
+    if (!lv) { if (game()) game().toast('That level isn’t here. Update the app'); return; }
+    vs = { ...v, id: lv.id };
+    play(lv);
+  }
+  if (root.addEventListener) {
+    root.addEventListener('hashchange', () => { if (/dpvs=/.test(location.hash)) openVs(); });
+    if (/dpvs=/.test(location.hash)) { const wait = () => (root.LUTSGame && root.LUTSDuel ? openVs() : setTimeout(wait, 300)); setTimeout(wait, 800); }
+  }
   function play(lv) {
     if (!lv.daily) shownChapter = lv.chapter; // back on the map, this chapter stays open
     current = lv; board = new Board(lv); finished = false; startedAt = Date.now(); replay = null;
@@ -574,7 +620,8 @@
     el.root.classList.remove('showing');
     el.play.hidden = false;
     $('#diyaLevelName').textContent = levelName(lv);
-    const tip = !lv.daily && lv.chapter === 0 && lv.index < TUTORIAL.length ? TUTORIAL[lv.index] : '';
+    const dare = vs && vs.id === lv.id ? `Beat ${vs.n || 'your friend'}: ${vs.m} moves` : ''; // (a friend's challenge)
+    const tip = dare || (!lv.daily && lv.chapter === 0 && lv.index < TUTORIAL.length ? TUTORIAL[lv.index] : '');
     $('#diyaTip').textContent = tip;
     $('#diyaTip').hidden = !tip;
     layout();
@@ -823,6 +870,11 @@
     if (award.chest) { $('#diyaChestText').textContent = `🎁 Chest +${award.chest}`; const d = $('#diyaChestDouble'); d.disabled = false; d.hidden = !(g && g.videoReady()); }
     $('#diyaResPremium').hidden = !g || isPremium();
     $('#diyaResStreak').textContent = streak ? `🔥 ${streak}-day streak` : '';
+    if (vs && vs.id === current.id) { // against a friend's moves (fewer is better)
+      const d = vs.m - b.moves;
+      $('#diyaResLine').textContent = d > 0 ? `You beat ${vs.n || 'your friend'} by ${d} moves!` : d === 0 ? `A tie with ${vs.n || 'your friend'}!` : `${vs.n || 'Your friend'} used ${-d} fewer moves. Try again!`;
+    }
+    $('#diyaChallenge').textContent = vs && vs.id === current.id ? 'Challenge back' : 'Challenge a friend';
     const nx = nextLevel();
     $('#diyaNext').hidden = !nx;
     $('#diyaResult').hidden = false;
