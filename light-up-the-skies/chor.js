@@ -1,4 +1,4 @@
-// Cracker Street: sneak down a bazaar street on Diwali night and find the crackers hidden in it: on shop counters, behind
+// Fireworks Street: sneak down a bazaar street on Diwali night and find the crackers hidden in it: on shop counters, behind
 // crates, under the stalls. There is no shop and nothing to buy. Whatever you find goes in your bag (3 at a time).
 // Tap a cracker in the bag to put it down in front of you and light it with Fire or a tap on it (the street has no
 // sparkler: Fire and a throw light everything); or drag it up into the street to throw
@@ -29,6 +29,9 @@
   const TREASURES = [['lakshmi', 'Golden Lakshmi', '🪷'], ['nataraja', 'Bronze Nataraja', '🔱'], ['ganesha', 'Silver Ganesha', '🐘'], ['peacock', 'Jewelled Peacock', '🦚'], ['diya', 'Diamond Diya', '🪔'], ['crown', 'Maharaja’s Crown', '👑']];
   // Each treasure's own picture (assets/chor/treasure, made in Google Flow); the emoji stays for texts and toasts.
   const tPic = (t) => `<img class="chor-tpic" src="assets/chor/treasure/${t[0]}.webp" alt="" aria-hidden="true">`;
+  // The same pictures for canvases (the vault's marker in the street), loaded once each.
+  const tImgs = {};
+  const tImg = (id) => { if (!tImgs[id]) { tImgs[id] = new Image(); tImgs[id].src = `assets/chor/treasure/${id}.webp`; } return tImgs[id]; };
   const treasureOfWeek = (ms = Date.now()) => TREASURES[Math.floor((ms / 864e5 + 3) / 7) % TREASURES.length];
   const THIEF_HEISTS = 5, ESCAPE_RUN = 3.6, GATE_R = 3.5; // heists for the Master Thief frame; Seth-ji's speed after you; how near the gate counts
   const BAG = 6, BIG_BAG = 10, /* kinds of cracker the bag holds (each up to STACK); it scrolls */ STASHES = 9, RARE_GEMS = 15, REACH = 24; // metres: further away, the stash is only a glow to walk to
@@ -363,7 +366,12 @@
     if (round) { g.beginPath(); g.arc(64, 70, 40, 0, Math.PI * 2); } else rr(g, 20, 26, 88, 88, 22);
     const body = g.createLinearGradient(0, 26, 0, 114); body.addColorStop(0, '#5a3a9a'); body.addColorStop(1, '#2a1650');
     g.fillStyle = body; g.fill(); g.lineWidth = 7; g.strokeStyle = edge; g.stroke();
-    g.font = '54px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(sign, 64, 73);
+    const pic = s.vault ? tImg(treasureOfWeek()[0]) : null;
+    if (pic && pic.complete && pic.naturalWidth) { g.save(); rr(g, 24, 30, 80, 80, 18); g.clip(); g.drawImage(pic, 24, 30, 80, 80); g.restore(); } // the vault: the week's treasure itself
+    else {
+      if (pic) pic.addEventListener('load', () => syncLabels(), { once: true }); // (the emoji until its picture is in)
+      g.font = '54px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(sign, 64, 73);
+    }
     if (badge) {
       g.font = '700 22px Outfit, sans-serif'; const w = g.measureText(badge).width + 18;
       rr(g, 120 - w, 8, w, 30, 15); g.fillStyle = '#ffd27a'; g.fill(); g.fillStyle = '#2a1640'; g.fillText(badge, 120 - w / 2, 24);
@@ -1416,7 +1424,7 @@
     const best = Math.max(state.best || 0, state.score), isBest = state.score > (state.best || 0) && state.score > 0;
     state.best = best; save();
     g.score(state.score);
-    box.innerHTML = `<div class="chor-card"><small>Cracker Street · tonight</small><b>${state.score}</b><span>${isBest ? 'chaos points · a new best!' : 'chaos points'}</span>`
+    box.innerHTML = `<div class="chor-card"><small>Fireworks Street · tonight</small><b>${state.score}</b><span>${isBest ? 'chaos points · a new best!' : 'chaos points'}</span>`
       + `<p>${daily.filter(isTaken).length} of ${daily.length} stashes found · best ${best}</p>`
       + '<div class="chor-card-btns"><button type="button" class="btn ghost" data-act="share">Share</button><button type="button" class="btn primary" data-act="on">Keep playing</button></div></div>';
     box.hidden = false;
@@ -1426,7 +1434,7 @@
       if (act.dataset.act === 'on') { box.hidden = true; return; }
       const L = window.LUTSGame;
       // (drawn onto the share card's canvas, so translated here)
-      if (L && L.shareResult) L.shareResult({ kicker: 'Cracker Street', title: T((STREETS.find((t) => t.id === G().street) || STREETS[0]).name), big: String(state.score), line: T('chaos points') + ' · ' + T(`${daily.filter(isTaken).length} stashes found`), art: `assets/chor/thumb/${G().street}.webp`, name: 'pataka-chor.png', text: T(`🧨 I caused ${state.score} points of Diwali chaos in Cracker Street!`) });
+      if (L && L.shareResult) L.shareResult({ kicker: 'Fireworks Street', title: T((STREETS.find((t) => t.id === G().street) || STREETS[0]).name), big: String(state.score), line: T('chaos points') + ' · ' + T(`${daily.filter(isTaken).length} stashes found`), art: `assets/chor/thumb/${G().street}.webp`, name: 'pataka-chor.png', text: T(`🧨 I caused ${state.score} points of Diwali chaos in Fireworks Street!`) });
     };
   }
   // ---------- The street picker and the how-to-play ----------
@@ -1466,7 +1474,7 @@
     };
     picker.innerHTML = `<div class="chor-ptop">
         <button type="button" class="chor-pback" data-pick-close aria-label="${T(fromStreet ? 'Close' : 'Back')}">${fromStreet ? '✕' : '‹'}</button>
-        <div class="chor-ptitle"><small>Cracker Street</small><b>${T('Pick a street')}</b></div>
+        <div class="chor-ptitle"><small>Fireworks Street</small><b>${T('Pick a street')}</b></div>
         <button type="button" class="chor-phow" data-pick-how>？ <span>${T('How to play')}</span></button>
       </div>
       <div class="chor-pscroll">
@@ -1595,7 +1603,7 @@
     const g = G(), w = g && g.w3d;
     if (!w || race) return;
     closeSheet();
-    race = { day: day || state.day, street: g.street, target, t0: null, mela: mela || null, found: -1, phase: 'keys', treasure: treasureOfWeek() }; // (mela: a Mela Night room's live race, rooms.js)
+    race = { day: day || state.day, street: g.street, target, t0: null, mela: mela || null, found: -1, phase: 'keys', treasure: treasureOfWeek() }; tImg(race.treasure[0]); // (its picture ready for the vault) // (mela: a Mela Night room's live race, rooms.js)
     state.raceSaved = { taken: state.taken, left: state.left || {}, street: g.street }; // (back afterwards, even if the app is closed mid-race)
     state.taken = []; state.left = {}; save();
     flying = []; aim = null; chase = null; alert = 0; graceTo = clock + GRACE; atStart = true;
@@ -1778,8 +1786,8 @@
     const name = D.savedName(), street = T((STREETS.find((t) => t.id === r.street) || STREETS[0]).name);
     const link = D.link(`heist=${D.encode({ n: name, st: r.street, d: r.day, t: Math.round(sec * 10) / 10 })}`);
     const tr = r.treasure || treasureOfWeek();
-    const text = T(`🏆 I stole the ${tr[1]} from Seth-ji on ${street} in ${fmtT(sec)} in Cracker Street! Can you pull off the heist faster? Same street, same stashes:`);
-    const blob = D.card({ art: `assets/chor/thumb/${r.street}.webp`, kicker: name ? T(`${name} challenges you`) : T('Street heist'), title: `${tr[2]} ${T(tr[1])}`, big: fmtT(sec), line: `${street} · ${T('Cracker Street heist')}` });
+    const text = T(`🏆 I stole the ${tr[1]} from Seth-ji on ${street} in ${fmtT(sec)} in Fireworks Street! Can you pull off the heist faster? Same street, same stashes:`);
+    const blob = D.card({ art: `assets/chor/thumb/${r.street}.webp`, kicker: name ? T(`${name} challenges you`) : T('Street heist'), title: `${tr[2]} ${T(tr[1])}`, big: fmtT(sec), line: `${street} · ${T('Fireworks Street heist')}` });
     D.share({ title: T('Street race'), text, url: link, blob, name: 'street-race.png', src: 'race' });
   }
   // A friend's race link (#heist=…): their street, their day, their time to beat. Played in the app only.
@@ -1837,6 +1845,7 @@
     const tr = treasureOfWeek(), tile = document.getElementById('tileChor'), ch = document.querySelector('#btnChRace small');
     if (tile) tile.textContent = `${tr[2]} ${T(`This week: steal the ${tr[1]}`)}`;
     if (ch) ch.textContent = T(`Steal the ${tr[1]}`);
+    const chIcon = document.querySelector('#btnChRace > i'); if (chIcon) chIcon.innerHTML = tPic(tr); // the home Challenges card shows the week's treasure
     const badge = btn && btn.querySelector('.tile-badge'); if (badge) badge.textContent = T('Heist');
     // On the home screen: this week's best heist on the Bazaar (a real player's time from the street board) to beat
     const rival = document.getElementById('homeRival');

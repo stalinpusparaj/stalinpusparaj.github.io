@@ -172,7 +172,7 @@
     } catch (e) { return b ? b.list : []; }
   }
 
-  // Other games' weekly boards on the same Firebase (Cracker Street's street races, the puzzles' sprints): post a score (higher
+  // Other games' weekly boards on the same Firebase (Fireworks Street's street races, the puzzles' sprints): post a score (higher
   // is better; a time is turned into one by the caller) with your name, photo and frame, and read the week's top ten.
   window.LUTSBoards = {
     on: ON,
@@ -618,7 +618,7 @@
         b.append(t);
         b.addEventListener('click', () => {
           if (!owns(id) && cost === null) { showSheet('pass'); return; } // won on the Street Pass+ track
-          if (!owns(id) && cost === -1) { D.toast('Pull off 5 street heists in Cracker Street to earn this frame', 3200); return; }
+          if (!owns(id) && cost === -1) { D.toast('Pull off 5 street heists in Fireworks Street to earn this frame', 3200); return; }
           if (!owns(id)) {
             if (!D.spend(cost)) { D.openGems(cost, `the ${label} frame`); return; }
             const st0 = load(); st0.frames = [...new Set([...(st0.frames || []), id])]; save(st0);

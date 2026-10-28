@@ -4313,3 +4313,4 @@ body.chor-cinema .actions, body.chor-cinema .nav-back { visibility: hidden; } /*
 .chor-trophy:not(.got):not(.now) .chor-tpic { filter: grayscale(1) brightness(.45); }
 .chor-finale-reveal > i { display: block; width: 168px; height: 168px; font-size: 0; }
 .chor-finale-reveal .chor-tpic { border-radius: 28px; box-shadow: 0 0 40px rgba(255, 190, 80, .7); }
+#btnChRace > i .chor-tpic { width: 48px; height: 48px; margin: 0 auto; border-radius: 12px; box-shadow: 0 0 16px rgba(255, 190, 80, .55); }
