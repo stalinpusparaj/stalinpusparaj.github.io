@@ -4274,3 +4274,6 @@ body.card-mode .duel-champ { display: none !important; } /* the card show writes
 .cards-pairs[hidden] { display: none; }
 .pair-chip { padding: 6px 12px; border-radius: 999px; font-weight: 800; font-size: .8rem; color: #ffe2a8; background: var(--jn-case); border: 1px solid var(--jn-rim-2); }
 .pair-chip.risk { color: #fff1e0; border-color: #ff7a45; box-shadow: 0 0 14px -4px rgba(255, 90, 40, .9); }
+
+/* Card maker: a finale shell not yet yours shows its price or crown, dimmed */
+#cFinale .chip.locked { opacity: .72; }

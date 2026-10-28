@@ -5105,6 +5105,7 @@
       o: OCC_IDS.has(raw.o) ? raw.o : 'custom', t: clean(raw.t, 20), f: clean(raw.f, 24),
       h: clean(raw.h, 24), m: cleanMsg(raw.m, 160), p: Object.prototype.hasOwnProperty.call(PALETTES, raw.p) ? raw.p : 'rainbow', w: isWorld(raw.w) ? raw.w : '', img: '',
     };
+    if (FINALES.includes(raw.s) && raw.s) c.s = raw.s; // the sender's finale shell (older links: the occasion's own)
     if (raw.lit) c.lit = 1; // a Light someone up dedication: its receiver is offered to light the sender back
     if (REL_BY_ID.has(raw.rel) && raw.rel !== 'anyone') c.rel = raw.rel; // who they are to the sender (older links: none)
     const pg = pagesOf(raw);
@@ -5313,11 +5314,48 @@
     if (!saysRel(c, r)) { const tag = document.createElement('span'); tag.className = 'g-rel'; tag.textContent = r.word; node.append(tag); }
   }
 
+  // The card's finale: your showpiece shell from the fireworks game closes the show (and the name). The occasion's own
+  // is free; a gem shell is yours for cards once, for its price ×5; a Premium shell comes with Premium. Receivers see it free.
+  const FINALES = ['', 'kamuro', 'brocade', 'senrin', 'heart', 'spider', 'colorchange', 'kingwillow', 'peacock', 'multibreak', 'ghost', 'shellofshells'];
+  const FINALE_KEY = 'luts:finales';
+  const finaleOwned = (id) => { if (!id) return true; if (PREMIUM_SHELLS.has(id)) return premium.active; try { return !!JSON.parse(localStorage.getItem(FINALE_KEY) || '{}')[id]; } catch (e) { return false; } };
+  const finalePrice = (id) => (SHELL_GEM_COST[id] || 2) * 5;
+  let finaleAsk = null;
+  function renderFinales() {
+    const box = $('#cFinale');
+    if (!box) return;
+    box.innerHTML = '';
+    for (const id of FINALES) {
+      const b = document.createElement('button'), own = finaleOwned(id);
+      b.type = 'button';
+      b.className = 'chip' + ((card.s || '') === id ? ' active' : '') + (own ? '' : ' locked');
+      if (!id) b.textContent = '✨ Occasion’s own';
+      else { const l = document.createElement('span'); l.textContent = TYPES[id].label; b.append(`${id === 'brocade' ? '🎇' : TYPES[id].icon} `, l, own ? '' : PREMIUM_SHELLS.has(id) ? ' 👑' : ` 💎${finalePrice(id)}`); } // Brocade's own 👑 would read as Premium here
+      b.addEventListener('click', () => pickFinale(id));
+      box.append(b);
+    }
+  }
+  function pickFinale(id) {
+    if (!finaleOwned(id)) {
+      if (PREMIUM_SHELLS.has(id)) { openPremium({}); return; }
+      const n = finalePrice(id);
+      // the first tap says the price, a second within six seconds buys it (no gems spent by surprise)
+      if (!finaleAsk || finaleAsk.id !== id || Date.now() - finaleAsk.at > 6000) { finaleAsk = { id, at: Date.now() }; toast(`Make ${TYPES[id].label} your card finale for 💎${n}? Tap again`, 3600); return; }
+      finaleAsk = null;
+      if (!spendGems(n)) { openGems(n); return; }
+      let own = {}; try { own = JSON.parse(localStorage.getItem(FINALE_KEY) || '{}'); } catch (e) { own = {}; }
+      own[id] = 1; try { localStorage.setItem(FINALE_KEY, JSON.stringify(own)); } catch (e) { /* ignore */ }
+    }
+    card.s = id;
+    renderFinales();
+    if (id) launchShell({ x: W * 0.5, y: H * 0.25, type: id }); // a taste of it in the sky behind
+  }
   function fillForm() {
     f.to.value = card.t; f.from.value = card.f; f.head.value = card.h; f.msg.value = card.m;
     renderOccasions();
     syncRelations();
     themeChips($('#cThemes'), card.p, (id) => { card.p = id; fillForm(); });
+    renderFinales();
     renderPages();
     renderRemind();
     updatePreview();
@@ -5882,7 +5920,7 @@
     if (c.own && music.url) playMusic(music.start); else stopMusic(0.4);
     const T = 'card';
     // The occasion's own shells: gold willows for Diwali, colourful peonies for Holi, hearts for love and weddings.
-    const [left, right, mid, end] = (OCC_BY_ID[c.o] && OCC_BY_ID[c.o].show) || SHOW_DEFAULT;
+    const [left, right, mid, occEnd] = (OCC_BY_ID[c.o] && OCC_BY_ID[c.o].show) || SHOW_DEFAULT, end = c.s || occEnd; // your finale, else the occasion's
     cardShells = [];
     const shell = (o) => { cardShells.push(o.type); launchShell(o); };
     after(0.2, () => shell({ x: W * 0.22, y: H * 0.3, type: left }), T);
@@ -6339,13 +6377,13 @@
     saveCards();
   }
   // A saved card into the creator's draft (no sharper photo: the small one plays the show).
-  const loadDraft = (e) => Object.assign(card, { rel: '', rm: null }, e.c, { id: e.id, imgFull: '', friend: '', pg: [...(e.c.pg || [])], rm: e.c.rm ? { ...e.c.rm } : null }); // a card saved as Anyone has no rel; its own copy of the pages and reminder
+  const loadDraft = (e) => Object.assign(card, { rel: '', rm: null, s: '' }, e.c, { id: e.id, imgFull: '', friend: '', pg: [...(e.c.pg || [])], rm: e.c.rm ? { ...e.c.rm } : null }); // a card saved as Anyone has no rel; its own copy of the pages and reminder
   // A new card: the same occasion written fresh, still signed with your name.
   function freshCard() {
     const o = OCC_BY_ID[card.o] || OCCASIONS[0];
     let from = card.f;
     try { from = from || localStorage.getItem('luts:from') || ''; } catch (e) { /* ignore */ }
-    Object.assign(card, { id: '', o: o.id, t: '', f: from, rel: '', h: inLang(o.head), m: inLang(o.msg), p: o.theme, img: '', imgFull: '', friend: '', pg: [], rm: null });
+    Object.assign(card, { id: '', o: o.id, t: '', f: from, rel: '', h: inLang(o.head), m: inLang(o.msg), p: o.theme, img: '', imgFull: '', friend: '', pg: [], rm: null, s: '' });
   }
   function startCard() { if (myCards.length) openCards(); else openCardModal(); }
 
