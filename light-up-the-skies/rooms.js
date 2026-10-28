@@ -12,7 +12,7 @@
   const $ = (s, r = document) => r.querySelector(s);
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const PLACES = [['meenakshi-amman-temple', 'Madurai'], ['gateway-of-india', 'Mumbai, Maharashtra'], ['golden-temple', 'Amritsar'], ['brihadeeswarar-temple', 'Thanjavur']];
-  // Street race rooms: Pataka Chor's streets by those temples (same stashes for everyone in the room)
+  // Street race rooms: Cracker Street's streets by those temples (same stashes for everyone in the room)
   const RACE_PLACES = [['chor-meenakshi', 'meenakshi-amman-temple', 'Pudhu Mandapam Street · Madurai'], ['chor-gateway', 'gateway-of-india', 'Colaba · Gateway of India'],
     ['chor-goldentemple', 'golden-temple', 'Heritage Street · Amritsar'], ['chor-street', '', 'Bazaar']];
   const RACE_CAP = 240, RACE_GRACE = 45; // a race ends at four minutes, or 45 seconds after the first one home
@@ -228,7 +228,7 @@
   function invite() {
     if (!room) return;
     const name = placeOf(room.w);
-    D().share({ title: 'Mela Night', text: isRace() ? `⏱ Race me down ${name} in Pataka Chor! Room code ${room.code} 🧨\nTap to join:` : `🛕 Join my Diwali fireworks at ${name}! Room code ${room.code} 🎆\nTap to join:`, url: D().link(`room=${room.code}`), src: 'room' });
+    D().share({ title: 'Mela Night', text: isRace() ? `⏱ Race me down ${name} in Cracker Street! Room code ${room.code} 🧨\nTap to join:` : `🛕 Join my Diwali fireworks at ${name}! Room code ${room.code} 🎆\nTap to join:`, url: D().link(`room=${room.code}`), src: 'room' });
   }
   async function fillBots(n) {
     if (!room || !isHost()) return;
@@ -448,7 +448,7 @@
   function raceTick() {
     if (!race.on || !room) return;
     if (!room.data || !room.data.meta) { const r = room; stopRace(false); room = null; try { r.src.close(); } catch (e) { /* closed */ } D().toast('The host left the mela'); return; }
-    if (window.PatakaChor && !PatakaChor.on && Date.now() - race.began > 45e3) { leave(true); return; } // left Pataka Chor (a slow phone may take a while to open the street)
+    if (window.PatakaChor && !PatakaChor.on && Date.now() - race.began > 45e3) { leave(true); return; } // left Cracker Street (a slow phone may take a while to open the street)
     const ps = players().filter(Boolean), fins = ps.filter((p) => progOf(p.u).t > 0);
     if (fins.length && !race.firstFin) race.firstFin = Date.now();
     const el = (Date.now() - race.began) / 1000;
@@ -666,7 +666,7 @@
     const r = room && room.result;
     if (!r) return;
     const name = placeOf(room.w);
-    if (r.race) { D().share({ title: 'Mela Night', text: r.won ? `🏆 I beat my friends to the ${window.PatakaChor && PatakaChor.treasure ? PatakaChor.treasure()[1] : 'treasure'} on ${name} in Pataka Chor! 🧨\nRace me:` : `⏱ A street race with friends down ${name} in Pataka Chor! 🧨\nRace me:`, url: D().playLink('mela'), src: 'mela' }); return; }
+    if (r.race) { D().share({ title: 'Mela Night', text: r.won ? `🏆 I beat my friends to the ${window.PatakaChor && PatakaChor.treasure ? PatakaChor.treasure()[1] : 'treasure'} on ${name} in Cracker Street! 🧨\nRace me:` : `⏱ A street race with friends down ${name} in Cracker Street! 🧨\nRace me:`, url: D().playLink('mela'), src: 'mela' }); return; }
     D().share({ title: 'Mela Night', text: r.won ? `🏆 I won Mela Night at ${name} with ❤️ ${r.ranked[0].h} hearts! 🎆\nPlay with me:` : `🎆 Fireworks with friends at ${name} on Mela Night!\nPlay with me:`, url: D().playLink('mela'), src: 'mela' });
   }
 

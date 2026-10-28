@@ -275,13 +275,13 @@
     'golden-manor': 'golden-manor' };
   // A world still loading its picture counts already. The night skies (Default, Particle Festival) have no 3D scene:
   // they stay flat, and 3D comes back with the next landmark.
-  // Pataka Chor (chor.js) plays on its own bazaar street, whatever the chosen world. placing: chor.js is putting down a
+  // Cracker Street (chor.js) plays on its own bazaar street, whatever the chosen world. placing: chor.js is putting down a
   // cracker the player found; any other cracker placement is refused while the mode is on (no shop, nothing to buy).
   // street: which of its streets (world3d-<street>.js): the free bazaar, or a Premium one.
   const chor = { on: false, placing: false, street: 'chor-street' };
   const skyOf = (t) => (typeof t === 'string' && t.startsWith('sky:') ? t.slice(4) : null); // a found sky shell's shell
   const model3d = () => (chor.on ? chor.street : SCENES_3D[world.pending || world.id] || '');
-  // The 3D landmarks are Premium; 2D stays free for everyone. Pataka Chor's street is free, and always 3D.
+  // The 3D landmarks are Premium; 2D stays free for everyone. Cracker Street's street is free, and always 3D.
   const has3d = () => premium.active;
   const w3dWanted = () => mode === 'play' && (chor.on || (settings.scene3d && has3d())) && !w3dFailed && !!model3d() && !arOn && !rush.on && !document.body.classList.contains('home');
   // Ready: built and wanted. Shown: ready and published to the screen by syncWorld3d (so nothing treats a scene that
@@ -2525,7 +2525,7 @@
       const hit = hitItem((e.clientX - arPan.x), (e.clientY - arPan.y));
       pointer.kind = 'item';
       pointer.item = hit || placeItem(settings.item, (e.clientX - arPan.x), (e.clientY - arPan.y));
-      if (!pointer.item) { pointer = null; return; } // Pataka Chor: only the crackers you find go down
+      if (!pointer.item) { pointer = null; return; } // Cracker Street: only the crackers you find go down
       pointer.fresh = !hit;
       pointer.oy = pointer.item.y - (e.clientY - arPan.y);
       return;
@@ -3386,7 +3386,7 @@
     return `✨ ${c.h || 'A fireworks greeting'}${name ? ` for ${name}` : ''}, made with Light Up the Skies 🎆\nMake your own: ${link}${get}`;
   }
   const shotCaption = () => {
-    if (chor.on) return `🧨 I sneaked crackers past Seth-ji in Pataka Chor, Light Up the Skies 🎆\nCatch me if you can: ${appLink()}${getApp('chor')}`;
+    if (chor.on) return `🧨 I sneaked crackers past Seth-ji in Cracker Street, Light Up the Skies 🎆\nCatch me if you can: ${appLink()}${getApp('chor')}`;
     if (document.body.classList.contains('dueling')) return `⚔️ A Sky Duel in Light Up the Skies: whose fireworks win? 🎆\nDuel me: ${appLink()}${getApp('duel')}`;
     return `🪔 Happy Diwali! I lit up the sky with Light Up the Skies 🎆\nLight yours: ${appLink()}${getApp('share')}`;
   };
@@ -6589,7 +6589,7 @@
   }
   // What a launch costs: one cracker, or every cracker waiting on the street for Burst all. Sparkler writing is free.
   function gemCost(s) {
-    if (!s || s.writing || premium.active || chor.on) return 0; // Premium: every cracker is free; Pataka Chor's are found
+    if (!s || s.writing || premium.active || chor.on) return 0; // Premium: every cracker is free; Cracker Street's are found
     if (s.multi) return waitingItems().slice(0, burstMax()).reduce((sum, it) => sum + (GEM_COST[it.type] || 0), 0);
     if (s.ground || s.id.startsWith('item:')) return GEM_COST[s.type] || 0;
     return SHELL_GEM_COST[s.type] || 0;
@@ -6954,6 +6954,8 @@
     const t = new Date(Date.now() + 864e5), h = hooks[(t.getFullYear() * 400 + t.getMonth() * 31 + t.getDate()) % hooks.length];
     if (lit) lines.push(`#evening\t${lit}\t\t${h[0]}\t${h[1]}`);
     else if (wallet.remind && wallet.day) lines.push(`#evening\t${wallet.day}\tgift\t${h[0]}\t${h[1]}`);
+    // Sent cards not yet watched (last 30 days): the app checks their codes every few hours and says when one is opened.
+    for (const e of myCards) if (e.kind === 'made' && e.w && !e.seen && Date.now() - e.updated < 30 * 864e5) lines.push(`#watch\t${e.w}\t${inLang(`💖 ${clean(e.c.t, 20)} watched your sky`)}\t${inLang('Tap to see who lit your sky back')}`);
     window.LUTSNative.reminders(lines.join('\n'));
   }
 
@@ -8734,7 +8736,7 @@
         // A mortar: one big aerial shell, high and wide.
         const S = it.s * U * IS, mx = it.x, my = it.y - 44 * S;
         it.fired = true;
-        // (a tube carrying a chosen shell, as Pataka Chor's found sky shells do, sends up that one)
+        // (a tube carrying a chosen shell, as Cracker Street's found sky shells do, sends up that one)
         launchShell({ sx: mx, sy: my, x: mx + rand(-40, 40) * U, y: rand(H * 0.1, H * 0.22), size: rand(1.2, 1.45), type: it.shellId && TYPES[it.shellId] ? it.shellId : pick(['chrysanthemum', 'peony', 'kamuro', 'willow']), L: 1 });
         flash(mx, my, '#ffd9a0', 0.8, gctx);
         for (let i = 0; i < 6; i++) smoke(mx, my, rand(-30, 30) * U, -rand(30, 70) * U, '#8d8898', 10 * U, 50 * U, 2.6, 0.09);
@@ -9798,7 +9800,7 @@
     queueBurstSync(); // one fewer waiting: Fire's label and Burst all's count follow
     atDepth(it, () => Sound.hiss(ITEMS[it.type].fuse + 0.1, 6000, 0.05, pan(it.x), { q: 0.4 }));
     if (window.LUTSGoals) LUTSGoals.tick('launch'); achieve('first');
-    // On a Pataka Chor street in a Mela Night race: the others (and anyone watching) see it go off too (rooms.js)
+    // On a Cracker Street street in a Mela Night race: the others (and anyone watching) see it go off too (rooms.js)
     if (chor.on && it.an && window.PatakaChor && PatakaChor.onBang && !PatakaChor.quiet) PatakaChor.onBang(it.shellId ? `sky:${it.shellId}` : it.type, it.an.wx, it.an.wz);
     if (!tried.has(it.type)) {
       tried.add(it.type);
@@ -10548,7 +10550,7 @@
     drawConfetti();
   }
 
-  // Dock chips use the same drawings as the game (d: pixels per unit; Pataka Chor's shop draws them bigger, as pictures).
+  // Dock chips use the same drawings as the game (d: pixels per unit; Cracker Street's shop draws them bigger, as pictures).
   function itemIcon(type, d = 2) {
     const c = document.createElement('canvas');
     c.width = c.height = 34 * d;
@@ -10755,7 +10757,7 @@
   });
   // Pays a launch's gems up front (refunded when it does not start), or opens the gem sheet when they fall short.
   function launchWithGems(s) {
-    // Pataka Chor: Fire lights the crackers you found and put down; with none on the street there is nothing to light.
+    // Cracker Street: Fire lights the crackers you found and put down; with none on the street there is nothing to light.
     if (chor.on && s.id && s.id.startsWith('item:') && !waitingItems().length) { toast('Find a cracker first, then put it down'); return false; }
     // Premium crackers and shells a free player lights here use their free tries (once the launch starts); one with
     // none left opens the offer instead.
@@ -12619,8 +12621,8 @@
     const cost = gemCost(s);
     fire.textContent = busy ? labels[launch.state] : fireAll() ? fireAllLabel() : `Fire ${s.label}${cost ? ` · 💎${cost}` : usedSelection && !paid && points >= 50 ? ' · 50 pts' : ''}`;
     fire.disabled = busy || rewardBusy || sweepBusy();
-    fire.hidden = playMode === 'spark' || (sparklerFires() && !chor.on); // Pataka Chor keeps Fire beside the sparkler
-    // Pataka Chor lights only what you found and put down: say how many are ready, not the shop's chosen cracker.
+    fire.hidden = playMode === 'spark' || (sparklerFires() && !chor.on); // Cracker Street keeps Fire beside the sparkler
+    // Cracker Street lights only what you found and put down: say how many are ready, not the shop's chosen cracker.
     if (chor.on && !busy) { const n = waitingItems().length; fire.textContent = n ? `Fire · ${n}` : 'Find a cracker'; fire.classList.toggle('chor-idle', !n); }
     for (const b of document.querySelectorAll('#shellList button, #groundList button')) {
       const id = b.dataset.shell ? `shell:${b.dataset.shell}` : `item:${b.dataset.item}`;
@@ -12651,7 +12653,7 @@
   }
   function requestFire() {
     if (mode !== 'play' || rush.on || paused || document.hidden || rewardBusy || launch.state !== 'READY') return;
-    // Pataka Chor: Fire lights the crackers waiting on the street (and riding the donkey) where they are, as the
+    // Cracker Street: Fire lights the crackers waiting on the street (and riding the donkey) where they are, as the
     // sparkler does: found crackers, so no gems and no launch, and a cracker on the move keeps moving.
     if (chor.on) {
       const waiting = waitingItems();
@@ -13124,7 +13126,7 @@
     w3dFailed = true;
     if (save) { settings.scene3d = false; saveSettings(); }
     syncViewToggle();
-    // Pataka Chor is 3D only: rather than wait on "loading" for ever (every button dead), it ends and you're home.
+    // Cracker Street is 3D only: rather than wait on "loading" for ever (every button dead), it ends and you're home.
     if (chor.on && window.PatakaChor) {
       try { window.PatakaChor.stop(); } catch (e) { /* already ending */ }
       if (mode !== 'intro') $('#btnHome').click();
@@ -13149,7 +13151,7 @@
     if (!w3d) return;
     // The horizon sits a band above the controls: enough forecourt for the crackers, the rest is landmark and sky.
     // While a show plays on a weak phone (lite3d) the scene renders at about half the pixels.
-    // Pataka Chor is about the street, not the sky: its horizon sits higher, so the street fills half the screen.
+    // Cracker Street is about the street, not the sky: its horizon sits higher, so the street fills half the screen.
     w3d.resize(W, H, DPR * (measuredTier ? 1 : 0.85) * (lite3d ? 0.6 : 1), chor.on ? 0.46 : (groundBottom() - H * 0.16) / H);
     if (w3dShown()) renderWorld3d();
   }
@@ -13179,6 +13181,20 @@
     it.y = y; it.s = itemScale(y); it.z = itemDepth(y);
     sortItems();
   }
+  // The street is 3D only: while its scene loads, a cover in the street's own picture hides the flat sky and ground
+  // underneath (no 2D flash before the street appears).
+  function syncChorCover(ready) {
+    const show = chor.on && !ready && !w3dFailed;
+    let c = $('#chorCover');
+    if (show && !c) {
+      c = document.createElement('div'); c.id = 'chorCover'; c.className = 'chor-cover';
+      c.innerHTML = '<p><span class="chor-cover-spin" aria-hidden="true"></span><span>Opening the street…</span></p>';
+      document.body.append(c);
+    }
+    if (!c) return;
+    if (show) c.style.setProperty('--cover-art', `url("assets/chor/thumb/${chor.street}.webp")`);
+    c.classList.toggle('gone', !show);
+  }
   function syncWorld3d() {
     const want = w3dWanted(), model = want ? model3d() : '', ready = launch.state === 'READY';
     // A tube is always waiting in Sky mode: after a launch, on starting, on returning from a card show.
@@ -13195,6 +13211,7 @@
       if (w3dPending && ready) { w3dPending.dispose(); w3dPending = null; freshW3dCanvas(); }
     }
     const on = w3dReady(), key = on ? model : '';
+    syncChorCover(on);
     if (w3dFlatWorld !== !model3d()) { w3dFlatWorld = !model3d(); syncViewToggle(); } // the switch follows the world
     if (key === w3dKey) return;
     const was = w3dKey;
@@ -13223,7 +13240,7 @@
       w3d.setTilt(s && !s.ground && !s.writing && !reduceMotion() ? camera.travel : 0); // weak phones too: a show there is lite3d
       w3d.setMaxPitch(playMode === 'ground' ? 0.1 : 0.42); // in Ground mode you can't look so far up that the crackers go
       w3d.setFolk(playMode === 'ground', launch.state !== 'READY', groundItems); // the dog and the old man: Ground only, round its crackers
-      if (chor.on && window.PatakaChor) window.PatakaChor.walk(dt); // Pataka Chor's step, in this frame, before it eases and draws
+      if (chor.on && window.PatakaChor) window.PatakaChor.walk(dt); // Cracker Street's step, in this frame, before it eases and draws
       w3dMoved = w3d.update(dt) || w3d.version !== w3dVersion; // (a step on foot moves the camera without easing: it counts)
       if (chor.on && window.PatakaChor) window.PatakaChor.place(); // its labels, from this frame's camera
     } catch (error) { world3dLost(error); return; }
@@ -13519,11 +13536,11 @@
     get folk() { return w3d ? w3d.folk : null; },
     // For tests: the shell types the card show on screen has launched so far.
     get cardShells() { return cardShells.slice(); },
-    // ----- Pataka Chor (chor.js): Ground mode on the bazaar street, with only the crackers the player finds -----
+    // ----- Cracker Street (chor.js): Ground mode on the bazaar street, with only the crackers the player finds -----
     chor: {
       get on() { return chor.on; },
       start() {
-        w3dFailed = false; w3dLosses = []; // Pataka Chor needs 3D: each time it opens, 3D gets another try
+        w3dFailed = false; w3dLosses = []; // Cracker Street needs 3D: each time it opens, 3D gets another try
         Sound.resume();
         abortLaunch();
         if (rush.on) endRush(true);

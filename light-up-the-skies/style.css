@@ -4277,3 +4277,39 @@ body.card-mode .duel-champ { display: none !important; } /* the card show writes
 
 /* Card maker: a finale shell not yet yours shows its price or crown, dimmed */
 #cFinale .chip.locked { opacity: .72; }
+
+/* Street (3D only): a cover in the street's picture while its scene loads, so the flat 2D world never flashes first */
+.chor-cover { position: fixed; inset: 0; z-index: 40; display: grid; place-items: end center; padding-bottom: 22vh; background: #0b0820 var(--cover-art, none) center / cover no-repeat; transition: opacity .35s ease; }
+.chor-cover::before { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(8, 6, 26, .25), rgba(8, 6, 26, .75)); }
+.chor-cover p { position: relative; display: flex; gap: 10px; align-items: center; margin: 0; padding: 10px 18px; border-radius: 999px; font-weight: 800; color: #ffe2a8; background: rgba(12, 8, 30, .7); border: 1px solid rgba(255, 210, 140, .35); }
+.chor-cover-spin { width: 16px; height: 16px; border-radius: 50%; border: 3px solid rgba(255, 210, 140, .3); border-top-color: #ffcf6b; animation: chorSpin .8s linear infinite; }
+@keyframes chorSpin { to { transform: rotate(360deg); } }
+.chor-cover.gone { opacity: 0; pointer-events: none; }
+
+/* Street heist finale: letterbox bars, the treasure lifted into the light, fireworks behind (chor.js heistFinale) */
+.chor-finale { position: fixed; inset: 0; z-index: 9000; display: flex; flex-direction: column; justify-content: space-between; pointer-events: auto; transition: opacity .45s ease; }
+.chor-finale.gone { opacity: 0; }
+.chor-finale-bar { height: 11vh; background: #000; animation: finBar .6s ease-out both; }
+.chor-finale-bar:first-child { transform-origin: top; }
+.chor-finale-bar:last-child { transform-origin: bottom; }
+@keyframes finBar { from { transform: scaleY(0); } }
+.chor-finale-reveal { display: grid; justify-items: center; gap: 6px; text-align: center; padding: 0 16px; animation: finRise 1.4s cubic-bezier(.2, .8, .2, 1) .3s both; }
+.chor-finale-reveal i { font-style: normal; font-size: 92px; line-height: 1; filter: drop-shadow(0 0 22px rgba(255, 200, 90, .95)) drop-shadow(0 0 60px rgba(255, 150, 40, .7)); animation: finGlow 1.8s ease-in-out infinite alternate; }
+.chor-finale-reveal b { font-family: var(--font-display, inherit); font-size: 1.6rem; color: #ffe2a8; text-shadow: 0 2px 14px rgba(0, 0, 0, .8); }
+.chor-finale-reveal small { color: #fff3dc; font-weight: 700; text-shadow: 0 2px 10px rgba(0, 0, 0, .8); }
+@keyframes finRise { from { opacity: 0; transform: translateY(40px) scale(.7); } }
+@keyframes finGlow { to { transform: scale(1.08) rotate(-3deg); } }
+.chor-hud.cinema > :not(.chor-sheet) { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .chor-finale-reveal, .chor-finale-reveal i, .chor-finale-bar { animation: none; } }
+/* after the reveal the treasure steps down to the lower third, smaller, and the sky above is the show */
+.chor-finale-reveal { transition: transform .9s cubic-bezier(.2, .8, .2, 1); }
+.chor-finale.low .chor-finale-reveal { transform: translateY(26vh) scale(.62); }
+body.chor-cinema .actions, body.chor-cinema .nav-back { visibility: hidden; } /* the film has no buttons */
+
+/* Treasure pictures (assets/chor/treasure): round-cornered, glowing; a trophy not yet stolen stays a dim silhouette */
+.chor-tpic { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: 22%; }
+.chor-pheist > i, .chor-heist-prize > i, .chor-trophy > i { display: inline-grid; width: 56px; height: 56px; flex: none; font-size: 0; }
+.chor-trophy > i { width: 64px; height: 64px; margin: 0 auto; }
+.chor-trophy:not(.got):not(.now) .chor-tpic { filter: grayscale(1) brightness(.45); }
+.chor-finale-reveal > i { display: block; width: 168px; height: 168px; font-size: 0; }
+.chor-finale-reveal .chor-tpic { border-radius: 28px; box-shadow: 0 0 40px rgba(255, 190, 80, .7); }

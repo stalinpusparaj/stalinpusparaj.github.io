@@ -21,7 +21,7 @@
   const PLAY = [
     ['launch', 'launch', 20, 10, 'Light 20 crackers'],
     ['puzzle', 'puzzle', 2, 15, 'Win 2 puzzle levels'],
-    ['race', 'race', 1, 20, 'Finish a street race in Pataka Chor'],
+    ['race', 'race', 1, 20, 'Finish a street race in Cracker Street'],
     ['rush', 'rush', 1, 15, 'Finish a Lantern Rush'],
     ['share', 'share', 1, 15, 'Share a show, a card or a level'],
     ['mela', 'mela', 1, 20, 'Play a Mela Night show'],

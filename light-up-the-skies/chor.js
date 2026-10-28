@@ -1,4 +1,4 @@
-// Pataka Chor: sneak down a bazaar street on Diwali night and find the crackers hidden in it: on shop counters, behind
+// Cracker Street: sneak down a bazaar street on Diwali night and find the crackers hidden in it: on shop counters, behind
 // crates, under the stalls. There is no shop and nothing to buy. Whatever you find goes in your bag (3 at a time).
 // Tap a cracker in the bag to put it down in front of you and light it with Fire or a tap on it (the street has no
 // sparkler: Fire and a throw light everything); or drag it up into the street to throw
@@ -26,7 +26,9 @@
   const RARE = 4, RARE_ORBS = 2, RARE_SHOP = 4, RARE_REFILL = 0.35; // Premium finds: of the day's stashes, sky orbs, the shop's dozen; share of new stashes
   // The street race is a heist: the nine stashes are pieces of a key, the key opens Seth-ji's vault, and the week's
   // treasure has to be carried back to the gate with Seth-ji on your heels. Each week a different treasure.
-  const TREASURES = [['lakshmi', 'Golden Lakshmi', '🪷'], ['nataraja', 'Bronze Nataraja', '🕉️'], ['ganesha', 'Silver Ganesha', '🐘'], ['peacock', 'Jewelled Peacock', '🦚'], ['diya', 'Diamond Diya', '🪔'], ['crown', 'Maharaja’s Crown', '👑']];
+  const TREASURES = [['lakshmi', 'Golden Lakshmi', '🪷'], ['nataraja', 'Bronze Nataraja', '🔱'], ['ganesha', 'Silver Ganesha', '🐘'], ['peacock', 'Jewelled Peacock', '🦚'], ['diya', 'Diamond Diya', '🪔'], ['crown', 'Maharaja’s Crown', '👑']];
+  // Each treasure's own picture (assets/chor/treasure, made in Google Flow); the emoji stays for texts and toasts.
+  const tPic = (t) => `<img class="chor-tpic" src="assets/chor/treasure/${t[0]}.webp" alt="" aria-hidden="true">`;
   const treasureOfWeek = (ms = Date.now()) => TREASURES[Math.floor((ms / 864e5 + 3) / 7) % TREASURES.length];
   const THIEF_HEISTS = 5, ESCAPE_RUN = 3.6, GATE_R = 3.5; // heists for the Master Thief frame; Seth-ji's speed after you; how near the gate counts
   const BAG = 6, BIG_BAG = 10, /* kinds of cracker the bag holds (each up to STACK); it scrolls */ STASHES = 9, RARE_GEMS = 15, REACH = 24; // metres: further away, the stash is only a glow to walk to
@@ -296,11 +298,11 @@
       // In the shop, its collection; on a street, the way into the shop (the streets are the Street button above).
       box.innerHTML = '<button type="button" class="chor-catbtn" data-catalog>🛍️ All crackers</button>' // (the 3D shop is off for now: SHOP_OFF)
         + (w.drone ? '<button type="button" data-drone>🚁 Drone view</button>' : '')
-        + '<button type="button" class="chor-catbtn" data-race>⏱ Race</button><button type="button" data-trophies>🏆 Trophies</button>'
+        + '<button type="button" class="chor-catbtn" data-race>🗝 Heist</button><button type="button" data-trophies>🏆 Trophies</button>'
         + list.map((v, i) => `<button type="button" data-view="${i}">${v.name}</button>`).join('');
     }
     const dr = box.querySelector('[data-drone]'); if (dr) dr.setAttribute('aria-pressed', String(!!w.aerial));
-    const rb = box.querySelector('[data-race]'); if (rb) { rb.setAttribute('aria-pressed', String(!!race)); rb.textContent = race ? T('⏹ Stop race') : T('⏱ Race'); }
+    const rb = box.querySelector('[data-race]'); if (rb) { rb.setAttribute('aria-pressed', String(!!race)); rb.textContent = race ? T('⏹ Stop heist') : T('🗝 Heist'); }
     box.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(w.walking ? +b.dataset.view === chosenView : +b.dataset.view === w.view)));
     hud.querySelector('.chor-stick').hidden = !w.walking;
     if (w.walking) requestAnimationFrame(() => restStick()); // (once the pad is laid out)
@@ -320,7 +322,7 @@
     if (state.ping > 0) html += `<button type="button" class="chor-slot tool" data-tool="ping"><i aria-hidden="true">📡</i><small>Ping</small><em>${state.ping}</em></button>`;
     box.innerHTML = html;
     const daily = stashes.filter((o) => typeof o.key === 'number');
-    hud.querySelector('.chor-count').textContent = `${daily.filter(isTaken).length}/${daily.length} found`;
+    hud.querySelector('.chor-count').textContent = race ? `🗝 ${daily.filter(isTaken).length}/${daily.length} keys` : `${daily.filter(isTaken).length}/${daily.length} found today`; // (today's stashes in free play; the key pieces in a heist)
     hud.querySelector('.chor-score').textContent = `${state.score}`;
   }
   // A ware on display: its picture stands on a step (world3d setWares); here, its tag (what you tap): its picture,
@@ -388,6 +390,14 @@
     g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, W, H); g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.imageSmoothingQuality = 'high';
     const nearest = draws.filter((d) => !d.top).sort((a, b) => a.dist - b.dist)[0]; // (the one to go for first)
+    // Distance pills that would overlap a nearer one's are left out (two stashes side by side read "33 m", not "33 m m").
+    const pills = [];
+    for (const d of [...draws].sort((a, b) => a.dist - b.dist)) {
+      if (d.top || d.near || d.dist >= 60) continue;
+      const r = { x0: d.x - 26, x1: d.x + 26, y0: d.y + d.h / 2, y1: d.y + d.h / 2 + 19 };
+      d.pill = !pills.some((q) => r.x0 < q.x1 && q.x0 < r.x1 && r.y0 < q.y1 && q.y0 < r.y1);
+      if (d.pill) pills.push(r);
+    }
     for (const d of draws.sort((a, b) => b.dist - a.dist)) { // (the far ones first, the near ones over them)
       if (d === nearest) { // a pulsing gold ring round the nearest
         const pulse = 0.5 + 0.5 * Math.sin(clock * 5), R = d.h * (0.62 + 0.08 * pulse);
@@ -395,7 +405,7 @@
       }
       const h = d.h, w2 = h * (d.img.width / d.img.height);
       g.globalAlpha = d.a; g.drawImage(d.img, d.x - w2 / 2, d.top ? d.y : d.y - h / 2, w2, h);
-      if (!d.top && !d.near && d.dist < 60) { // how far: "8 m" under it
+      if (d.pill) { // how far: "8 m" under it
         const m = `${Math.round(d.dist)} m`; g.globalAlpha = Math.max(0.6, d.a); g.font = '700 11px Outfit, sans-serif';
         const mw = g.measureText(m).width + 12, my = d.y + d.h / 2 + 1;
         rr(g, d.x - mw / 2, my, mw, 17, 8.5); g.fillStyle = 'rgba(20, 12, 40, .78)'; g.fill();
@@ -1406,7 +1416,7 @@
     const best = Math.max(state.best || 0, state.score), isBest = state.score > (state.best || 0) && state.score > 0;
     state.best = best; save();
     g.score(state.score);
-    box.innerHTML = `<div class="chor-card"><small>Pataka Chor · tonight</small><b>${state.score}</b><span>${isBest ? 'chaos points · a new best!' : 'chaos points'}</span>`
+    box.innerHTML = `<div class="chor-card"><small>Cracker Street · tonight</small><b>${state.score}</b><span>${isBest ? 'chaos points · a new best!' : 'chaos points'}</span>`
       + `<p>${daily.filter(isTaken).length} of ${daily.length} stashes found · best ${best}</p>`
       + '<div class="chor-card-btns"><button type="button" class="btn ghost" data-act="share">Share</button><button type="button" class="btn primary" data-act="on">Keep playing</button></div></div>';
     box.hidden = false;
@@ -1416,7 +1426,7 @@
       if (act.dataset.act === 'on') { box.hidden = true; return; }
       const L = window.LUTSGame;
       // (drawn onto the share card's canvas, so translated here)
-      if (L && L.shareResult) L.shareResult({ kicker: 'Pataka Chor', title: T((STREETS.find((t) => t.id === G().street) || STREETS[0]).name), big: String(state.score), line: T('chaos points') + ' · ' + T(`${daily.filter(isTaken).length} stashes found`), art: `assets/chor/thumb/${G().street}.webp`, name: 'pataka-chor.png', text: T(`🧨 I caused ${state.score} points of Diwali chaos in Pataka Chor!`) });
+      if (L && L.shareResult) L.shareResult({ kicker: 'Cracker Street', title: T((STREETS.find((t) => t.id === G().street) || STREETS[0]).name), big: String(state.score), line: T('chaos points') + ' · ' + T(`${daily.filter(isTaken).length} stashes found`), art: `assets/chor/thumb/${G().street}.webp`, name: 'pataka-chor.png', text: T(`🧨 I caused ${state.score} points of Diwali chaos in Cracker Street!`) });
     };
   }
   // ---------- The street picker and the how-to-play ----------
@@ -1456,12 +1466,12 @@
     };
     picker.innerHTML = `<div class="chor-ptop">
         <button type="button" class="chor-pback" data-pick-close aria-label="${T(fromStreet ? 'Close' : 'Back')}">${fromStreet ? '✕' : '‹'}</button>
-        <div class="chor-ptitle"><small>Pataka Chor</small><b>${T('Pick a street')}</b></div>
+        <div class="chor-ptitle"><small>Cracker Street</small><b>${T('Pick a street')}</b></div>
         <button type="button" class="chor-phow" data-pick-how>？ <span>${T('How to play')}</span></button>
       </div>
       <div class="chor-pscroll">
         <p class="chor-plede">${T('Sneak in, find the hidden crackers, light them up, and don\'t get caught by Seth-ji.')}</p>
-        ${(() => { const tr = treasureOfWeek(), got = (state.trophies || {})[tr[0]] || 0; return `<button type="button" class="chor-pheist" data-pick-heist="${last.id}"><i aria-hidden="true">${tr[2]}</i><span><small>🏆 ${T("This week's heist")}${got ? ` · ${T(`stolen ×${got}`)}` : ''}</small><b>${T(`Steal the ${tr[1]}`)}</b><em>${T('Find the 9 key pieces, open the vault, run!')} ›</em></span></button>`; })()}
+        ${(() => { const tr = treasureOfWeek(), got = (state.trophies || {})[tr[0]] || 0; return `<button type="button" class="chor-pheist" data-pick-heist="${last.id}"><i aria-hidden="true">${tPic(tr)}</i><span><small>🏆 ${T("This week's heist")}${got ? ` · ${T(`stolen ×${got}`)}` : ''}</small><b>${T(`Steal the ${tr[1]}`)}</b><em>${T('Find the 9 key pieces, open the vault, run!')} ›</em></span></button>`; })()}
         ${card(last, true)}
         ${!SHOP_OFF && last.id !== 'chor-shop' ? `<button type="button" class="chor-pshop" data-pick="chor-shop"><img src="assets/chor/thumb/chor-shop.webp" alt="" loading="lazy"><span><small>${T('New')} · ${T('Every cracker on display')}</small><b>${T("Light Up the Skies · Seth-ji's cracker shop")}</b><i>${T('Walk in and pick any cracker')} ›</i></span></button>` : ''}
         <h3 class="chor-phead">${T('All streets')} <span>${STREETS.length}</span></h3>
@@ -1615,7 +1625,7 @@
   // week's, and the way to the Master Thief frame.
   function openTrophies() {
     const now = treasureOfWeek(), got = state.trophies || {}, n = state.heists || 0;
-    const cards = TREASURES.map(([id, name, icon]) => `<div class="chor-trophy${got[id] ? ' got' : ''}${id === now[0] ? ' now' : ''}"><i>${icon}</i><b>${T(name)}</b><small>${got[id] ? `×${got[id]}` : id === now[0] ? T('This week') : T('Not yet')}</small></div>`).join('');
+    const cards = TREASURES.map(([id, name]) => `<div class="chor-trophy${got[id] ? ' got' : ''}${id === now[0] ? ' now' : ''}"><i>${tPic([id])}</i><b>${T(name)}</b><small>${got[id] ? `×${got[id]}` : id === now[0] ? T('This week') : T('Not yet')}</small></div>`).join('');
     sheet(`<b>🏆 ${T('Trophy room')}</b><p class="chor-cat-note">${T(`This week's treasure: ${now[1]}. Race any street: find the 9 key pieces, open the vault, get it to the gate.`)}</p>`
       + `<div class="chor-trophies">${cards}</div>`
       + `<p class="chor-thief">${n >= THIEF_HEISTS ? T('🎭 Master Thief frame unlocked') : T(`🎭 Master Thief frame: ${n}/${THIEF_HEISTS} heists`)}</p>`
@@ -1687,6 +1697,49 @@
     syncViews(); whenReady();
     if (r.mela) { r.mela.done(finished, sec); return; } // the room shows its own result
     if (!finished) return;
+    heistFinale(r, () => raceResult(r, sec));
+  }
+  // The heist's ending, like a film's: letterbox bars, the treasure lifted into the light with its name, and a fireworks
+  // volley up the street filmed low and looking up, the way fireworks are filmed. About ten seconds; a tap skips it.
+  const FINALE_SHELLS = ['sky:kingwillow', 'sky:peony', 'sky:kamuro', 'sky:brocade', 'sky:crossette', 'sky:heart', 'sky:senrin', 'sky:dahlia', 'sky:palm', 'sky:kingwillow', 'sky:brocade', 'sky:kamuro'];
+  function heistFinale(r, then) {
+    const g = G(), w = g && g.w3d, tr = r.treasure || treasureOfWeek();
+    if (!w || !hud) { then(); return; }
+    const box = document.createElement('div');
+    box.className = 'chor-finale';
+    box.innerHTML = `<div class="chor-finale-bar"></div><div class="chor-finale-reveal"><i>${tPic(tr)}</i><b></b><small></small></div><div class="chor-finale-bar"></div>`;
+    box.querySelector('b').textContent = T(`The ${tr[1]} is yours!`);
+    box.querySelector('small').textContent = T('Seth-ji never saw it coming 🎆');
+    document.body.append(box);
+    hud.classList.add('cinema'); document.body.classList.add('chor-cinema');
+    const timers = [];
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      timers.forEach(clearTimeout);
+      box.classList.add('gone'); setTimeout(() => box.remove(), 500);
+      hud.classList.remove('cinema'); document.body.classList.remove('chor-cinema');
+      if (w.goView) w.goView(0);
+      then();
+    };
+    box.addEventListener('click', finish);
+    const b = w.bounds || { x0: -8, x1: 8, z0: -60, z1: 10 }, len = b.z1 - b.z0;
+    g.buzz && g.buzz(120); g.tick && g.tick();
+    // The camera stays low by the gate, looking up the street (the sky in frame), and drifts in for the last volley.
+    if (w.showCam) { w.showCam(0, b.z1 - 14, 'burst'); timers.push(setTimeout(() => w.showCam(0, b.z1 - 24, 'burst'), 5200)); }
+    // The treasure holds the centre, then steps down to the lower third so the sky is the show.
+    timers.push(setTimeout(() => box.classList.add('low'), 2600));
+    // The volley: pairs from both sides of the street, walking away up it, then everything at once.
+    FINALE_SHELLS.forEach((type, i) => {
+      const side = i % 2 ? b.x1 - 2 : b.x0 + 2, z = b.z1 - 18 - (i >> 1) * Math.min(6, len * 0.08);
+      timers.push(setTimeout(() => remoteBang(type, side, z), 700 + i * 430));
+    });
+    timers.push(setTimeout(() => { for (let i = 0; i < 6; i++) remoteBang(FINALE_SHELLS[(i * 5) % FINALE_SHELLS.length], b.x0 + 2 + (i / 5) * (b.x1 - b.x0 - 4), b.z1 - 30); }, 6600));
+    timers.push(setTimeout(finish, 10200));
+  }
+  function raceResult(r, sec) {
+    const g = G();
     state.raceBest = state.raceBest || {};
     const prev = state.raceBest[r.street], best = !prev || sec < prev;
     if (best) { state.raceBest[r.street] = sec; save(); }
@@ -1696,7 +1749,7 @@
     const street = T((STREETS.find((t) => t.id === r.street) || STREETS[0]).name);
     const line = r.target ? (won ? T(`You beat ${r.target.n || 'your friend'} by ${fmtT(r.target.t - sec)}!`) : T(`${r.target.n || 'Your friend'} was ${fmtT(sec - r.target.t)} faster`)) : best ? T('A new best on this street!') : `${T('Your best')} ${fmtT(prev)}`;
     const tr = r.treasure || treasureOfWeek();
-    sheet(`<b>🏆 ${T('Heist complete!')}</b><p class="chor-cat-note">${street}</p><p class="chor-heist-prize"><i>${tr[2]}</i>${T(`You stole the ${tr[1]}!`)}</p><div class="chor-race-big">${fmtT(sec)}</div><p class="chor-race-line${won || (!r.target && best) ? ' won' : ''}">${line}</p>`
+    sheet(`<b>🏆 ${T('Heist complete!')}</b><p class="chor-cat-note">${street}</p><p class="chor-heist-prize"><i>${tPic(tr)}</i>${T(`You stole the ${tr[1]}!`)}</p><div class="chor-race-big">${fmtT(sec)}</div><p class="chor-race-line${won || (!r.target && best) ? ' won' : ''}">${line}</p>`
       + `<div class="chor-race-board"><small>${T('This week on this street')}</small><ol><li>${T('Loading…')}</li></ol></div>`
       + `<div class="chor-card-btns"><button type="button" class="btn ghost" data-kit="trophies">🏆 ${T('Trophy room')}</button><button type="button" class="btn ghost" data-kit="race-again">${T('Race again')}</button><button type="button" class="btn primary" data-kit="race-share">${T('Challenge a friend')}</button></div>`, async (act) => {
       if (act === 'race-again') { startRace(r.target, r.day); return true; }
@@ -1725,8 +1778,8 @@
     const name = D.savedName(), street = T((STREETS.find((t) => t.id === r.street) || STREETS[0]).name);
     const link = D.link(`heist=${D.encode({ n: name, st: r.street, d: r.day, t: Math.round(sec * 10) / 10 })}`);
     const tr = r.treasure || treasureOfWeek();
-    const text = T(`🏆 I stole the ${tr[1]} from Seth-ji on ${street} in ${fmtT(sec)} in Pataka Chor! Can you pull off the heist faster? Same street, same stashes:`);
-    const blob = D.card({ art: `assets/chor/thumb/${r.street}.webp`, kicker: name ? T(`${name} challenges you`) : T('Street heist'), title: `${tr[2]} ${T(tr[1])}`, big: fmtT(sec), line: `${street} · ${T('Pataka Chor heist')}` });
+    const text = T(`🏆 I stole the ${tr[1]} from Seth-ji on ${street} in ${fmtT(sec)} in Cracker Street! Can you pull off the heist faster? Same street, same stashes:`);
+    const blob = D.card({ art: `assets/chor/thumb/${r.street}.webp`, kicker: name ? T(`${name} challenges you`) : T('Street heist'), title: `${tr[2]} ${T(tr[1])}`, big: fmtT(sec), line: `${street} · ${T('Cracker Street heist')}` });
     D.share({ title: T('Street race'), text, url: link, blob, name: 'street-race.png', src: 'race' });
   }
   // A friend's race link (#heist=…): their street, their day, their time to beat. Played in the app only.
