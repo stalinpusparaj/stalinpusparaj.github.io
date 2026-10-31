@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.gemmyapps.safetydetectivetown",
+      "sha256_cert_fingerprints": [
+        "CF:5D:02:77:DD:B8:28:8B:53:09:04:0B:B0:8A:00:5C:B2:0B:04:E6:6B:5B:79:CB:FD:90:D2:29:BF:53:DE:05"
+      ]
+    }
+  }
+]
