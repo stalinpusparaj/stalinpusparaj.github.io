@@ -29,7 +29,7 @@
     ],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.gemcreators.buzzyabcgarden",
+      "package_name": "com.gemmyapps.buzzyabcgarden",
       "sha256_cert_fingerprints": [
         "5B:66:18:7C:4B:C9:87:1B:9D:C2:F8:B3:0B:60:0A:32:FF:2D:90:E9:97:AA:1D:53:EC:77:91:CB:3A:DC:9D:88"
       ]
