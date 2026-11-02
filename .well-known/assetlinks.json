@@ -31,7 +31,8 @@
       "namespace": "android_app",
       "package_name": "com.gemmyapps.buzzyabcgarden",
       "sha256_cert_fingerprints": [
-        "5B:66:18:7C:4B:C9:87:1B:9D:C2:F8:B3:0B:60:0A:32:FF:2D:90:E9:97:AA:1D:53:EC:77:91:CB:3A:DC:9D:88"
+        "5B:66:18:7C:4B:C9:87:1B:9D:C2:F8:B3:0B:60:0A:32:FF:2D:90:E9:97:AA:1D:53:EC:77:91:CB:3A:DC:9D:88",
+        "37:A2:8D:C2:66:39:6B:4A:2A:B0:46:8B:38:62:22:02:B5:F1:82:22:CF:62:ED:74:9A:F6:74:84:C1:3B:89:21"
       ]
     }
   }
