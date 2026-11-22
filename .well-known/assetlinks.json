@@ -7,7 +7,9 @@
       "namespace": "android_app",
       "package_name": "com.gemmyapps.safetydetectivetown",
       "sha256_cert_fingerprints": [
-        "CF:5D:02:77:DD:B8:28:8B:53:09:04:0B:B0:8A:00:5C:B2:0B:04:E6:6B:5B:79:CB:FD:90:D2:29:BF:53:DE:05"
+        "CF:5D:02:77:DD:B8:28:8B:53:09:04:0B:B0:8A:00:5C:B2:0B:04:E6:6B:5B:79:CB:FD:90:D2:29:BF:53:DE:05",
+        "FB:2C:A1:51:DB:75:C3:49:3C:40:5F:DD:93:B9:05:F2:95:A9:8A:6A:27:82:EB:0E:A4:0A:B9:17:04:B2:92:3B",
+        "6D:1B:D9:6D:A7:FC:94:56:2A:BC:E5:91:FC:E1:90:D1:4E:54:85:C3:63:C1:EF:9B:9F:77:F3:F2:3E:65:A0:62"
       ]
     }
   },
