@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f6f1e7">
+<title>Pixel Bloom</title>
+<meta name="description" content="Color by number and mystery pixel puzzles: 4,000 free levels, no ads, every level unlocked.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Pixel Bloom — color by number & mystery puzzles">
+<meta property="og:description" content="4,000 free puzzles, no ads, no timers. Tap the link to try this one.">
+<meta property="og:image" content="https://pixelbloom.app/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<style>
+  :root {
+    --bg: #f6f1e7; --ink: #2a2733; --soft: #6f6a78; --card: #fffdf8; --line: #e4dccd;
+    --accent: #ff6b4a; --accent2: #3f7cff; --int: #3aa76d; --adv: #e9962b; --exp: #c8417a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font-family: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", sans-serif; }
+  button { font: inherit; color: inherit; border: 0; background: var(--card); border-radius: 12px; cursor: pointer; }
+  #app { height: 100%; }
+
+  /* ---------- home ---------- */
+  .home { max-width: 1100px; margin: 0 auto; padding: 16px 16px 48px; }
+  .app-banner { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #2b2b33; color: #fffdf8; font-size: 14px; position: relative; z-index: 30; }
+  .app-banner span { flex: 1; }
+  .app-banner .get { background: #ffb3c7; color: #2b2b33; border-radius: 999px; padding: 6px 12px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+  .app-banner .close { background: none; border: 0; color: inherit; font-size: 16px; padding: 4px; min-height: 0; box-shadow: none; }
+  .card .row.share { margin-top: 8px; }
+  .extras { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  .pill { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; border-radius: 999px; padding: 6px 12px; font-size: 14px; min-height: 0; width: auto; }
+  .app-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 50; }
+  .shop .card { max-height: 90vh; overflow-y: auto; text-align: left; }
+  .shop h3 { margin: 14px 0 6px; font-size: 15px; }
+  .shop-item { display: flex; justify-content: space-between; width: 100%; margin: 6px 0; }
+  .shop .fine { font-size: 13px; color: #8a7f72; }
+  .shop-msg:empty { display: none; }
+  .link { background: none; border: 0; box-shadow: none; text-decoration: underline; color: inherit; }
+  .foot { display: flex; gap: 16px; justify-content: center; padding: 24px 0 32px; font-size: 13px; }
+  .foot a { color: #8a7f72; }
+  .event { margin: 12px 0; padding: 14px; border-radius: 18px; background: linear-gradient(135deg, #fff1e0, #fde3ec); }
+  .ev-head { display: flex; justify-content: space-between; align-items: baseline; }
+  .ev-strip { display: flex; gap: 6px; overflow-x: auto; padding: 10px 0; scrollbar-width: none; }
+  .ev-strip canvas { width: 54px; height: 54px; flex: none; border-radius: 8px; image-rendering: pixelated; cursor: pointer; background: #fff; }
+  .ev-strip canvas.done { outline: 2px solid #3a9d5d; }
+  .event .fine { margin: 6px 0 0; font-size: 12px; color: #8a7f72; }
+  .hero { padding: 20px 4px 8px; }
+  .hero h1 { margin: 0; font-size: 34px; letter-spacing: -0.5px; }
+  .tag { margin: 4px 0 12px; color: var(--soft); }
+  .stats, .perks { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .stats span { background: var(--card); border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; font-weight: 600; }
+  .perks span { font-size: 13px; color: #2f6b4a; background: #e3f3e8; padding: 4px 10px; border-radius: 999px; }
+  .primary { background: var(--accent); color: #fff; font-weight: 700; padding: 10px 18px; box-shadow: 0 3px 0 #d44d2f; }
+  .primary.big { font-size: 17px; padding: 13px 22px; margin-top: 4px; }
+  .chapters { display: flex; gap: 8px; overflow-x: auto; padding: 14px 2px 10px; scrollbar-width: none; }
+  .chap { flex: 0 0 auto; padding: 8px 14px; border: 2px solid transparent; display: flex; flex-direction: column; align-items: flex-start; border-left: 5px solid var(--int); }
+  .chap.d-advanced { border-left-color: var(--adv); }
+  .chap.d-expert { border-left-color: var(--exp); }
+  .chap small { color: var(--soft); font-size: 11px; }
+  .chap.sel { border-color: var(--ink); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 12px; }
+  .card-lv { padding: 8px; display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); transition: transform .12s; }
+  .card-lv:hover { transform: translateY(-2px); }
+  .card-lv.milestone { border: 2px solid #f0b43c; }
+  .card-lv canvas { width: 100%; aspect-ratio: 1; object-fit: contain; image-rendering: pixelated; border-radius: 8px; background: #eee8dc; }
+  .lbl { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; color: var(--soft); }
+  .badge { background: #ffe9c7; color: #8a5a00; border-radius: 6px; padding: 0 6px; }
+  .badge.done { background: #d7f2e1; color: #1f7a45; }
+
+
+  /* ---------- daily + tabs + mystery ---------- */
+  .today { display: flex; gap: 14px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 12px; margin: 14px 0 4px; }
+  .today canvas { width: 92px; height: 92px; image-rendering: pixelated; border-radius: 12px; background: #eee8dc; flex: 0 0 auto; }
+  .today .info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .today small { color: var(--soft); }
+  .today .meta { display: flex; gap: 10px; font-weight: 700; font-size: 14px; }
+  .today .row { justify-content: flex-start; margin-top: 4px; }
+  .today .primary { padding: 8px 14px; }
+  .gift { background: #fff1d6; color: #8a5a00; padding: 8px 12px; font-weight: 700; }
+  .gift[disabled] { opacity: .8; cursor: default; }
+  .tabs { display: flex; gap: 8px; margin-top: 14px; }
+  .tab { flex: 1; padding: 10px; font-weight: 700; border: 2px solid transparent; }
+  .tab.sel { border-color: var(--ink); }
+  .card-lv.mystery canvas { background: #f3eee4; }
+  .size { color: var(--soft); font-weight: 600; }
+
+  /* ---------- game ---------- */
+  .game { height: 100%; display: flex; flex-direction: column; }
+  .topbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--card); border-bottom: 1px solid var(--line); }
+  .icon { width: 40px; height: 40px; font-size: 20px; background: var(--bg); }
+  .title { flex: 1; min-width: 0; }
+  .title .name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .title .sub { font-size: 12px; color: var(--soft); }
+  .pct { font-weight: 800; font-size: 18px; color: var(--accent); }
+  .stage { flex: 1; position: relative; overflow: hidden; touch-action: none; }
+  .stage canvas { position: absolute; inset: 0; touch-action: none; cursor: crosshair; }
+  .toast { position: absolute; left: 50%; top: 12px; transform: translate(-50%, -20px); opacity: 0; transition: .2s;
+    background: rgba(42,39,51,.92); color: #fff; padding: 8px 14px; border-radius: 999px; font-size: 14px; pointer-events: none; white-space: nowrap; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .tools { display: flex; gap: 8px; padding: 8px 12px; background: var(--card); border-top: 1px solid var(--line); overflow-x: auto; }
+  .tool { flex: 0 0 auto; padding: 8px 12px; background: var(--bg); font-weight: 600; font-size: 14px; }
+  .tool.active { background: var(--accent2); color: #fff; }
+  .palette { display: flex; gap: 8px; padding: 10px 12px calc(12px + env(safe-area-inset-bottom)); overflow-x: auto; background: var(--card); scroll-snap-type: x proximity; }
+  .swatch { flex: 0 0 auto; width: 58px; padding: 4px; display: flex; flex-direction: column; align-items: center; gap: 4px; background: transparent; scroll-snap-align: center; }
+  .chip { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 17px; box-shadow: inset 0 0 0 2px rgba(0,0,0,.08); transition: transform .12s; }
+  .swatch.sel .chip { transform: scale(1.12); box-shadow: 0 0 0 3px var(--card), 0 0 0 6px var(--ink); }
+  .swatch.done .chip { opacity: .35; }
+  .bar { width: 40px; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .bar .fill { height: 100%; background: var(--int); width: 0; transition: width .2s; }
+  .cnt { font-size: 11px; color: var(--soft); font-weight: 600; }
+
+  .overlay { position: fixed; inset: 0; background: rgba(30,26,40,.55); display: grid; place-items: center; padding: 16px; overflow: hidden; z-index: 10; }
+  .card { background: var(--card); border-radius: 20px; padding: 20px; max-width: 420px; width: 100%; text-align: center; position: relative; z-index: 2; }
+  .card h2 { margin: 0 0 12px; }
+  .preview { width: min(300px, 70vw); height: auto; image-rendering: pixelated; border-radius: 12px; }
+  .reward { color: #1f7a45; font-weight: 700; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .row button:not(.primary) { background: var(--bg); padding: 10px 14px; }
+  .confetti { position: absolute; top: -12px; width: 9px; height: 14px; border-radius: 2px; animation: fall linear forwards; z-index: 1; }
+  @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+  // Inside the Android app the native bridge defines window.Capacitor; load its JS core (plugin proxies) first.
+  if (window.Capacitor) document.write('<script src="capacitor.js"><\/script>');
+</script>
+<script src="pixelbloom.js"></script>
+<script>
+  // Web build only: the Android app already ships its files locally.
+  var native = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+  if (!native && 'serviceWorker' in navigator && location.protocol.indexOf('http') === 0) navigator.serviceWorker.register('sw.js');
+</script>
+</body>
+</html>
