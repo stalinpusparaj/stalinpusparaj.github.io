@@ -187,7 +187,7 @@
   const levelName = (lv) => (lv.daily ? `Daily Diya #${lv.no}` : `${CHAPTERS[data.chapters[lv.chapter].id]} ${lv.index + 1}`);
   // Gems come from the game's shared puzzle rule (LUTSGame.reward). The last 3 chapters (8×8) are Premium; free players
   // can play their first 5 levels. Premium also opens every chapter now, gives unlimited hints and every past daily.
-  const UNLOCK = 2 / 3, HINTS_A_DAY = 1, HINT_VIDEOS_A_DAY = 3, HINTS_PER_VIDEO = 2, PREMIUM_CHAPTERS = 3, TASTER = 5, ARCHIVE_DAYS = 14;
+  const UNLOCK = 2 / 3, HINTS_A_DAY = 1, PREMIUM_CHAPTERS = 3, TASTER = 5, ARCHIVE_DAYS = 14;
   const TUTORIAL = [
     'Drag from a diya to the diya of the same colour.',
     'Paths can’t cross. Fill every square for a perfect light.',
@@ -203,13 +203,14 @@
     let v = null;
     try { v = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { v = null; }
     if (!v || typeof v !== 'object') v = {};
-    for (const k of ['stars', 'best', 'daily', 'vids']) v[k] = v[k] && typeof v[k] === 'object' ? v[k] : {};
+    for (const k of ['stars', 'best', 'daily']) v[k] = v[k] && typeof v[k] === 'object' ? v[k] : {};
     if (!Number.isFinite(v.hints)) v.hints = HINTS_A_DAY;
-    // A free hint comes back every day; more cost gems (or a video, or Premium).
-    if (v.hintDay !== today()) { v.hints = Math.max(v.hints, HINTS_A_DAY); v.hintDay = today(); for (const d of Object.keys(v.vids)) if (d !== today()) delete v.vids[d]; }
+    // A free hint comes back every day; more cost gems or come with Premium.
+    if (v.hintDay !== today()) { v.hints = Math.max(v.hints, HINTS_A_DAY); v.hintDay = today(); }
     return v;
   }
   let prog = load();
+  window.LUTSDiyaHints = (n) => { prog.hints += n; save(); }; // a bundle's hints from the gem shop
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(prog)); } catch (e) { /* storage full: progress stays for this visit */ } };
 
   let data = null, loading = null;
@@ -384,7 +385,7 @@
           <p class="diya-res-stars" id="diyaResStars" aria-hidden="true"></p>
           <p class="diya-res-line" id="diyaResLine"></p>
           <p class="diya-res-gems"><span id="diyaResGain"></span> <span id="diyaResStreak"></span></p>
-          <div class="diya-chest" id="diyaChest" hidden><span id="diyaChestText"></span><button class="btn ghost small" id="diyaChestDouble" type="button">Watch a video · double it</button></div>
+          <div class="diya-chest" id="diyaChest" hidden><span id="diyaChestText"></span></div>
           <div class="diya-res-actions">
             <button class="btn primary" id="diyaNext" type="button">Next level</button>
             <button class="btn ghost" id="diyaLevels" type="button">Map</button>
@@ -405,7 +406,6 @@
           <p class="diya-res-line">A free hint comes back every day.</p>
           <div class="diya-res-actions">
             <button class="btn primary diya-gem-hint" id="diyaHintGems" type="button"></button>
-            <button class="btn ghost" id="diyaHintVideo" type="button">Watch a video · +2 hints</button>
             <button class="diya-upsell" id="diyaHintPremium" type="button"><span aria-hidden="true">👑</span>Unlimited hints with Premium</button>
             <button class="btn ghost" id="diyaHintClose" type="button">Not now</button>
           </div>
@@ -417,12 +417,17 @@
       root: s, map: $('#diyaMap'), play: $('#diyaPlay'), chapters: $('#diyaChapters'), canvas: $('#diyaCanvas'), board: $('#diyaBoard'),
       result: $('#diyaResult'), hintBox: $('#diyaHintBox'), skip: $('#diyaSkip'), ambient: $('#diyaAmbient'),
     };
+    // The win banner over the board (made here, so the page's markup needs nothing new).
+    el.banner = document.createElement('div');
+    el.banner.className = 'diya-banner'; el.banner.hidden = true; el.banner.setAttribute('aria-live', 'polite');
+    el.banner.innerHTML = '<span></span><small></small>';
+    el.board.append(el.banner);
     for (let i = 0; i < 9; i++) el.ambient.append(document.createElement('i'));
     $('#diyaHome').addEventListener('click', close);
     $('#diyaBack').addEventListener('click', () => showMap());
     $('#diyaDaily').addEventListener('click', () => play(dailyLevel()));
     $('#diyaUndo').addEventListener('click', () => { if (board && board.undo()) changed(); });
-    $('#diyaRestart').addEventListener('click', () => { if (board) { board.restart(); changed(); } });
+    $('#diyaRestart').addEventListener('click', () => { if (board) { board.restart(); resetCombo(); changed(); } });
     $('#diyaHint').addEventListener('click', useHint);
     // The eye fades the board down so the picture behind it shows: a tap turns it on or off, holding it peeks until
     // the finger lifts.
@@ -438,7 +443,6 @@
       pick.hidden = !open; $('#diyaBgBtn').setAttribute('aria-expanded', String(open));
       if (open) { const on = pick.querySelector('.chip.active'); if (on) on.scrollIntoView({ block: 'nearest', inline: 'center' }); }
     });
-    $('#diyaHintVideo').addEventListener('click', hintVideo);
     $('#diyaHintClose').addEventListener('click', () => { el.hintBox.hidden = true; });
     $('#diyaHintX').addEventListener('click', () => { el.hintBox.hidden = true; });
     $('#diyaHintGems').addEventListener('click', () => {
@@ -449,12 +453,6 @@
     });
     $('#diyaHintPremium').addEventListener('click', () => { el.hintBox.hidden = true; if (game()) game().openPremium({ hints: true }); });
     $('#diyaResPremium').addEventListener('click', () => { if (game()) game().openPremium({ levels: true }); });
-    $('#diyaChestDouble').addEventListener('click', async () => {
-      const g = game(), btn = $('#diyaChestDouble');
-      if (!g || !award || !award.chest || btn.disabled) return;
-      btn.disabled = true;
-      if (await g.doubleChest(award.chest)) { $('#diyaChestText').textContent = `🎁 Chest +${award.chest * 2}`; btn.hidden = true; } else btn.disabled = false;
-    });
     $('#diyaNext').addEventListener('click', () => { const nx = nextLevel(); if (nx) play(nx); else showMap(); });
     $('#diyaAgain').addEventListener('click', () => play(current));
     $('#diyaLevels').addEventListener('click', () => showMap());
@@ -463,10 +461,10 @@
     $('#diyaShare').addEventListener('click', shareLevel);
     $('#diyaShareVideo').addEventListener('click', shareVideo);
     $('#diyaChallenge').addEventListener('click', shareChallenge);
-    el.skip.addEventListener('pointerdown', () => { if (showTimer) { clearTimeout(showTimer); showTimer = 0; showResult(); } });
+    el.skip.addEventListener('pointerdown', () => { if (skipFinale()) return; if (showTimer) { clearTimeout(showTimer); showTimer = 0; showResult(); } });
     const cv = el.canvas;
     cv.addEventListener('pointerdown', onDown);
-    cv.addEventListener('pointermove', onMove);
+    cv.addEventListener('onpointerrawupdate' in window ? 'pointerrawupdate' : 'pointermove', onMove); // the raw updates arrive sooner where there are any
     cv.addEventListener('pointerup', onUp);
     cv.addEventListener('pointercancel', onUp);
     // The board takes the room the other rows leave, which changes with the window and with a translated tip's length.
@@ -476,6 +474,7 @@
 
   // ----- The level map: Daily Diya, then the chapters -----
   function showMap() {
+    cancelFinale();
     endPreview(false);
     el.play.hidden = true; el.result.hidden = true; el.hintBox.hidden = true;
     el.map.hidden = false;
@@ -538,8 +537,8 @@
       }
       box.append(sec);
       if (!shown || !open) return;
-      const grid = document.createElement('div');
-      grid.className = 'diya-levels';
+      const trail = MAP_ART[ch.id], grid = trail ? Trail.grid(ch.levels.length, `assets/diya-path/${trail}`) : document.createElement('div');
+      if (!trail) grid.className = 'diya-levels';
       ch.levels.forEach((lv, j) => {
         const b = document.createElement('button'), st = prog.stars[lv.id] || 0, crown = premiumLocked(i, j), can = open && !crown && levelOpen(ch, j);
         b.type = 'button'; b.className = `diya-level${st ? ' won' : ''}${st === 3 ? ' gold' : ''}${crown ? ' premium-only' : ''}`;
@@ -549,13 +548,52 @@
         b.querySelector('small').textContent = crown ? '👑' : can ? starText(st) : '🔒';
         b.setAttribute('aria-label', `Level ${j + 1}`);
         b.addEventListener('click', () => (crown ? game() && game().openPremium({ levels: true }) : play({ ...lv, chapter: i, index: j })));
-        if (can && !st && !next) next = b;
+        if (can && !st && !next) { next = b; if (trail) b.classList.add('next'); }
+        if (trail) Trail.place(grid, b, j);
         grid.append(b);
       });
       sec.append(grid);
     });
     if (scrollToNext && next) requestAnimationFrame(() => next.scrollIntoView({ block: 'center' }));
+    Trail.pan(el.map.querySelector('.diya-scroll'));
   }
+  // Painted level maps (Google Flow art), by chapter.
+  const MAP_ART = { courtyard: 'map-courtyard.webp', garden: 'map-garden.webp', rangoli: 'map-rangoli.webp', lanterns: 'map-lanterns.webp', market: 'map-market.webp',
+    temple: 'map-temple.webp', ghat: 'map-ghat.webp', palace: 'map-palace.webp', fort: 'map-fort.webp', festival: 'map-festival.webp' };
+  // A chapter's levels as a trail up its painted map (Diya Path and Rocket Rush): level 1 at the bottom, each next one a
+  // step up and swung left or right. The painting stays behind the screen and pans from its foot to its top as you climb
+  // (parallax): no animation loop, only the page's own scroll.
+  const TRAIL_GAP = 88;
+  const Trail = window.LUTSTrail = {
+    grid(n, artUrl) {
+      const grid = document.createElement('div'), h = n * TRAIL_GAP + 140;
+      grid.className = 'diya-levels diya-trail';
+      grid.style.height = `${h}px`;
+      grid.style.setProperty('--art', `url('${artUrl}')`);
+      const pts = Array.from({ length: n }, (_, j) => [50 + Math.sin(j * 0.72) * 27, h - 70 - j * TRAIL_GAP]);
+      grid.innerHTML = `<div class="diya-trail-art" aria-hidden="true"></div><svg class="diya-trail-line" viewBox="0 0 100 ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts.map(([x, y]) => `${x},${y}`).join(' ')}"/></svg>`;
+      grid.trailPts = pts;
+      return grid;
+    },
+    place(grid, b, j) { const [x, y] = grid.trailPts[j]; b.style.left = `${x}%`; b.style.top = `${y}px`; },
+    // Set on scroll (passive), at most once a frame. Each scroller is hooked once.
+    pan(sc) {
+      if (!sc) return;
+      if (!sc.trailHooked) { sc.trailHooked = true; sc.addEventListener('scroll', () => Trail.pan(sc), { passive: true }); }
+      if (sc.trailQueued) return;
+      sc.trailQueued = true;
+      requestAnimationFrame(() => {
+        sc.trailQueued = false;
+        const t = sc.querySelector('.diya-trail');
+        if (!t) return;
+        const art = t.querySelector('.diya-trail-art'), view = sc.clientHeight;
+        art.style.height = `${view}px`; art.style.marginBottom = `${-view}px`;
+        const top = t.getBoundingClientRect().top - sc.getBoundingClientRect().top; // the trail's top, from the view's
+        const k = Math.min(1, Math.max(0, -top / Math.max(1, t.offsetHeight - view)));
+        t.style.setProperty('--pp', `${(k * 100).toFixed(1)}%`); // 0% at the chapter's top level, 100% at level 1
+      });
+    },
+  };
   const starText = (n) => '★'.repeat(n) + '☆'.repeat(3 - n);
   function nextLevel() {
     if (!current || current.daily) return null;
@@ -566,6 +604,7 @@
   }
 
   // ----- Playing a level -----
+  let gridKey = '', lastDraw = 0; // (drawing: the grid layer's state, the last frame drawn)
   let board = null, current = null, cell = 0, ox = 0, oy = 0, dpr = 1, raf = 0, last = 0, sparks = [], glowAt = [], finished = false, showTimer = 0;
   // ----- Challenge a friend: a link with this level (or this day's Daily Diya) and your moves; it opens the same board
   // for them with your moves to beat (in the app; the web sends to Google Play). -----
@@ -610,8 +649,10 @@
     if (/dpvs=/.test(location.hash)) { const wait = () => (root.LUTSGame && root.LUTSDuel ? openVs() : setTimeout(wait, 300)); setTimeout(wait, 800); }
   }
   function play(lv) {
+    cancelFinale(); resetCombo();
     if (!lv.daily) shownChapter = lv.chapter; // back on the map, this chapter stays open
     current = lv; board = new Board(lv); finished = false; startedAt = Date.now(); replay = null;
+    if (root.LUTSTrack) { root.LUTSTrack.screen('diya_path'); root.LUTSTrack.level('diya_path', lv.daily ? 'daily' : lv.id); }
     el.root.classList.remove('diya-clean');
     setPeek(false);
     startClip();
@@ -630,15 +671,19 @@
   function layout() {
     const cs = getComputedStyle(el.board), padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight), padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
     const side = Math.max(120, Math.floor(Math.min(el.board.clientWidth - padX, el.board.clientHeight - padY)));
-    dpr = Math.min(2.5, root.devicePixelRatio || 1);
+    // the board's sharpness: 2× at most, 1.5× on a modest phone (a third fewer pixels to draw on every frame)
+    const modest = (navigator.hardwareConcurrency || 8) <= 4 || (navigator.deviceMemory || 8) <= 4;
+    dpr = Math.min(modest ? 1.5 : 2, root.devicePixelRatio || 1);
     const cv = el.canvas;
     // the grid has its own canvas underneath, so a recorded clip (which copies the top one) shows no grid
     for (const c of [cv, $('#diyaGrid')]) { c.style.width = c.style.height = `${side}px`; c.width = c.height = Math.round(side * dpr); }
+    gridKey = ''; // (setting a canvas's size clears it, even to the same size: the grid is drawn again)
     const pad = side * 0.04;
     cell = (side - 2 * pad) / board.n;
     ox = oy = pad;
   }
   function changed() {
+    lightShown = ''; // (the counters below are written in full)
     const b = board, best = prog.best[current.id];
     $('#diyaMoves').textContent = `Moves ${b.moves}`;
     $('#diyaBest').textContent = best ? `Best ${best}` : `Par ${b.k}`;
@@ -651,16 +696,20 @@
     el.root.style.setProperty('--diya-fill', b.fill().toFixed(3));
     if (!finished && b.complete() && !b.drag) finish();
   }
+  // The board's place on screen, measured when a finger goes down (not on every move: reading layout right after the
+  // counters change made the WebView lay the whole screen out again on each move, the drag's lag)
+  let boardRect = null;
   const cellAt = (e) => {
-    const r = el.canvas.getBoundingClientRect(), x = e.clientX - r.left - ox, y = e.clientY - r.top - oy;
+    const r = boardRect || el.canvas.getBoundingClientRect(), x = e.clientX - r.left - ox, y = e.clientY - r.top - oy;
     const cx = Math.floor(x / cell), cy = Math.floor(y / cell);
     return cx < 0 || cy < 0 || cx >= board.n || cy >= board.n ? -1 : cy * board.n + cx;
   };
   let wasConnected = [];
   function onDown(e) {
-    if (finished && board && el.result.hidden && !showTimer) { el.result.hidden = false; return; }
+    if (finished && board && el.result.hidden && !showTimer && !finaleTimer) { el.result.hidden = false; return; }
     if (!board || finished) return;
     if (game()) game().resume();
+    boardRect = el.canvas.getBoundingClientRect();
     const i = cellAt(e);
     wasConnected = board.paths.map((_, c) => board.connected(c));
     if (!board.begin(i)) return;
@@ -674,22 +723,55 @@
     if (i >= 0 && board.move(i)) { lit(); changedLight(); }
   }
   function onUp() {
+    boardRect = null;
     if (!board || !board.drag) return;
     board.end();
     changed();
   }
-  // A pair that just lit: bell, buzz and a burst of glow.
-  function lit() {
+  // A pair that just lit: bell, buzz and a burst of glow. Pairs lit one after another quickly (within COMBO_GAP) build
+  // a combo: ×2, ×3…, each with a bigger burst and a label over the board. A hint's pair never counts toward one.
+  const COMBO_GAP = 4000;
+  let combo = 0, lastLitAt = -1e9, bestCombo = 0;
+  function lit(byHint) {
     for (let c = 0; c < board.k; c++) {
       const on = board.connected(c);
-      if (on && !wasConnected[c]) { chime(c); if (game()) game().buzz(25); glowAt[c] = performance.now(); }
+      if (on && !wasConnected[c]) {
+        const now = performance.now();
+        combo = byHint ? 0 : now - lastLitAt < COMBO_GAP ? combo + 1 : 1;
+        lastLitAt = byHint ? -1e9 : now;
+        bestCombo = Math.max(bestCombo, combo);
+        chime(c); if (game()) game().buzz(combo > 1 ? [20, 40, 20] : 25); glowAt[c] = now;
+        const size = combo > 1 ? Math.min(2.2, 0.6 + combo * 0.4) : 0.6;
+        for (const i of board.endsOf[c]) burst(cellX(i), cellY(i), COLOURS[c].hex, size);
+        if (combo > 1) { const [a, z] = board.endsOf[c]; showCombo(combo, (cellX(a) + cellX(z)) / 2, (cellY(a) + cellY(z)) / 2, COLOURS[c].hex); }
+      }
       wasConnected[c] = on;
     }
   }
+  const resetCombo = () => { combo = 0; lastLitAt = -1e9; bestCombo = 0; };
+  // "×3 Combo!" floating up from between the pair's diyas (board coordinates are the canvas's CSS pixels).
+  function showCombo(n, x, y, col) {
+    const tag = document.createElement('div');
+    tag.className = 'diya-combo';
+    tag.textContent = `×${n} ${n >= 4 ? 'Blazing!' : 'Combo!'}`;
+    tag.style.left = `${el.canvas.offsetLeft + x}px`; tag.style.top = `${el.canvas.offsetTop + y}px`;
+    tag.style.setProperty('--c', col);
+    el.board.append(tag);
+    setTimeout(() => tag.remove(), 1100);
+  }
+  // The counters: written at most once a frame, and only what changed (a drag moves many times a frame)
+  let lightRaf = 0, lightShown = '';
   const changedLight = () => {
-    $('#diyaPairs').textContent = `Pairs ${board.connectedCount()}/${board.k}`;
-    $('#diyaFill').textContent = `Filled ${Math.round(board.fill() * 100)}%`;
-    el.root.style.setProperty('--diya-fill', board.fill().toFixed(3));
+    if (lightRaf) return;
+    lightRaf = requestAnimationFrame(() => {
+      lightRaf = 0;
+      if (!board) return;
+      const pairs = board.connectedCount(), fill = Math.round(board.fill() * 100), key = `${pairs}|${fill}|${board.k}`;
+      if (key === lightShown) return;
+      lightShown = key;
+      $('#diyaPairs').textContent = `Pairs ${pairs}/${board.k}`;
+      $('#diyaFill').textContent = `Filled ${fill}%`; // (the screen's warm glow follows on release: repainting it mid-drag was costly)
+    });
   };
   function useHint() {
     if (!board || finished) return;
@@ -698,36 +780,21 @@
     wasConnected = board.paths.map((_, c) => board.connected(c));
     if (board.hint() < 0) return;
     if (!free) { prog.hints--; save(); }
-    lit(); changed();
+    lit(true); changed();
   }
   function openHintBox() {
-    const g = game(), left = HINT_VIDEOS_A_DAY - (prog.vids[today()] || 0), btn = $('#diyaHintVideo');
-    btn.hidden = !(g && g.videoReady());
-    btn.disabled = left <= 0;
-    btn.textContent = left <= 0 ? 'Videos are done for today' : `Watch a video · +${HINTS_PER_VIDEO} hints`;
+    const g = game();
     $('#diyaHintPremium').hidden = !g;
     const gb = $('#diyaHintGems'), cost = g ? g.hintCost() : 10, have = g ? g.gems() : 0;
     gb.hidden = !g;
     gb.textContent = have >= cost ? `Use 💎 ${cost} for a hint` : `Buy gems · a hint is 💎 ${cost}`;
     el.hintBox.hidden = false;
   }
-  async function hintVideo() {
-    const g = game(), btn = $('#diyaHintVideo');
-    if (!g || btn.disabled) return;
-    btn.disabled = true;
-    const ok = await g.watchVideo();
-    if (ok) {
-      prog.vids[today()] = (prog.vids[today()] || 0) + 1;
-      prog.hints += HINTS_PER_VIDEO; save();
-      el.hintBox.hidden = true;
-      changed();
-    } else btn.disabled = false;
-  }
-
   // ----- A finished level: the show over the landmark, then the stars -----
   let award = null, startedAt = 0;
   function finish() {
     finished = true;
+    if (root.LUTSTrack) root.LUTSTrack.levelEnd('diya_path', 'win');
     const b = board, stars = b.stars(), id = current.id, g = game();
     swell();
     if (g) g.buzz([30, 60, 30]);
@@ -745,11 +812,11 @@
     award = { stars, gain: r.gain, chest: r.chest, newBest, streak: current.daily && current.day === today() && g ? g.markDaily(today()) : 0 };
     // The Daily Diya's leaderboard score: stars first, then speed (900 points, 3 fewer for every second taken).
     if (current.daily && current.day === today() && g && g.dailyScore) g.dailyScore('diya', stars * 1000 + Math.max(0, 900 - Math.round((Date.now() - startedAt) / 1000) * 3));
-    // No fireworks: the lit board glows for a moment, then the level-complete card. The sky is hushed too, so nothing
-    // left over from a show goes on bursting behind the puzzle.
+    // The finale plays on the board itself (no sky show, no firework sounds), then the level-complete card. The sky is
+    // hushed too, so nothing left over from a show goes on bursting behind the puzzle.
     if (g && g.quiet) g.quiet();
     setPeek(false);
-    showTimer = setTimeout(() => { showTimer = 0; showResult(); }, 650);
+    finale(stars, () => { showResult(); });
     setTimeout(() => endClip(true), 1200); // the lit board glows on the clip's last second
   }
   const peeking = () => !!el && el.root.classList.contains('peek');
@@ -867,7 +934,7 @@
     $('#diyaResGain').textContent = gain ? `💎 +${gain}` : '';
     const g = game();
     $('#diyaChest').hidden = !award.chest;
-    if (award.chest) { $('#diyaChestText').textContent = `🎁 Chest +${award.chest}`; const d = $('#diyaChestDouble'); d.disabled = false; d.hidden = !(g && g.videoReady()); }
+    if (award.chest) $('#diyaChestText').textContent = `🎁 Chest +${award.chest}`;
     $('#diyaResPremium').hidden = !g || isPremium();
     $('#diyaResStreak').textContent = streak ? `🔥 ${streak}-day streak` : '';
     if (vs && vs.id === current.id) { // against a friend's moves (fewer is better)
@@ -879,16 +946,68 @@
     $('#diyaNext').hidden = !nx;
     $('#diyaResult').hidden = false;
     $('#diyaNext').hidden ? $('#diyaAgain').focus() : $('#diyaNext').focus();
-    if (game()) game().adBreak(); // a video at this break, at most one every 2 minutes (the game decides)
   }
 
   // ----- Drawing -----
   const rgba = (hex, a) => { const v = parseInt(hex.slice(1), 16); return `rgba(${v >> 16},${(v >> 8) & 255},${v & 255},${a})`; };
+  // Speed: full frame rate only while something moves (a drag, sparks, a fresh glow, a replay or a clip); at rest the
+  // flames flicker at ~20 fps. The grid layer is redrawn only when the paths, the picture or the size change.
+  // No board on screen (the level map): no frames, a look 5 times a second for one.
+  let idleTimer = 0;
+  // ----- Fireworks on the board: a burst where a pair lights, and a finale when the level is won (as Rocket Rush has) -----
+  let SPARK_CAP = 160; // raised during the finale, back afterwards
+  // A burst at (x, y) in a diya's colour: hot streaks out in a ring, twinkling glitter, a white flash.
+  function burst(x, y, col, size) {
+    const n = Math.round(16 + size * 14), v = cell * (2.2 + size * 1.4);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.random() * 0.3, sp = v * (0.55 + Math.random() * 0.6);
+      sparks.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.55 + Math.random() * 0.4, age: 0, col: i % 3 ? col : '#fff3c4', r: 0.04 + size * 0.008, drag: 2.4, grav: 1.4 });
+    }
+    for (let i = 0; i < 6 + size * 4; i++) {
+      const a = Math.random() * Math.PI * 2, sp = v * Math.random() * 0.45;
+      sparks.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.8 + Math.random() * 0.6, age: 0, col: '#ffe9a8', r: 0.03, tw: true, drag: 3, grav: 0.7 });
+    }
+    sparks.push({ x, y, vx: 0, vy: 0, life: 0.25, age: 0, col: '#fff1c4', r: 0.55 + size * 0.1, grav: 0, glow: true });
+    kick();
+  }
+  const kick = () => { if (!raf && el && !el.play.hidden) raf = requestAnimationFrame(frame); };
+  const cellX = (i) => ox + (i % board.n + 0.5) * cell, cellY = (i) => oy + (((i / board.n) | 0) + 0.5) * cell;
+  // The level is won: the banner and its stars over the board, bursts from every lit diya in its own colour, a shower
+  // of gold glitter, then the result card. A tap on the board skips to it.
+  let finaleTimer = 0, finaleDone = null;
+  // Skip straight to the result (Back, the skip button); false when no finale is playing.
+  const skipFinale = () => { if (!finaleDone) return false; finaleDone(); return true; };
+  function finale(stars, then) {
+    SPARK_CAP = 700;
+    const bn = el.banner;
+    bn.firstChild.textContent = stars === 3 ? 'Perfect path!' : stars === 2 ? 'Beautifully lit!' : 'All diyas lit!';
+    bn.lastChild.textContent = '★'.repeat(stars) + '☆'.repeat(3 - stars);
+    bn.hidden = false; bn.classList.remove('in'); void bn.offsetWidth; bn.classList.add('in');
+    const ends = [];
+    for (let c = 0; c < board.k; c++) for (const i of board.endsOf[c]) ends.push([cellX(i), cellY(i), COLOURS[c].hex]);
+    ends.sort(() => Math.random() - 0.5);
+    const n = Math.min(ends.length, 4 + stars * 3);
+    for (let k = 0; k < n; k++) setTimeout(() => { if (finaleTimer) { const [x, y, col] = ends[k]; burst(x, y, col, 1 + stars * 0.5); } }, 80 + k * (1300 / n));
+    const side = el.canvas.width / dpr;
+    for (let i = 0; i < 60 + stars * 20; i++) { // glitter rain over the whole board
+      sparks.push({ x: Math.random() * side, y: -Math.random() * side * 0.3, vx: (Math.random() - 0.5) * cell * 0.4, vy: cell * (0.5 + Math.random()), life: 1.6 + Math.random() * 0.8, age: 0, col: Math.random() < 0.5 ? '#ffd27a' : '#fff3c4', r: 0.03, tw: true, drag: 0.6, grav: 0.6 });
+    }
+    kick();
+    const done = () => { if (!finaleTimer) return; clearTimeout(finaleTimer); finaleTimer = 0; finaleDone = null; el.board.removeEventListener('pointerdown', done); bn.hidden = true; SPARK_CAP = 160; then(); };
+    finaleDone = done;
+    finaleTimer = setTimeout(done, 2100);
+    el.board.addEventListener('pointerdown', done);
+  }
+  function cancelFinale() { if (!finaleTimer) return; clearTimeout(finaleTimer); finaleTimer = 0; if (el) { el.banner.hidden = true; if (finaleDone) el.board.removeEventListener('pointerdown', finaleDone); } finaleDone = null; SPARK_CAP = 160; }
+
   function frame(now) {
+    if (!board || el.play.hidden) { raf = 0; clearTimeout(idleTimer); idleTimer = setTimeout(() => { if (!el.root.hidden && !raf) raf = requestAnimationFrame(frame); }, 200); return; }
     raf = requestAnimationFrame(frame);
+    const busy = board.drag || sparks.length || replay || clip || glowAt.some((t) => now - t < 700);
+    if (!busy && now - lastDraw < 50) return;
+    lastDraw = now;
     const dt = Math.min(0.05, (now - last) / 1000 || 0);
     last = now;
-    if (!board || el.play.hidden) return;
     if (replay) stepReplay(dt);
     if (clip) clipFrame();
     const g = el.canvas.getContext('2d'), n = board.n, W = el.canvas.width;
@@ -897,6 +1016,58 @@
     const cx = (i) => ox + (i % n + 0.5) * cell, cy = (i) => oy + (((i / n) | 0) + 0.5) * cell;
     // The cell washes and the grid go on the canvas underneath: on screen they look the same, and neither a recorded
     // clip nor a Share video replay shows them.
+    const key = `${W}|${cell}|${ox}|${oy}|${el.root.dataset.scene || ''}|${replay ? 1 : 0}|${board.paths.map((p, c) => p.join('.') + (board.connected(c) ? '!' : '')).join('/')}`;
+    if (key !== gridKey) { gridKey = key; drawGrid(n, W); }
+    // glowing tubes
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    for (let c = 0; c < board.k; c++) {
+      const p = board.paths[c];
+      if (p.length < 2) continue;
+      const col = COLOURS[c].hex, on = board.connected(c), pulse = on ? 0.85 + 0.15 * Math.sin(now / 420 + c) : 0.7;
+      const flash = Math.max(0, 1 - (now - glowAt[c]) / 700);
+      const trace = () => { g.beginPath(); g.moveTo(cx(p[0]), cy(p[0])); for (const i of p) g.lineTo(cx(i), cy(i)); };
+      g.save();
+      // the glow as a wide soft stroke (a shadow blur per path, every frame, was the slowest thing on a phone)
+      g.strokeStyle = rgba(col, (0.16 + flash * 0.2) * pulse); g.lineWidth = cell * (0.62 + flash * 0.25); trace(); g.stroke();
+      g.strokeStyle = rgba(col, 0.55 + flash * 0.3); g.lineWidth = cell * 0.36; trace(); g.stroke();
+      g.strokeStyle = 'rgba(255, 252, 240, 0.85)'; g.lineWidth = cell * 0.09; trace(); g.stroke();
+      g.restore();
+    }
+    // diyas
+    for (let c = 0; c < board.k; c++) for (const i of board.endsOf[c]) drawDiya(g, cx(i), cy(i), cell, c, board.connected(c), now, Math.max(0, 1 - (now - glowAt[c]) / 700));
+    // the drag head: a little sparkle
+    if (board.drag) {
+      const p = board.drag.path, h = p[p.length - 1], col = COLOURS[board.drag.c].hex;
+      for (let s = 0; s < 2; s++) sparks.push({ x: cx(h), y: cy(h), vx: (Math.random() - 0.5) * cell * 2.4, vy: (Math.random() - 0.7) * cell * 2.4, life: 0.5 + Math.random() * 0.3, age: 0, col });
+      g.save();
+      g.fillStyle = rgba(col, 0.35); g.beginPath(); g.arc(cx(h), cy(h), cell * 0.24, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(255,255,255,0.9)'; g.beginPath(); g.arc(cx(h), cy(h), cell * 0.12, 0, Math.PI * 2); g.fill();
+      g.restore();
+    }
+    if (sparks.length > SPARK_CAP) sparks.splice(0, sparks.length - SPARK_CAP);
+    g.save();
+    g.globalCompositeOperation = 'lighter';
+    for (let s = sparks.length - 1; s >= 0; s--) {
+      const p = sparks[s];
+      p.age += dt;
+      if (p.age > p.life) { sparks.splice(s, 1); continue; }
+      // Optional, for bursts: drag (slows it), grav (cells/s² of fall, default 3), r (radius in cells), tw (twinkles),
+      // glow (a soft flash that grows as it fades).
+      if (p.drag) { const k = Math.exp(-p.drag * dt); p.vx *= k; p.vy *= k; }
+      p.x += p.vx * dt; p.y += p.vy * dt; p.vy += cell * (p.grav ?? 3) * dt;
+      const fade = 1 - p.age / p.life, a = p.tw ? fade * (0.45 + 0.55 * Math.random()) : fade;
+      if (p.glow) {
+        const R = cell * p.r * (1 + p.age / p.life * 0.6), gr = g.createRadialGradient(p.x, p.y, 0, p.x, p.y, R);
+        gr.addColorStop(0, rgba(p.col, fade * 0.9)); gr.addColorStop(1, rgba(p.col, 0));
+        g.fillStyle = gr; g.beginPath(); g.arc(p.x, p.y, R, 0, Math.PI * 2); g.fill();
+        continue;
+      }
+      g.fillStyle = rgba(p.col, a);
+      g.beginPath(); g.arc(p.x, p.y, cell * (p.r || 0.035), 0, Math.PI * 2); g.fill();
+    }
+    g.restore();
+  }
+  function drawGrid(n, W) {
     const gg = $('#diyaGrid').getContext('2d');
     gg.setTransform(dpr, 0, 0, dpr, 0, 0);
     gg.clearRect(0, 0, W, W);
@@ -924,57 +1095,18 @@
     g.stroke();
     g.restore();
     }
-    // glowing tubes
-    g.lineCap = 'round'; g.lineJoin = 'round';
-    for (let c = 0; c < board.k; c++) {
-      const p = board.paths[c];
-      if (p.length < 2) continue;
-      const col = COLOURS[c].hex, on = board.connected(c), pulse = on ? 0.85 + 0.15 * Math.sin(now / 420 + c) : 0.7;
-      const flash = Math.max(0, 1 - (now - glowAt[c]) / 700);
-      const trace = () => { g.beginPath(); g.moveTo(cx(p[0]), cy(p[0])); for (const i of p) g.lineTo(cx(i), cy(i)); };
-      g.save();
-      g.shadowColor = col; g.shadowBlur = cell * (0.35 + flash * 0.6) * pulse;
-      g.strokeStyle = rgba(col, 0.55 + flash * 0.3); g.lineWidth = cell * 0.36; trace(); g.stroke();
-      g.shadowBlur = 0;
-      g.strokeStyle = 'rgba(255, 252, 240, 0.85)'; g.lineWidth = cell * 0.09; trace(); g.stroke();
-      g.restore();
-    }
-    // diyas
-    for (let c = 0; c < board.k; c++) for (const i of board.endsOf[c]) drawDiya(g, cx(i), cy(i), cell, c, board.connected(c), now, Math.max(0, 1 - (now - glowAt[c]) / 700));
-    // the drag head: a little sparkle
-    if (board.drag) {
-      const p = board.drag.path, h = p[p.length - 1], col = COLOURS[board.drag.c].hex;
-      for (let s = 0; s < 2; s++) sparks.push({ x: cx(h), y: cy(h), vx: (Math.random() - 0.5) * cell * 2.4, vy: (Math.random() - 0.7) * cell * 2.4, life: 0.5 + Math.random() * 0.3, age: 0, col });
-      g.save();
-      g.fillStyle = 'rgba(255,255,255,0.9)'; g.shadowColor = col; g.shadowBlur = cell * 0.5;
-      g.beginPath(); g.arc(cx(h), cy(h), cell * 0.12, 0, Math.PI * 2); g.fill();
-      g.restore();
-    }
-    if (sparks.length > 160) sparks.splice(0, sparks.length - 160);
-    g.save();
-    g.globalCompositeOperation = 'lighter';
-    for (let s = sparks.length - 1; s >= 0; s--) {
-      const p = sparks[s];
-      p.age += dt;
-      if (p.age > p.life) { sparks.splice(s, 1); continue; }
-      p.x += p.vx * dt; p.y += p.vy * dt; p.vy += cell * 3 * dt;
-      g.fillStyle = rgba(p.col, 1 - p.age / p.life);
-      g.beginPath(); g.arc(p.x, p.y, cell * 0.035, 0, Math.PI * 2); g.fill();
-    }
-    g.restore();
   }
   // A flickering flame standing on (x, fy), r tall-ish.
   function drawFlame(g, x, fy, r, c, now, s) {
     const fl = 1 + Math.sin(now / 90 + c * 2) * 0.08 + Math.sin(now / 37 + c) * 0.04, fh = r * 1.15 * fl;
     const fg = g.createLinearGradient(x, fy - fh, x, fy);
     fg.addColorStop(0, 'rgba(255,250,220,0.95)'); fg.addColorStop(0.5, '#ffd36b'); fg.addColorStop(1, '#ff8a2a');
-    g.fillStyle = fg; g.shadowColor = '#ffb347'; g.shadowBlur = s * 0.4;
+    g.fillStyle = fg; // (no shadow blur: the diya's own glow lights it)
     g.beginPath();
     g.moveTo(x, fy - fh);
     g.quadraticCurveTo(x + r * 0.42, fy - fh * 0.35, x, fy);
     g.quadraticCurveTo(x - r * 0.42, fy - fh * 0.35, x, fy - fh);
     g.fill();
-    g.shadowBlur = 0;
   }
   // The enamel diyas painted in Google Flow (assets/diya-path/diya-<colour>.webp), each with its colour's gold emblem;
   // Premium's golden set is gold-<colour>.webp.
@@ -985,6 +1117,17 @@
     const im = sprites[set][c];
     return im && im.complete && im.naturalWidth ? im : null;
   };
+  // An unlit lamp's picture, darkened once and kept (a canvas filter on every frame was very slow on Android)
+  const dims = new Map();
+  function dimmed(img) {
+    let d = dims.get(img);
+    if (d) return d;
+    d = document.createElement('canvas'); d.width = img.naturalWidth; d.height = img.naturalHeight;
+    const x = d.getContext('2d'); x.drawImage(img, 0, 0);
+    x.globalCompositeOperation = 'source-atop'; x.fillStyle = 'rgba(10, 6, 24, 0.24)'; x.fillRect(0, 0, d.width, d.height);
+    dims.set(img, d);
+    return d;
+  }
   // A diya in its colour; lit pairs carry a flickering flame at the spout. Until the pictures load, a drawn one.
   function drawDiya(g, x, y, s, c, on, now, flash) {
     const col = COLOURS[c].hex, r = s * 0.36;
@@ -997,9 +1140,7 @@
     const img = sprite(c);
     if (img) {
       const d = s * 1.12, top = y - d / 2 + s * 0.08;
-      if (!on) g.filter = 'brightness(0.8) saturate(0.85)'; // unlit lamps sit a little back
-      g.drawImage(img, x - d / 2, top, d, d);
-      g.filter = 'none';
+      g.drawImage(on ? img : dimmed(img), x - d / 2, top, d, d); // unlit lamps sit a little back
       if (on) drawFlame(g, x + d * 0.4, top + d * 0.36, r * 0.85, c, now, s);
       g.restore();
       return;
@@ -1063,11 +1204,13 @@
   function close() {
     if (el) endPreview(false);
     if (!el || el.root.hidden) return;
+    if (root.LUTSTrack) { root.LUTSTrack.levelEnd('diya_path', 'quit'); root.LUTSTrack.screen('home'); }
     if (showTimer) { clearTimeout(showTimer); showTimer = 0; }
+    cancelFinale();
     el.root.hidden = true;
     el.root.classList.remove('showing');
     document.body.classList.remove('diya-open');
-    cancelAnimationFrame(raf); raf = 0;
+    cancelAnimationFrame(raf); raf = 0; clearTimeout(idleTimer);
     endClip(false); clipVideo = null;
     board = null;
     if (game()) game().leave();
@@ -1077,6 +1220,7 @@
   api.back = () => {
     if (!el || el.root.hidden) return false;
     if (!el.hintBox.hidden) el.hintBox.hidden = true;
+    else if (skipFinale()) { /* straight to the result */ }
     else if (showTimer) { clearTimeout(showTimer); showTimer = 0; showResult(); }
     else if (!el.play.hidden || !el.result.hidden) showMap();
     else close();

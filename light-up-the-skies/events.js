@@ -1,8 +1,7 @@
 // Events and the Store: the home screen's bottom bar (index.html #homeBar; its Cards button opens the card maker).
 //  - Events: four goals a day (two of them gratitude: light someone up, a love card, a card sent back), each paying
 //    gems, and a bonus chest once all four are done. The game calls LUTSGoals.tick(kind) as things happen.
-//  - Store: the Lucky Draw (one free spin a day, two more for a video; gems only, never bought, the chances shown),
-//    free gems for a video, No ads (Premium) and the gem shop.
+//  - Store: the Lucky Draw (one free spin a day plus bundle spins), Premium, and gem packs.
 (() => {
   const D = () => window.LUTSDuel, G = () => window.LUTSGame;
   const $ = (s, r = document) => r.querySelector(s);
@@ -27,6 +26,8 @@
     ['mela', 'mela', 1, 20, 'Play a Mela Night show'],
   ];
   const BONUS = 25, GKEY = 'luts:goals';
+  // Where each goal is done: a tap on the goal goes there (the button the home screen has for it)
+  const GO = { joy: '#btnJoy', back: '#btnCard', card: '#btnCard', launch: '#btnStart', puzzle: '#btnDiya', race: '#btnChRace', rush: '#btnDailySky', share: '#btnStart', mela: '#btnMela' };
   const hash = (s) => { let h = 2166136261; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
   function pickFor(day) {
     const h = hash(day), g = [...GRATITUDE], p = [...PLAY], out = [];
@@ -55,22 +56,33 @@
   }
   const claimable = () => { const st = goals(); return list().filter(([id, , need]) => (st.prog[id] || 0) >= need && !st.claimed[id]).length + (allDone(st) && !st.bonus ? 1 : 0); };
   const allDone = (st) => list().every(([id]) => st.claimed[id]);
-  // The home screen's "today" pill: your daily streak and how many of today's goals are done (tap: Events)
+  // The home screen's streak pill: your daily streak, at risk or near a prize (tap: today's Daily Sky)
   function renderToday() {
     const el = $('#homeToday');
     if (!el) return;
-    const st = goals(), done = list().filter(([id, , need]) => (st.prog[id] || 0) >= need).length;
     let streak = 0; try { streak = G() && G().dailyStreak ? +G().dailyStreak() || 0 : 0; } catch (e) { streak = 0; }
     streakPrize(streak);
     let played = true; try { played = !G().playedToday || G().playedToday(); } catch (e) { played = true; }
-    // a streak not yet kept today: warn, and the tap opens today's Daily Sky instead of Events
+    // a streak not yet kept today: warn (it glows)
     // the next streak prize, when it's one or two days away (a reason to come back tomorrow)
     const next = STREAK_PRIZES.find(([d]) => d > streak), near = streak > 0 && next && next[0] - streak <= 2 ? next : null;
+    // First thing each day: light someone up (the daily gratitude habit); once done, the streak pill as before
+    let joyDone = true, joyN = 0; try { joyDone = !G().joyToday || G().joyToday(); joyN = +G().joyStreak() || 0; } catch (e) { joyDone = true; }
+    el.classList.toggle('joy', !joyDone);
+    if (!joyDone) {
+      el.classList.remove('risk');
+      el.innerHTML = '';
+      const b = document.createElement('b'); b.textContent = '🪔 Who will you light up tonight?';
+      const s = document.createElement('small'); s.textContent = joyN ? `🔥 ${joyN}-day streak · keep it going` : 'Write someone you love across the sky and keep your diya burning';
+      el.append(b, s); el.hidden = false;
+      return;
+    }
     el.classList.toggle('risk', streak > 0 && !played);
+    // The pill is the streak only (the goals live on the bottom bar's Goals, with its badge), and it opens the Daily Sky
     el.textContent = streak > 0 && !played ? `🔥 ${streak}-day streak at risk · play today to keep it`
       : near ? `🔥 ${streak}-day streak · ${near[0] - streak} more for 💎${near[1]}`
-      : streak > 0 ? `🔥 ${streak}-day streak · 🎯 Goals ${done}/4` : `🎯 Today's goals ${done}/4`;
-    el.hidden = false;
+      : `🔥 ${streak}-day streak · keep it going`;
+    el.hidden = !(streak > 0);
   }
   // Streak milestones pay gems once each (3, 7, 14 and 30 days)
   const STREAK_PRIZES = [[3, 10], [7, 25], [14, 50], [30, 100]];
@@ -90,6 +102,7 @@
     const n = claimable();
     b.textContent = n; b.hidden = !n;
     renderToday();
+    const dot = $('#sideSpinDot'); if (dot) dot.hidden = !draw().free; // today's free spin is waiting
   }
   function renderGoals() {
     const st = goals(), box = $('#goalList');
@@ -111,6 +124,12 @@
         renderGoals(); renderBadge();
       });
       li.append(btn);
+      // the goal itself takes you to do it
+      const go = GO[GRATITUDE.concat(PLAY).find((x) => x[0] === id)[1]];
+      if (go && !got) {
+        li.classList.add('go'); li.tabIndex = 0; li.setAttribute('role', 'button');
+        li.addEventListener('click', (e) => { if (e.target.closest('.goal-claim')) return; const t = $(go); if (!t) return; D().closeSheet($('#eventsModal')); t.click(); });
+      }
       box.append(li);
     }
     const bonus = $('#goalBonus');
@@ -122,26 +141,25 @@
   // ---------- Store: Lucky Draw ----------
   // [gems, weight]: the chances are shown under the wheel.
   const PRIZES = [[5, 30], [10, 26], [15, 16], [20, 12], [30, 8], [50, 5], [75, 2], [100, 1]];
-  const DKEY = 'luts:draw', VIDEO_SPINS = 2;
-  const draw = () => { const s = load(DKEY, {}); return s.day === today() ? s : { day: today(), free: 1, video: 0 }; };
+  const DKEY = 'luts:draw';
+  const draw = () => { const s = load(DKEY, {}); return s.day === today() ? s : { day: today(), free: 1 }; };
   let spinning = false, angle = 0;
+  const inLang0 = (t) => (window.LUTSLang ? LUTSLang.t(t) : t);
   function renderDraw() {
     const s = draw();
-    $('#drawSpin').disabled = spinning || (!s.free && s.video >= VIDEO_SPINS);
-    const prem = D() && D().premium();
-    $('#drawSpin').textContent = s.free ? 'Spin free' : s.video < VIDEO_SPINS ? (prem ? `👑 Spin again (${VIDEO_SPINS - s.video} left)` : `🎬 Watch a video to spin (${VIDEO_SPINS - s.video} left)`) : 'Come back tomorrow';
+    const extra = (G() && G().bonusSpins && G().bonusSpins.left) || 0; // spins from a bundle, used once today's free one has gone
+    if ($('#sideSpinDot')) $('#sideSpinDot').hidden = !s.free && !extra;
+    $('#drawSpin').disabled = spinning || (!s.free && !extra);
+    $('#drawSpin').textContent = s.free ? 'Spin free' : extra ? inLang0('Spin free ({0} left)').replace('{0}', extra) : 'Come back tomorrow';
     const total = PRIZES.reduce((a, [, w]) => a + w, 0);
     $('#drawOdds').textContent = `Chances: ${PRIZES.map(([g, w]) => `💎${g} ${Math.round(w / total * 100) || '<1'}%`).join(' · ')}`;
   }
   async function spin() {
     if (spinning) return;
     const s = draw();
-    if (!s.free) {
-      if (s.video >= VIDEO_SPINS) return;
-      const g = G();
-      if (!g || !g.watchVideo || !(await g.watchVideo())) return;
-      s.video += 1;
-    } else s.free = 0;
+    if (!s.free && G() && G().bonusSpins && G().bonusSpins.take()) { /* a bundle's spin */ }
+    else if (!s.free) return;
+    else s.free = 0;
     store(DKEY, s);
     const total = PRIZES.reduce((a, [, w]) => a + w, 0);
     let r = Math.random() * total, i = 0;
@@ -163,22 +181,11 @@
     $('#drawWheel').style.background = `conic-gradient(${PRIZES.map((_, i) => `${cols[i]} ${i * seg}deg ${(i + 1) * seg}deg`).join(',')})`;
     $('#drawWheel').innerHTML = PRIZES.map(([g], i) => `<span style="transform: rotate(${i * seg + seg / 2}deg)"><b>💎${g}</b></span>`).join('');
   }
-  async function freeGems() {
-    const g = G();
-    if (!g || !g.watchVideo) return;
-    const st = load(DKEY, {}), day = today();
-    const used = st.gday === day ? st.gvid || 0 : 0;
-    if (used >= 4) { D().toast('Four free-gem videos a day. More tomorrow!'); return; }
-    if (!(await g.watchVideo())) return;
-    const s = load(DKEY, {}); s.gday = day; s.gvid = used + 1; store(DKEY, s);
-    D().addGems(10, 'for the video');
-    renderStore();
-  }
   function renderStore() {
-    const st = load(DKEY, {}), used = st.gday === today() ? st.gvid || 0 : 0;
-    $('#storeFreeLeft').textContent = `${4 - used} of 4 left today`;
     const g = D();
-    $('#storeNoAds').hidden = !!(g && g.premium());
+    $('#storePremium').hidden = !!(g && g.premium());
+    if (G() && G().storeShows) G().storeShows();
+    $('#storeGemsLine').textContent = (G() && G().gemOffer && G().gemOffer()) || 'Packs of gems';
   }
 
   // ---------- Sheets and the bottom bar ----------
@@ -202,12 +209,14 @@
     $('#goalCard').addEventListener('click', () => { D().closeSheet($('#eventsModal')); $('#btnCard').click(); });
     $('#goalJoy').addEventListener('click', () => { D().closeSheet($('#eventsModal')); const b = $('#btnJoy'); if (b) b.click(); });
     $('#drawSpin').addEventListener('click', spin);
-    $('#storeFree').addEventListener('click', freeGems);
-    $('#storeNoAds').addEventListener('click', () => D().openPremium());
+    $('#storePremium').addEventListener('click', () => D().openPremium());
+    $('#sideSpin').addEventListener('click', () => { renderDraw(); renderStore(); $('#drawWon').textContent = ''; open('storeModal'); });
+    $('#sideGems').addEventListener('click', () => $('#btnGems').click());
+    $('#sidePremium').addEventListener('click', () => D().openPremium());
     $('#storeGems').addEventListener('click', () => { D().closeSheet($('#storeModal')); $('#btnGems').click(); });
     buildWheel();
     renderBadge();
-    $('#homeToday').addEventListener('click', (e) => (e.currentTarget.classList.contains('risk') ? $('#btnDailySky') : $('#homeBar [data-open=eventsModal]')).click());
+    $('#homeToday').addEventListener('click', () => $(G() && G().joyToday && !G().joyToday() ? '#btnJoy' : '#btnDailySky').click());
     document.addEventListener('visibilitychange', () => { if (!document.hidden) renderBadge(); });
   });
 

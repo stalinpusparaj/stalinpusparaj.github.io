@@ -28,6 +28,8 @@
   <link rel="preload" href="assets/fonts/cinzel-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/fonts/fonts.css">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="home-focus.css">
+  <link rel="stylesheet" href="gameplay-focus.css">
 </head>
 <body>
   <!-- Scene layers -->
@@ -35,7 +37,6 @@
   <video id="cam" playsinline muted autoplay aria-hidden="true"></video>
   <div id="skyGlow"></div>
   <canvas id="fx"></canvas>
-  <canvas id="glow" aria-hidden="true"></canvas>
   <canvas id="city"></canvas>
   <canvas id="floor"></canvas>
   <canvas id="items"></canvas>
@@ -64,6 +65,8 @@
       </div>
       <!-- Tap sky (Premium): tap anywhere in the sky to fire (see tapSky in game.js) -->
       <button class="tap-sky" id="btnTapSky" type="button" aria-pressed="false"><span id="tapSkyLabel">Tap sky</span></button>
+      <!-- Fill the street (Mega Burst, Premium): Ground's chip in the same spot, a full row of crackers in one tap -->
+      <button class="tap-sky fill-btn" id="btnFillStreet" type="button" hidden><span>Fill street</span></button>
     </div>
 
     <div class="actions">
@@ -107,6 +110,14 @@
     </button>
   </header>
 
+  <!-- Fire, floating over the scene in Sky and Ground: a gold overlay button on the right, out of the page's layout -->
+  <div class="fire-fab-wrap left ui">
+    <button class="fire-fab" id="btnFireFab" type="button" aria-label="Fire the chosen cracker" title="Fire">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21V11"/><path d="M12 3v2M5.6 5.6l1.4 1.4M3 12h2M18.4 5.6L17 7M21 12h-2"/><circle cx="12" cy="10" r="2.2"/><path d="M9 21h6"/></svg>
+      <span>Fire</span>
+    </button>
+  </div>
+
   <div class="spark-float ui" id="sparkFloat" role="toolbar" aria-label="Sparkler tools">
     <button class="tool active" data-tool="pen" aria-pressed="true" title="Sparkler pen">
       <svg viewBox="0 0 24 24"><path d="M4 20l4-1 11-11-3-3L5 16zM14 7l3 3"/><path d="M19 3l.6 1.4L21 5l-1.4.6L19 7l-.6-1.4L17 5l1.4-.6z"/></svg>
@@ -134,14 +145,20 @@
       <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
   </div>
+  <!-- In the app: a finished recording goes straight to one social app (ShareTargets in the Android app) -->
+  <div id="shareApps" class="share-apps" role="dialog" aria-label="Share your video" hidden>
+    <div class="share-apps-head"><b>Share your video</b>
+      <button class="icon-btn" id="btnShareAppsX" aria-label="Close" type="button"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="share-apps-row" id="shareAppsRow"></div>
+    <small>Saved to your gallery too</small>
+  </div>
   <!-- On every recorded video: the app's name and where to get it (shown only while the screen records) -->
   <canvas class="end-card" id="endCard" aria-hidden="true" hidden></canvas>
-  <div class="rec-mark" id="recMark" aria-hidden="true"><img src="assets/icons/icon-192.png" alt="" width="28" height="28"><span><b>Light Up the Skies</b><small>Get it on Google Play</small></span></div>
+  <div class="rec-mark" id="recMark" aria-hidden="true"><img src="assets/icons/icon-192.png" alt="" width="28" height="28"><span><b>Light Up the Skies</b><em translate="no">✦ by Gem Creators ✦</em><small>Get it on Google Play</small></span></div>
   <button type="button" id="recBadge" class="rec-badge" aria-label="Stop recording" hidden><span class="rec-dot"></span><span id="recLabel">REC</span> <span id="recTime">0:00</span></button>
   <div id="combo" class="combo" aria-live="polite"></div>
   <div id="toast" class="toast" role="status"></div>
-  <!-- After a few videos in one visit: a quiet way out (game.js premiumNudge) -->
-  <button type="button" class="premium-nudge" id="premiumNudge" hidden><span class="premium-crown" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 18h18l-1.6-10-4.6 4.2L12 5l-2.8 7.2L4.6 8z"/></svg></span><span><b>Tired of videos?</b><small>Premium removes every ad</small></span></button>
   <!-- Lantern Rush: time, score and multiplier during a round -->
   <div class="rush-hud" id="rushHud" hidden>
     <span class="rush-time"><b id="rushTime">30</b>s</span>
@@ -149,6 +166,41 @@
     <span class="rush-target" id="rushTarget" hidden></span>
   </div>
   <button id="btnShowUi" class="show-ui" aria-label="Show controls">Show controls</button>
+  <button id="btnLiveExit" class="live-exit" type="button" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 11.2L12 4l8.5 7.2"/><path d="M6 9.6V20h4.6v-5.4h2.8V20H18V9.6"/></svg><span>Home</span></button>
+  <!-- Live Sky: a themed show has ended; light the same sky yourself, watch it again, or choose another (game.js) -->
+  <!-- Live Sky's caption card: a place's line, Safe Diwali's question and tip, the gratitude finale (game.js liveCaption) -->
+  <div class="live-caption" id="liveCaption" role="status" aria-live="polite" hidden><b id="liveCapHead"></b><span id="liveCapBody"></span><button type="button" class="live-cap-act" id="liveCapAct" hidden></button></div>
+  <div class="live-gate" id="liveEnd" role="dialog" aria-modal="true" aria-labelledby="liveEndTitle" hidden>
+    <div class="live-gate-box">
+      <h2 id="liveEndTitle">What a show!</h2>
+      <p>Now it’s your turn: the same landmark and every cracker in the show are yours to light.</p>
+      <button type="button" class="btn primary" id="btnLivePlay"><span aria-hidden="true">🎆</span><span>Light this sky yourself</span></button>
+      <button type="button" class="btn ghost" id="btnLiveAgain">Watch again</button>
+      <button type="button" class="btn ghost" id="btnLiveMore">Another show</button>
+      <button type="button" class="live-offer" id="btnLiveOffer" hidden><i class="crown-ico" aria-hidden="true"></i>Liked it? Premium plays all 36 shows all night</button>
+    </div>
+  </div>
+  <!-- A 👑 show for a free player: Premium, its gems once, or today's free show; nothing chosen for them (game.js liveLockCard) -->
+  <div class="live-gate" id="liveLock" role="dialog" aria-modal="true" aria-labelledby="liveLockTitle" hidden>
+    <div class="live-gate-box">
+      <h2 id="liveLockTitle"></h2>
+      <p id="liveLockLine"></p>
+      <button type="button" class="btn ghost" id="btnLockFree"><span aria-hidden="true">🎁</span><span>Watch free today</span></button>
+      <button type="button" class="btn primary" id="btnLockPremium"><i class="crown-ico" aria-hidden="true"></i><span>Premium</span></button>
+      <button type="button" class="btn ghost" id="btnLockGems"><span>Unlock</span><span id="liveLockGems"></span></button>
+      <button type="button" class="btn ghost" id="btnLockAll"><span>All shows</span><span id="liveLockAll"></span></button>
+      <button type="button" class="btn ghost" id="btnLockClose">Close</button>
+    </div>
+  </div>
+  <!-- Live Sky for standard players: a one-minute preview; Premium watches without end (game.js) -->
+  <div class="live-gate" id="liveGate" role="dialog" aria-modal="true" aria-labelledby="liveGateTitle" hidden>
+    <div class="live-gate-box">
+      <h2 id="liveGateTitle">The sky is waiting for you</h2>
+      <p>Your free preview has ended. Premium unlocks the whole night and all 36 shows.</p>
+      <button type="button" class="btn primary" id="btnLivePremium"><i class="crown-ico" aria-hidden="true"></i>Unlock all-night Live Sky</button>
+      <button type="button" class="btn ghost" id="btnLiveGateExit">Exit</button>
+    </div>
+  </div>
 
   <!-- Shell dock -->
   <div class="bottom-ui">
@@ -211,9 +263,21 @@
 
   <!-- Home: the app's name, one line and two choices; the game's controls wait until the show starts -->
   <section class="overlay intro" id="intro">
+    <!-- The home menu: every mode and screen in one list (home-menu.js) -->
+    <button class="intro-gear intro-menu" id="btnHomeMenu" type="button" aria-label="Menu" title="Menu" aria-expanded="false" aria-controls="homeMenu">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7h15M4.5 12h15M4.5 17h15"/></svg>
+    </button>
     <button class="intro-gear" id="btnIntroSettings" type="button" aria-label="Settings" title="Settings">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.8v2.6M12 18.6v2.6M21.2 12h-2.6M5.4 12H2.8M18.5 5.5l-1.8 1.8M7.3 16.7l-1.8 1.8M18.5 18.5l-1.8-1.8M7.3 7.3L5.5 5.5"/><circle cx="12" cy="12" r="6.4"/></svg>
     </button>
+    <!-- Quick gems and Premium on the home screen's sides. -->
+    <nav class="home-side left" aria-label="Free gems">
+      <button type="button" class="side-btn" id="sideSpin"><i aria-hidden="true"><svg class="side-svg" viewBox="0 0 32 32"><defs><linearGradient id="sgSpin" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff2b8"/><stop offset=".55" stop-color="#ffcf5a"/><stop offset="1" stop-color="#c47a12"/></linearGradient></defs><circle cx="16" cy="17" r="13" fill="url(#sgSpin)" stroke="#6a3500" stroke-width="1"/><path d="M16 17L16.00 6.40A10.6 10.6 0 0 1 23.50 9.50z" fill="#ffcf5a"/><path d="M16 17L23.50 9.50A10.6 10.6 0 0 1 26.60 17.00z" fill="#d8342a"/><path d="M16 17L26.60 17.00A10.6 10.6 0 0 1 23.50 24.50z" fill="#ffcf5a"/><path d="M16 17L23.50 24.50A10.6 10.6 0 0 1 16.00 27.60z" fill="#d8342a"/><path d="M16 17L16.00 27.60A10.6 10.6 0 0 1 8.50 24.50z" fill="#ffcf5a"/><path d="M16 17L8.50 24.50A10.6 10.6 0 0 1 5.40 17.00z" fill="#d8342a"/><path d="M16 17L5.40 17.00A10.6 10.6 0 0 1 8.50 9.50z" fill="#ffcf5a"/><path d="M16 17L8.50 9.50A10.6 10.6 0 0 1 16.00 6.40z" fill="#d8342a"/><circle cx="16" cy="17" r="10.6" fill="none" stroke="#6a3500" stroke-width=".7"/><circle cx="16" cy="17" r="2.6" fill="url(#sgSpin)" stroke="#6a3500" stroke-width=".8"/><path d="M12.8 1.2h6.4L16 7.4z" fill="#ff5a5a" stroke="#6a3500" stroke-width=".8" stroke-linejoin="round"/></svg></i><span>Lucky spin</span><em id="sideSpinDot" hidden></em></button>
+      <button type="button" class="side-btn" id="sideGems"><i aria-hidden="true">💎</i><span>Gem shop</span></button>
+    </nav>
+    <nav class="home-side right" aria-label="Premium">
+      <button type="button" class="side-btn crown" id="sidePremium"><i aria-hidden="true"><i class="crown-ico" aria-hidden="true"></i></i><span>Premium</span></button>
+    </nav>
     <div class="intro-inner">
       <!-- Shown when Google Play has a newer version for this phone (checked at start; at most once a day after Later) -->
       <div class="update-card" id="updateCard" role="status" hidden>
@@ -225,6 +289,11 @@
       <img class="intro-icon" src="assets/icons/icon-192.png" alt="" width="88" height="88">
       <h1 class="title">Light Up<br>the Skies</h1>
       <p class="lead">Fireworks over India’s landmarks, and wishes written in the sky.</p>
+      <!-- Diwali Pass offer, first on home while it's on sale and the player has no Premium (game.js syncPassOffer) -->
+      <button type="button" class="home-pass" id="homePass" hidden><span class="hp-ico" aria-hidden="true">🪔</span><span class="hp-text"><b>Diwali Pass</b><small></small></span><span class="hp-go" id="homePassPrice">Get it</span></button>
+      <!-- Nataraja Rescue one tap from home: the next chapter's intro (chor.js syncHomeStory fills it); on a
+           phone it takes the tagline's place, so Start the show and the love card stay where they were -->
+      <button type="button" class="home-story" id="homeStory" hidden></button>
       <button type="button" class="home-today" id="homeToday" hidden></button>
       <button type="button" class="home-rival" id="homeRival" hidden></button>
       <div class="intro-actions">
@@ -233,61 +302,120 @@
         <!-- On the website only (never in the app): the free Android app, for a friend who opened a shared link -->
         <a class="btn ghost get-app" id="btnGetApp" target="_blank" rel="noopener" hidden><span aria-hidden="true">▶</span><span>Get it on Google Play</span></a>
       </div>
-      <!-- Challenges: every way to play against a friend, side by side (game.js, duel.js, chor.js, the puzzles) -->
-      <section class="home-ch" aria-labelledby="homeChHead">
-        <div class="home-ch-head"><h3 id="homeChHead">Challenges</h3><button class="home-ch-all" id="btnChBoards" type="button">Leaderboards</button></div>
-        <div class="home-ch-row">
-          <button class="ch-card mela-card" id="btnMela" type="button" style="--j: 255, 150, 60"><i aria-hidden="true">🛕</i><b>Mela Night</b><small id="melaCount">Up to 4 at a temple</small><em aria-hidden="true">LIVE</em></button>
-          <button class="ch-card" id="btnDuel" type="button" style="--j: 255, 95, 162"><i aria-hidden="true">⚔️</i><b>Sky Duel</b><small>Your show vs a friend’s</small><em aria-hidden="true">NEW</em></button>
-          <button class="ch-card" id="btnRush" type="button" style="--j: 80, 200, 150"><i aria-hidden="true">🏮</i><b>Score Challenge</b><small id="tileRush">Beat a friend’s score</small><em aria-hidden="true">VS</em></button>
-          <button class="ch-card" id="btnChRace" type="button" style="--j: 255, 120, 60"><i aria-hidden="true">⏱</i><b>Street Heist</b><small>Find 9 stashes fastest</small></button>
-          <button class="ch-card" id="btnChRocket" type="button" style="--j: 255, 90, 78"><i aria-hidden="true">🚀</i><b>Daily Rocket</b><small>Same board for everyone</small></button>
-          <button class="ch-card" id="btnChDiya" type="button" style="--j: 255, 176, 70"><i aria-hidden="true">🪔</i><b>Daily Diya</b><small>Fewest moves wins</small></button>
-        </div>
-      </section>
-      <div class="home-tiles">
-        <!-- Diwali week: a challenge each day from Dhanteras to Bhai Dooj (game.js renderFest) -->
-        <button class="home-tile wide fest-tile" id="btnFest" type="button" hidden>
-          <span class="tile-ico tile-art" aria-hidden="true"><img src="assets/menu/glyphs/diwali.webp" alt="" width="40" height="40" decoding="async"></span>
-          <span class="tile-text"><b>Diwali week</b><small id="tileFest"></small></span>
-          <span class="tile-badge" id="badgeFest">Today</span>
+      <div class="home-shop" aria-label="Gems and Premium">
+        <button type="button" id="homeGems"><span aria-hidden="true">💎</span><span><b><span data-gems>0</span> gems</b><small>Get gems for special crackers</small></span></button>
+        <button type="button" id="homePremium"><span aria-hidden="true">👑</span><span><b>Explore Premium</b><small>Every cracker and every level</small></span></button>
+      </div>
+      <section class="home-sec" aria-labelledby="homePlayHead">
+        <div class="home-ch-head home-sec-head"><h3 id="homePlayHead">Play</h3></div>
+        <div class="home-tiles">
+        <button class="home-tile" id="btnChor" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><img src="assets/menu/thumb-street.webp" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Festival Street</b><small id="tileChor">Keys, crackers and a calm steal · friends watch live</small></span>
         </button>
-        <button class="home-tile" id="btnBirthdays" type="button">
-          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/birthdays.webp"><img src="assets/menu/birthdays.png" alt="" width="40" height="40" decoding="async"></picture>
-          <span class="tile-text"><b>Birthdays</b><small id="tileBday">Never miss a friend’s day</small></span>
+        <!-- The same street against the clock: Street Heist (the week's treasure on the weekly board; chor.js) -->
+        <button class="home-tile" id="btnHeist" type="button">
+          <span class="tile-ico tile-art heist-art" aria-hidden="true"><img src="assets/menu/thumb-street.webp" alt="" width="40" height="40" decoding="async"></span>
+          <span class="tile-text"><b>Street Heist</b><small id="tileHeist">Beat the clock to the week’s treasure</small></span>
+          <span class="tile-badge" aria-hidden="true">This week</span>
         </button>
-        <button class="home-tile" id="btnJoy" type="button">
-          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/daily-joy.webp"><img src="assets/menu/daily-joy.png" alt="" width="40" height="40" decoding="async"></picture>
-          <span class="tile-text"><b>Light someone up</b><small id="tileJoy">Who are you grateful for?</small></span>
+        <button class="home-tile" id="btnDiya" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><img src="assets/menu/thumb-diya.webp" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Diya Path</b><small id="tileDiya">Join the diyas with light</small></span>
+        </button>
+        <button class="home-tile" id="btnRocket" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><img src="assets/menu/thumb-rocket.webp" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Rocket Rush</b><small id="tileRocket">Launch the rockets in the right order</small></span>
+        </button>
+        <!-- Magic Spirals (sky-gears.js; Sky Gears in the code): roll a gear round a ring and its pen draws glowing loops (sky-gears.js); the tile is a real 96/56 pattern, pen hole 30 -->
+        <button class="home-tile" id="btnGears" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><svg class="sg-tile-svg" viewBox="0 0 48 48" aria-hidden="true">
+            <defs><radialGradient id="skgTileGlow" cx="50%" cy="50%" r="60%"><stop offset="0" stop-color="#2c1f62"/><stop offset="1" stop-color="#0a0820"/></radialGradient>
+              <linearGradient id="skgTileInk" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe3a0"/><stop offset=".55" stop-color="#ffb35c"/><stop offset="1" stop-color="#ff7ab8"/></linearGradient></defs>
+            <rect width="48" height="48" fill="url(#skgTileGlow)"/>
+            <circle cx="24" cy="24" r="21.5" fill="none" stroke="#6ff3ff" stroke-width=".6" stroke-dasharray="1 1.4" opacity=".55"/>
+            <path class="sg-spiral" d="M43.0 24.0L43.0 24.2L42.9 24.4L42.9 24.6L42.8 24.8L42.7 25.0L42.5 25.2L42.4 25.4L42.2 25.6L41.9 25.8L41.7 26.0L41.4 26.2L41.1 26.4L40.8 26.5L40.5 26.7L40.1 26.8L39.7 27.0L39.3 27.1L38.9 27.3L38.5 27.4L38.0 27.5L37.5 27.6L37.0 27.7L36.5 27.7L35.9 27.8L35.4 27.9L34.8 27.9L34.2 27.9L33.7 28.0L33.0 28.0L32.4 28.0L31.8 27.9L31.2 27.9L30.5 27.9L29.9 27.8L29.2 27.7L28.5 27.7L27.9 27.6L27.2 27.5L26.5 27.3L25.8 27.2L25.2 27.1L24.5 26.9L23.8 26.8L23.1 26.6L22.5 26.4L21.8 26.2L21.1 26.0L20.5 25.8L19.8 25.5L19.2 25.3L18.5 25.0L17.9 24.8L17.3 24.5L16.7 24.2L16.1 23.9L15.6 23.7L15.0 23.4L14.4 23.1L13.9 22.8L13.4 22.4L12.9 22.1L12.4 21.8L12.0 21.5L11.5 21.2L11.1 20.8L10.7 20.5L10.3 20.2L10.0 19.9L9.6 19.5L9.3 19.2L9.0 18.9L8.7 18.6L8.5 18.2L8.3 17.9L8.1 17.6L7.9 17.3L7.7 17.0L7.6 16.8L7.5 16.5L7.4 16.2L7.4 15.9L7.3 15.7L7.3 15.4L7.3 15.2L7.4 15.0L7.4 14.8L7.5 14.6L7.6 14.4L7.7 14.2L7.9 14.1L8.1 13.9L8.2 13.8L8.5 13.7L8.7 13.6L9.0 13.5L9.2 13.5L9.5 13.4L9.8 13.4L10.2 13.4L10.5 13.4L10.9 13.4L11.3 13.4L11.7 13.5L12.1 13.6L12.5 13.7L12.9 13.8L13.4 13.9L13.9 14.1L14.3 14.2L14.8 14.4L15.3 14.6L15.8 14.8L16.3 15.1L16.8 15.3L17.4 15.6L17.9 15.9L18.4 16.2L18.9 16.5L19.5 16.9L20.0 17.2L20.6 17.6L21.1 18.0L21.6 18.4L22.2 18.8L22.7 19.2L23.2 19.6L23.8 20.1L24.3 20.5L24.8 21.0L25.3 21.5L25.8 22.0L26.3 22.5L26.8 23.0L27.2 23.5L27.7 24.0L28.2 24.5L28.6 25.0L29.0 25.6L29.4 26.1L29.8 26.6L30.2 27.2L30.6 27.7L31.0 28.3L31.3 28.8L31.6 29.3L32.0 29.9L32.3 30.4L32.5 30.9L32.8 31.4L33.0 31.9L33.3 32.4L33.5 32.9L33.7 33.4L33.9 33.9L34.0 34.4L34.2 34.8L34.3 35.3L34.4 35.7L34.5 36.1L34.5 36.5L34.6 36.9L34.6 37.3L34.6 37.7L34.6 38.0L34.6 38.3L34.6 38.6L34.5 38.9L34.4 39.2L34.3 39.4L34.2 39.6L34.1 39.9L34.0 40.0L33.8 40.2L33.7 40.3L33.5 40.5L33.3 40.5L33.1 40.6L32.9 40.7L32.7 40.7L32.4 40.7L32.2 40.7L31.9 40.6L31.7 40.6L31.4 40.5L31.1 40.3L30.8 40.2L30.5 40.0L30.2 39.8L29.9 39.6L29.6 39.4L29.3 39.1L29.0 38.8L28.6 38.5L28.3 38.2L28.0 37.9L27.7 37.5L27.3 37.1L27.0 36.7L26.7 36.3L26.4 35.8L26.0 35.3L25.7 34.8L25.4 34.3L25.1 33.8L24.8 33.3L24.5 32.7L24.2 32.2L23.9 31.6L23.6 31.0L23.4 30.4L23.1 29.8L22.8 29.1L22.6 28.5L22.4 27.9L22.1 27.2L21.9 26.5L21.7 25.9L21.5 25.2L21.3 24.5L21.2 23.9L21.0 23.2L20.9 22.5L20.7 21.8L20.6 21.1L20.5 20.5L20.4 19.8L20.3 19.1L20.2 18.5L20.2 17.8L20.1 17.2L20.1 16.5L20.0 15.9L20.0 15.3L20.0 14.6L20.1 14.0L20.1 13.5L20.1 12.9L20.2 12.3L20.2 11.8L20.3 11.3L20.4 10.7L20.5 10.2L20.6 9.8L20.7 9.3L20.8 8.9L20.9 8.5L21.1 8.1L21.2 7.7L21.4 7.3L21.5 7.0L21.7 6.7L21.9 6.4L22.1 6.2L22.3 5.9L22.5 5.7L22.7 5.6L22.9 5.4L23.1 5.3L23.3 5.2L23.5 5.1L23.7 5.0L23.9 5.0L24.1 5.0L24.3 5.0L24.5 5.1L24.7 5.2L24.9 5.3L25.1 5.4L25.3 5.6L25.5 5.7L25.7 5.9L25.9 6.2L26.1 6.4L26.3 6.7L26.5 7.0L26.6 7.3L26.8 7.7L26.9 8.1L27.1 8.5L27.2 8.9L27.3 9.3L27.4 9.8L27.5 10.2L27.6 10.7L27.7 11.3L27.8 11.8L27.8 12.3L27.9 12.9L27.9 13.5L27.9 14.0L28.0 14.6L28.0 15.3L28.0 15.9L27.9 16.5L27.9 17.2L27.8 17.8L27.8 18.5L27.7 19.1L27.6 19.8L27.5 20.5L27.4 21.1L27.3 21.8L27.1 22.5L27.0 23.2L26.8 23.9L26.7 24.5L26.5 25.2L26.3 25.9L26.1 26.5L25.9 27.2L25.6 27.9L25.4 28.5L25.2 29.1L24.9 29.8L24.6 30.4L24.4 31.0L24.1 31.6L23.8 32.2L23.5 32.7L23.2 33.3L22.9 33.8L22.6 34.3L22.3 34.8L22.0 35.3L21.6 35.8L21.3 36.3L21.0 36.7L20.7 37.1L20.3 37.5L20.0 37.9L19.7 38.2L19.4 38.5L19.0 38.8L18.7 39.1L18.4 39.4L18.1 39.6L17.8 39.8L17.5 40.0L17.2 40.2L16.9 40.3L16.6 40.5L16.3 40.6L16.1 40.6L15.8 40.7L15.6 40.7L15.3 40.7L15.1 40.7L14.9 40.6L14.7 40.5L14.5 40.5L14.3 40.3L14.2 40.2L14.0 40.0L13.9 39.9L13.8 39.6L13.7 39.4L13.6 39.2L13.5 38.9L13.4 38.6L13.4 38.3L13.4 38.0L13.4 37.7L13.4 37.3L13.4 36.9L13.5 36.5L13.5 36.1L13.6 35.7L13.7 35.3L13.8 34.8L14.0 34.4L14.1 33.9L14.3 33.4L14.5 32.9L14.7 32.4L15.0 31.9L15.2 31.4L15.5 30.9L15.7 30.4L16.0 29.9L16.4 29.3L16.7 28.8L17.0 28.3L17.4 27.7L17.8 27.2L18.2 26.6L18.6 26.1L19.0 25.6L19.4 25.0L19.8 24.5L20.3 24.0L20.8 23.5L21.2 23.0L21.7 22.5L22.2 22.0L22.7 21.5L23.2 21.0L23.7 20.5L24.2 20.1L24.8 19.6L25.3 19.2L25.8 18.8L26.4 18.4L26.9 18.0L27.4 17.6L28.0 17.2L28.5 16.9L29.1 16.5L29.6 16.2L30.1 15.9L30.6 15.6L31.2 15.3L31.7 15.1L32.2 14.8L32.7 14.6L33.2 14.4L33.7 14.2L34.1 14.1L34.6 13.9L35.1 13.8L35.5 13.7L35.9 13.6L36.3 13.5L36.7 13.4L37.1 13.4L37.5 13.4L37.8 13.4L38.2 13.4L38.5 13.4L38.8 13.5L39.0 13.5L39.3 13.6L39.5 13.7L39.8 13.8L39.9 13.9L40.1 14.1L40.3 14.2L40.4 14.4L40.5 14.6L40.6 14.8L40.6 15.0L40.7 15.2L40.7 15.4L40.7 15.7L40.6 15.9L40.6 16.2L40.5 16.5L40.4 16.8L40.3 17.0L40.1 17.3L39.9 17.6L39.7 17.9L39.5 18.2L39.3 18.6L39.0 18.9L38.7 19.2L38.4 19.5L38.0 19.9L37.7 20.2L37.3 20.5L36.9 20.8L36.5 21.2L36.0 21.5L35.6 21.8L35.1 22.1L34.6 22.4L34.1 22.8L33.6 23.1L33.0 23.4L32.4 23.7L31.9 23.9L31.3 24.2L30.7 24.5L30.1 24.8L29.5 25.0L28.8 25.3L28.2 25.5L27.5 25.8L26.9 26.0L26.2 26.2L25.5 26.4L24.9 26.6L24.2 26.8L23.5 26.9L22.8 27.1L22.2 27.2L21.5 27.3L20.8 27.5L20.1 27.6L19.5 27.7L18.8 27.7L18.1 27.8L17.5 27.9L16.8 27.9L16.2 27.9L15.6 28.0L15.0 28.0L14.3 28.0L13.8 27.9L13.2 27.9L12.6 27.9L12.1 27.8L11.5 27.7L11.0 27.7L10.5 27.6L10.0 27.5L9.5 27.4L9.1 27.3L8.7 27.1L8.3 27.0L7.9 26.8L7.5 26.7L7.2 26.5L6.9 26.4L6.6 26.2L6.3 26.0L6.1 25.8L5.8 25.6L5.6 25.4L5.5 25.2L5.3 25.0L5.2 24.8L5.1 24.6L5.1 24.4L5.0 24.2L5.0 24.0L5.0 23.8L5.1 23.6L5.1 23.4L5.2 23.2L5.3 23.0L5.5 22.8L5.6 22.6L5.8 22.4L6.1 22.2L6.3 22.0L6.6 21.8L6.9 21.6L7.2 21.5L7.5 21.3L7.9 21.2L8.3 21.0L8.7 20.9L9.1 20.7L9.5 20.6L10.0 20.5L10.5 20.4L11.0 20.3L11.5 20.3L12.1 20.2L12.6 20.1L13.2 20.1L13.8 20.1L14.3 20.0L15.0 20.0L15.6 20.0L16.2 20.1L16.8 20.1L17.5 20.1L18.1 20.2L18.8 20.3L19.5 20.3L20.1 20.4L20.8 20.5L21.5 20.7L22.2 20.8L22.8 20.9L23.5 21.1L24.2 21.2L24.9 21.4L25.5 21.6L26.2 21.8L26.9 22.0L27.5 22.2L28.2 22.5L28.8 22.7L29.5 23.0L30.1 23.2L30.7 23.5L31.3 23.8L31.9 24.1L32.4 24.3L33.0 24.6L33.6 24.9L34.1 25.2L34.6 25.6L35.1 25.9L35.6 26.2L36.0 26.5L36.5 26.8L36.9 27.2L37.3 27.5L37.7 27.8L38.0 28.1L38.4 28.5L38.7 28.8L39.0 29.1L39.3 29.4L39.5 29.8L39.7 30.1L39.9 30.4L40.1 30.7L40.3 31.0L40.4 31.2L40.5 31.5L40.6 31.8L40.6 32.1L40.7 32.3L40.7 32.6L40.7 32.8L40.6 33.0L40.6 33.2L40.5 33.4L40.4 33.6L40.3 33.8L40.1 33.9L39.9 34.1L39.8 34.2L39.5 34.3L39.3 34.4L39.0 34.5L38.8 34.5L38.5 34.6L38.2 34.6L37.8 34.6L37.5 34.6L37.1 34.6L36.7 34.6L36.3 34.5L35.9 34.4L35.5 34.3L35.1 34.2L34.6 34.1L34.1 33.9L33.7 33.8L33.2 33.6L32.7 33.4L32.2 33.2L31.7 32.9L31.2 32.7L30.6 32.4L30.1 32.1L29.6 31.8L29.1 31.5L28.5 31.1L28.0 30.8L27.4 30.4L26.9 30.0L26.4 29.6L25.8 29.2L25.3 28.8L24.8 28.4L24.2 27.9L23.7 27.5L23.2 27.0L22.7 26.5L22.2 26.0L21.7 25.5L21.2 25.0L20.8 24.5L20.3 24.0L19.8 23.5L19.4 23.0L19.0 22.4L18.6 21.9L18.2 21.4L17.8 20.8L17.4 20.3L17.0 19.7L16.7 19.2L16.4 18.7L16.0 18.1L15.7 17.6L15.5 17.1L15.2 16.6L15.0 16.1L14.7 15.6L14.5 15.1L14.3 14.6L14.1 14.1L14.0 13.6L13.8 13.2L13.7 12.7L13.6 12.3L13.5 11.9L13.5 11.5L13.4 11.1L13.4 10.7L13.4 10.3L13.4 10.0L13.4 9.7L13.4 9.4L13.5 9.1L13.6 8.8L13.7 8.6L13.8 8.4L13.9 8.1L14.0 8.0L14.2 7.8L14.3 7.7L14.5 7.5L14.7 7.5L14.9 7.4L15.1 7.3L15.3 7.3L15.6 7.3L15.8 7.3L16.1 7.4L16.3 7.4L16.6 7.5L16.9 7.7L17.2 7.8L17.5 8.0L17.8 8.2L18.1 8.4L18.4 8.6L18.7 8.9L19.0 9.2L19.4 9.5L19.7 9.8L20.0 10.1L20.3 10.5L20.7 10.9L21.0 11.3L21.3 11.7L21.6 12.2L22.0 12.7L22.3 13.2L22.6 13.7L22.9 14.2L23.2 14.7L23.5 15.3L23.8 15.8L24.1 16.4L24.4 17.0L24.6 17.6L24.9 18.2L25.2 18.9L25.4 19.5L25.6 20.1L25.9 20.8L26.1 21.5L26.3 22.1L26.5 22.8L26.7 23.5L26.8 24.1L27.0 24.8L27.1 25.5L27.3 26.2L27.4 26.9L27.5 27.5L27.6 28.2L27.7 28.9L27.8 29.5L27.8 30.2L27.9 30.8L27.9 31.5L28.0 32.1L28.0 32.7L28.0 33.4L27.9 34.0L27.9 34.5L27.9 35.1L27.8 35.7L27.8 36.2L27.7 36.7L27.6 37.3L27.5 37.8L27.4 38.2L27.3 38.7L27.2 39.1L27.1 39.5L26.9 39.9L26.8 40.3L26.6 40.7L26.5 41.0L26.3 41.3L26.1 41.6L25.9 41.8L25.7 42.1L25.5 42.3L25.3 42.4L25.1 42.6L24.9 42.7L24.7 42.8L24.5 42.9L24.3 43.0L24.1 43.0L23.9 43.0L23.7 43.0L23.5 42.9L23.3 42.8L23.1 42.7L22.9 42.6L22.7 42.4L22.5 42.3L22.3 42.1L22.1 41.8L21.9 41.6L21.7 41.3L21.5 41.0L21.4 40.7L21.2 40.3L21.1 39.9L20.9 39.5L20.8 39.1L20.7 38.7L20.6 38.2L20.5 37.8L20.4 37.3L20.3 36.7L20.2 36.2L20.2 35.7L20.1 35.1L20.1 34.5L20.1 34.0L20.0 33.4L20.0 32.7L20.0 32.1L20.1 31.5L20.1 30.8L20.2 30.2L20.2 29.5L20.3 28.9L20.4 28.2L20.5 27.5L20.6 26.9L20.7 26.2L20.9 25.5L21.0 24.8L21.2 24.1L21.3 23.5L21.5 22.8L21.7 22.1L21.9 21.5L22.1 20.8L22.4 20.1L22.6 19.5L22.8 18.9L23.1 18.2L23.4 17.6L23.6 17.0L23.9 16.4L24.2 15.8L24.5 15.3L24.8 14.7L25.1 14.2L25.4 13.7L25.7 13.2L26.0 12.7L26.4 12.2L26.7 11.7L27.0 11.3L27.3 10.9L27.7 10.5L28.0 10.1L28.3 9.8L28.6 9.5L29.0 9.2L29.3 8.9L29.6 8.6L29.9 8.4L30.2 8.2L30.5 8.0L30.8 7.8L31.1 7.7L31.4 7.5L31.7 7.4L31.9 7.4L32.2 7.3L32.4 7.3L32.7 7.3L32.9 7.3L33.1 7.4L33.3 7.5L33.5 7.5L33.7 7.7L33.8 7.8L34.0 8.0L34.1 8.1L34.2 8.4L34.3 8.6L34.4 8.8L34.5 9.1L34.6 9.4L34.6 9.7L34.6 10.0L34.6 10.3L34.6 10.7L34.6 11.1L34.5 11.5L34.5 11.9L34.4 12.3L34.3 12.7L34.2 13.2L34.0 13.6L33.9 14.1L33.7 14.6L33.5 15.1L33.3 15.6L33.0 16.1L32.8 16.6L32.5 17.1L32.3 17.6L32.0 18.1L31.6 18.7L31.3 19.2L31.0 19.7L30.6 20.3L30.2 20.8L29.8 21.4L29.4 21.9L29.0 22.4L28.6 23.0L28.2 23.5L27.7 24.0L27.2 24.5L26.8 25.0L26.3 25.5L25.8 26.0L25.3 26.5L24.8 27.0L24.3 27.5L23.8 27.9L23.2 28.4L22.7 28.8L22.2 29.2L21.6 29.6L21.1 30.0L20.6 30.4L20.0 30.8L19.5 31.1L18.9 31.5L18.4 31.8L17.9 32.1L17.4 32.4L16.8 32.7L16.3 32.9L15.8 33.2L15.3 33.4L14.8 33.6L14.3 33.8L13.9 33.9L13.4 34.1L12.9 34.2L12.5 34.3L12.1 34.4L11.7 34.5L11.3 34.6L10.9 34.6L10.5 34.6L10.2 34.6L9.8 34.6L9.5 34.6L9.2 34.5L9.0 34.5L8.7 34.4L8.5 34.3L8.2 34.2L8.1 34.1L7.9 33.9L7.7 33.8L7.6 33.6L7.5 33.4L7.4 33.2L7.4 33.0L7.3 32.8L7.3 32.6L7.3 32.3L7.4 32.1L7.4 31.8L7.5 31.5L7.6 31.2L7.7 31.0L7.9 30.7L8.1 30.4L8.3 30.1L8.5 29.8L8.7 29.4L9.0 29.1L9.3 28.8L9.6 28.5L10.0 28.1L10.3 27.8L10.7 27.5L11.1 27.2L11.5 26.8L12.0 26.5L12.4 26.2L12.9 25.9L13.4 25.6L13.9 25.2L14.4 24.9L15.0 24.6L15.6 24.3L16.1 24.1L16.7 23.8L17.3 23.5L17.9 23.2L18.5 23.0L19.2 22.7L19.8 22.5L20.5 22.2L21.1 22.0L21.8 21.8L22.5 21.6L23.1 21.4L23.8 21.2L24.5 21.1L25.2 20.9L25.8 20.8L26.5 20.7L27.2 20.5L27.9 20.4L28.5 20.3L29.2 20.3L29.9 20.2L30.5 20.1L31.2 20.1L31.8 20.1L32.4 20.0L33.0 20.0L33.7 20.0L34.2 20.1L34.8 20.1L35.4 20.1L35.9 20.2L36.5 20.3L37.0 20.3L37.5 20.4L38.0 20.5L38.5 20.6L38.9 20.7L39.3 20.9L39.7 21.0L40.1 21.2L40.5 21.3L40.8 21.5L41.1 21.6L41.4 21.8L41.7 22.0L41.9 22.2L42.2 22.4L42.4 22.6L42.5 22.8L42.7 23.0L42.8 23.2L42.9 23.4L42.9 23.6L43.0 23.8L43.0 24.0Z" fill="none" stroke="url(#skgTileInk)" stroke-width="2.6" opacity=".22" stroke-linejoin="round"/>
+            <path class="sg-spiral" d="M43.0 24.0L43.0 24.2L42.9 24.4L42.9 24.6L42.8 24.8L42.7 25.0L42.5 25.2L42.4 25.4L42.2 25.6L41.9 25.8L41.7 26.0L41.4 26.2L41.1 26.4L40.8 26.5L40.5 26.7L40.1 26.8L39.7 27.0L39.3 27.1L38.9 27.3L38.5 27.4L38.0 27.5L37.5 27.6L37.0 27.7L36.5 27.7L35.9 27.8L35.4 27.9L34.8 27.9L34.2 27.9L33.7 28.0L33.0 28.0L32.4 28.0L31.8 27.9L31.2 27.9L30.5 27.9L29.9 27.8L29.2 27.7L28.5 27.7L27.9 27.6L27.2 27.5L26.5 27.3L25.8 27.2L25.2 27.1L24.5 26.9L23.8 26.8L23.1 26.6L22.5 26.4L21.8 26.2L21.1 26.0L20.5 25.8L19.8 25.5L19.2 25.3L18.5 25.0L17.9 24.8L17.3 24.5L16.7 24.2L16.1 23.9L15.6 23.7L15.0 23.4L14.4 23.1L13.9 22.8L13.4 22.4L12.9 22.1L12.4 21.8L12.0 21.5L11.5 21.2L11.1 20.8L10.7 20.5L10.3 20.2L10.0 19.9L9.6 19.5L9.3 19.2L9.0 18.9L8.7 18.6L8.5 18.2L8.3 17.9L8.1 17.6L7.9 17.3L7.7 17.0L7.6 16.8L7.5 16.5L7.4 16.2L7.4 15.9L7.3 15.7L7.3 15.4L7.3 15.2L7.4 15.0L7.4 14.8L7.5 14.6L7.6 14.4L7.7 14.2L7.9 14.1L8.1 13.9L8.2 13.8L8.5 13.7L8.7 13.6L9.0 13.5L9.2 13.5L9.5 13.4L9.8 13.4L10.2 13.4L10.5 13.4L10.9 13.4L11.3 13.4L11.7 13.5L12.1 13.6L12.5 13.7L12.9 13.8L13.4 13.9L13.9 14.1L14.3 14.2L14.8 14.4L15.3 14.6L15.8 14.8L16.3 15.1L16.8 15.3L17.4 15.6L17.9 15.9L18.4 16.2L18.9 16.5L19.5 16.9L20.0 17.2L20.6 17.6L21.1 18.0L21.6 18.4L22.2 18.8L22.7 19.2L23.2 19.6L23.8 20.1L24.3 20.5L24.8 21.0L25.3 21.5L25.8 22.0L26.3 22.5L26.8 23.0L27.2 23.5L27.7 24.0L28.2 24.5L28.6 25.0L29.0 25.6L29.4 26.1L29.8 26.6L30.2 27.2L30.6 27.7L31.0 28.3L31.3 28.8L31.6 29.3L32.0 29.9L32.3 30.4L32.5 30.9L32.8 31.4L33.0 31.9L33.3 32.4L33.5 32.9L33.7 33.4L33.9 33.9L34.0 34.4L34.2 34.8L34.3 35.3L34.4 35.7L34.5 36.1L34.5 36.5L34.6 36.9L34.6 37.3L34.6 37.7L34.6 38.0L34.6 38.3L34.6 38.6L34.5 38.9L34.4 39.2L34.3 39.4L34.2 39.6L34.1 39.9L34.0 40.0L33.8 40.2L33.7 40.3L33.5 40.5L33.3 40.5L33.1 40.6L32.9 40.7L32.7 40.7L32.4 40.7L32.2 40.7L31.9 40.6L31.7 40.6L31.4 40.5L31.1 40.3L30.8 40.2L30.5 40.0L30.2 39.8L29.9 39.6L29.6 39.4L29.3 39.1L29.0 38.8L28.6 38.5L28.3 38.2L28.0 37.9L27.7 37.5L27.3 37.1L27.0 36.7L26.7 36.3L26.4 35.8L26.0 35.3L25.7 34.8L25.4 34.3L25.1 33.8L24.8 33.3L24.5 32.7L24.2 32.2L23.9 31.6L23.6 31.0L23.4 30.4L23.1 29.8L22.8 29.1L22.6 28.5L22.4 27.9L22.1 27.2L21.9 26.5L21.7 25.9L21.5 25.2L21.3 24.5L21.2 23.9L21.0 23.2L20.9 22.5L20.7 21.8L20.6 21.1L20.5 20.5L20.4 19.8L20.3 19.1L20.2 18.5L20.2 17.8L20.1 17.2L20.1 16.5L20.0 15.9L20.0 15.3L20.0 14.6L20.1 14.0L20.1 13.5L20.1 12.9L20.2 12.3L20.2 11.8L20.3 11.3L20.4 10.7L20.5 10.2L20.6 9.8L20.7 9.3L20.8 8.9L20.9 8.5L21.1 8.1L21.2 7.7L21.4 7.3L21.5 7.0L21.7 6.7L21.9 6.4L22.1 6.2L22.3 5.9L22.5 5.7L22.7 5.6L22.9 5.4L23.1 5.3L23.3 5.2L23.5 5.1L23.7 5.0L23.9 5.0L24.1 5.0L24.3 5.0L24.5 5.1L24.7 5.2L24.9 5.3L25.1 5.4L25.3 5.6L25.5 5.7L25.7 5.9L25.9 6.2L26.1 6.4L26.3 6.7L26.5 7.0L26.6 7.3L26.8 7.7L26.9 8.1L27.1 8.5L27.2 8.9L27.3 9.3L27.4 9.8L27.5 10.2L27.6 10.7L27.7 11.3L27.8 11.8L27.8 12.3L27.9 12.9L27.9 13.5L27.9 14.0L28.0 14.6L28.0 15.3L28.0 15.9L27.9 16.5L27.9 17.2L27.8 17.8L27.8 18.5L27.7 19.1L27.6 19.8L27.5 20.5L27.4 21.1L27.3 21.8L27.1 22.5L27.0 23.2L26.8 23.9L26.7 24.5L26.5 25.2L26.3 25.9L26.1 26.5L25.9 27.2L25.6 27.9L25.4 28.5L25.2 29.1L24.9 29.8L24.6 30.4L24.4 31.0L24.1 31.6L23.8 32.2L23.5 32.7L23.2 33.3L22.9 33.8L22.6 34.3L22.3 34.8L22.0 35.3L21.6 35.8L21.3 36.3L21.0 36.7L20.7 37.1L20.3 37.5L20.0 37.9L19.7 38.2L19.4 38.5L19.0 38.8L18.7 39.1L18.4 39.4L18.1 39.6L17.8 39.8L17.5 40.0L17.2 40.2L16.9 40.3L16.6 40.5L16.3 40.6L16.1 40.6L15.8 40.7L15.6 40.7L15.3 40.7L15.1 40.7L14.9 40.6L14.7 40.5L14.5 40.5L14.3 40.3L14.2 40.2L14.0 40.0L13.9 39.9L13.8 39.6L13.7 39.4L13.6 39.2L13.5 38.9L13.4 38.6L13.4 38.3L13.4 38.0L13.4 37.7L13.4 37.3L13.4 36.9L13.5 36.5L13.5 36.1L13.6 35.7L13.7 35.3L13.8 34.8L14.0 34.4L14.1 33.9L14.3 33.4L14.5 32.9L14.7 32.4L15.0 31.9L15.2 31.4L15.5 30.9L15.7 30.4L16.0 29.9L16.4 29.3L16.7 28.8L17.0 28.3L17.4 27.7L17.8 27.2L18.2 26.6L18.6 26.1L19.0 25.6L19.4 25.0L19.8 24.5L20.3 24.0L20.8 23.5L21.2 23.0L21.7 22.5L22.2 22.0L22.7 21.5L23.2 21.0L23.7 20.5L24.2 20.1L24.8 19.6L25.3 19.2L25.8 18.8L26.4 18.4L26.9 18.0L27.4 17.6L28.0 17.2L28.5 16.9L29.1 16.5L29.6 16.2L30.1 15.9L30.6 15.6L31.2 15.3L31.7 15.1L32.2 14.8L32.7 14.6L33.2 14.4L33.7 14.2L34.1 14.1L34.6 13.9L35.1 13.8L35.5 13.7L35.9 13.6L36.3 13.5L36.7 13.4L37.1 13.4L37.5 13.4L37.8 13.4L38.2 13.4L38.5 13.4L38.8 13.5L39.0 13.5L39.3 13.6L39.5 13.7L39.8 13.8L39.9 13.9L40.1 14.1L40.3 14.2L40.4 14.4L40.5 14.6L40.6 14.8L40.6 15.0L40.7 15.2L40.7 15.4L40.7 15.7L40.6 15.9L40.6 16.2L40.5 16.5L40.4 16.8L40.3 17.0L40.1 17.3L39.9 17.6L39.7 17.9L39.5 18.2L39.3 18.6L39.0 18.9L38.7 19.2L38.4 19.5L38.0 19.9L37.7 20.2L37.3 20.5L36.9 20.8L36.5 21.2L36.0 21.5L35.6 21.8L35.1 22.1L34.6 22.4L34.1 22.8L33.6 23.1L33.0 23.4L32.4 23.7L31.9 23.9L31.3 24.2L30.7 24.5L30.1 24.8L29.5 25.0L28.8 25.3L28.2 25.5L27.5 25.8L26.9 26.0L26.2 26.2L25.5 26.4L24.9 26.6L24.2 26.8L23.5 26.9L22.8 27.1L22.2 27.2L21.5 27.3L20.8 27.5L20.1 27.6L19.5 27.7L18.8 27.7L18.1 27.8L17.5 27.9L16.8 27.9L16.2 27.9L15.6 28.0L15.0 28.0L14.3 28.0L13.8 27.9L13.2 27.9L12.6 27.9L12.1 27.8L11.5 27.7L11.0 27.7L10.5 27.6L10.0 27.5L9.5 27.4L9.1 27.3L8.7 27.1L8.3 27.0L7.9 26.8L7.5 26.7L7.2 26.5L6.9 26.4L6.6 26.2L6.3 26.0L6.1 25.8L5.8 25.6L5.6 25.4L5.5 25.2L5.3 25.0L5.2 24.8L5.1 24.6L5.1 24.4L5.0 24.2L5.0 24.0L5.0 23.8L5.1 23.6L5.1 23.4L5.2 23.2L5.3 23.0L5.5 22.8L5.6 22.6L5.8 22.4L6.1 22.2L6.3 22.0L6.6 21.8L6.9 21.6L7.2 21.5L7.5 21.3L7.9 21.2L8.3 21.0L8.7 20.9L9.1 20.7L9.5 20.6L10.0 20.5L10.5 20.4L11.0 20.3L11.5 20.3L12.1 20.2L12.6 20.1L13.2 20.1L13.8 20.1L14.3 20.0L15.0 20.0L15.6 20.0L16.2 20.1L16.8 20.1L17.5 20.1L18.1 20.2L18.8 20.3L19.5 20.3L20.1 20.4L20.8 20.5L21.5 20.7L22.2 20.8L22.8 20.9L23.5 21.1L24.2 21.2L24.9 21.4L25.5 21.6L26.2 21.8L26.9 22.0L27.5 22.2L28.2 22.5L28.8 22.7L29.5 23.0L30.1 23.2L30.7 23.5L31.3 23.8L31.9 24.1L32.4 24.3L33.0 24.6L33.6 24.9L34.1 25.2L34.6 25.6L35.1 25.9L35.6 26.2L36.0 26.5L36.5 26.8L36.9 27.2L37.3 27.5L37.7 27.8L38.0 28.1L38.4 28.5L38.7 28.8L39.0 29.1L39.3 29.4L39.5 29.8L39.7 30.1L39.9 30.4L40.1 30.7L40.3 31.0L40.4 31.2L40.5 31.5L40.6 31.8L40.6 32.1L40.7 32.3L40.7 32.6L40.7 32.8L40.6 33.0L40.6 33.2L40.5 33.4L40.4 33.6L40.3 33.8L40.1 33.9L39.9 34.1L39.8 34.2L39.5 34.3L39.3 34.4L39.0 34.5L38.8 34.5L38.5 34.6L38.2 34.6L37.8 34.6L37.5 34.6L37.1 34.6L36.7 34.6L36.3 34.5L35.9 34.4L35.5 34.3L35.1 34.2L34.6 34.1L34.1 33.9L33.7 33.8L33.2 33.6L32.7 33.4L32.2 33.2L31.7 32.9L31.2 32.7L30.6 32.4L30.1 32.1L29.6 31.8L29.1 31.5L28.5 31.1L28.0 30.8L27.4 30.4L26.9 30.0L26.4 29.6L25.8 29.2L25.3 28.8L24.8 28.4L24.2 27.9L23.7 27.5L23.2 27.0L22.7 26.5L22.2 26.0L21.7 25.5L21.2 25.0L20.8 24.5L20.3 24.0L19.8 23.5L19.4 23.0L19.0 22.4L18.6 21.9L18.2 21.4L17.8 20.8L17.4 20.3L17.0 19.7L16.7 19.2L16.4 18.7L16.0 18.1L15.7 17.6L15.5 17.1L15.2 16.6L15.0 16.1L14.7 15.6L14.5 15.1L14.3 14.6L14.1 14.1L14.0 13.6L13.8 13.2L13.7 12.7L13.6 12.3L13.5 11.9L13.5 11.5L13.4 11.1L13.4 10.7L13.4 10.3L13.4 10.0L13.4 9.7L13.4 9.4L13.5 9.1L13.6 8.8L13.7 8.6L13.8 8.4L13.9 8.1L14.0 8.0L14.2 7.8L14.3 7.7L14.5 7.5L14.7 7.5L14.9 7.4L15.1 7.3L15.3 7.3L15.6 7.3L15.8 7.3L16.1 7.4L16.3 7.4L16.6 7.5L16.9 7.7L17.2 7.8L17.5 8.0L17.8 8.2L18.1 8.4L18.4 8.6L18.7 8.9L19.0 9.2L19.4 9.5L19.7 9.8L20.0 10.1L20.3 10.5L20.7 10.9L21.0 11.3L21.3 11.7L21.6 12.2L22.0 12.7L22.3 13.2L22.6 13.7L22.9 14.2L23.2 14.7L23.5 15.3L23.8 15.8L24.1 16.4L24.4 17.0L24.6 17.6L24.9 18.2L25.2 18.9L25.4 19.5L25.6 20.1L25.9 20.8L26.1 21.5L26.3 22.1L26.5 22.8L26.7 23.5L26.8 24.1L27.0 24.8L27.1 25.5L27.3 26.2L27.4 26.9L27.5 27.5L27.6 28.2L27.7 28.9L27.8 29.5L27.8 30.2L27.9 30.8L27.9 31.5L28.0 32.1L28.0 32.7L28.0 33.4L27.9 34.0L27.9 34.5L27.9 35.1L27.8 35.7L27.8 36.2L27.7 36.7L27.6 37.3L27.5 37.8L27.4 38.2L27.3 38.7L27.2 39.1L27.1 39.5L26.9 39.9L26.8 40.3L26.6 40.7L26.5 41.0L26.3 41.3L26.1 41.6L25.9 41.8L25.7 42.1L25.5 42.3L25.3 42.4L25.1 42.6L24.9 42.7L24.7 42.8L24.5 42.9L24.3 43.0L24.1 43.0L23.9 43.0L23.7 43.0L23.5 42.9L23.3 42.8L23.1 42.7L22.9 42.6L22.7 42.4L22.5 42.3L22.3 42.1L22.1 41.8L21.9 41.6L21.7 41.3L21.5 41.0L21.4 40.7L21.2 40.3L21.1 39.9L20.9 39.5L20.8 39.1L20.7 38.7L20.6 38.2L20.5 37.8L20.4 37.3L20.3 36.7L20.2 36.2L20.2 35.7L20.1 35.1L20.1 34.5L20.1 34.0L20.0 33.4L20.0 32.7L20.0 32.1L20.1 31.5L20.1 30.8L20.2 30.2L20.2 29.5L20.3 28.9L20.4 28.2L20.5 27.5L20.6 26.9L20.7 26.2L20.9 25.5L21.0 24.8L21.2 24.1L21.3 23.5L21.5 22.8L21.7 22.1L21.9 21.5L22.1 20.8L22.4 20.1L22.6 19.5L22.8 18.9L23.1 18.2L23.4 17.6L23.6 17.0L23.9 16.4L24.2 15.8L24.5 15.3L24.8 14.7L25.1 14.2L25.4 13.7L25.7 13.2L26.0 12.7L26.4 12.2L26.7 11.7L27.0 11.3L27.3 10.9L27.7 10.5L28.0 10.1L28.3 9.8L28.6 9.5L29.0 9.2L29.3 8.9L29.6 8.6L29.9 8.4L30.2 8.2L30.5 8.0L30.8 7.8L31.1 7.7L31.4 7.5L31.7 7.4L31.9 7.4L32.2 7.3L32.4 7.3L32.7 7.3L32.9 7.3L33.1 7.4L33.3 7.5L33.5 7.5L33.7 7.7L33.8 7.8L34.0 8.0L34.1 8.1L34.2 8.4L34.3 8.6L34.4 8.8L34.5 9.1L34.6 9.4L34.6 9.7L34.6 10.0L34.6 10.3L34.6 10.7L34.6 11.1L34.5 11.5L34.5 11.9L34.4 12.3L34.3 12.7L34.2 13.2L34.0 13.6L33.9 14.1L33.7 14.6L33.5 15.1L33.3 15.6L33.0 16.1L32.8 16.6L32.5 17.1L32.3 17.6L32.0 18.1L31.6 18.7L31.3 19.2L31.0 19.7L30.6 20.3L30.2 20.8L29.8 21.4L29.4 21.9L29.0 22.4L28.6 23.0L28.2 23.5L27.7 24.0L27.2 24.5L26.8 25.0L26.3 25.5L25.8 26.0L25.3 26.5L24.8 27.0L24.3 27.5L23.8 27.9L23.2 28.4L22.7 28.8L22.2 29.2L21.6 29.6L21.1 30.0L20.6 30.4L20.0 30.8L19.5 31.1L18.9 31.5L18.4 31.8L17.9 32.1L17.4 32.4L16.8 32.7L16.3 32.9L15.8 33.2L15.3 33.4L14.8 33.6L14.3 33.8L13.9 33.9L13.4 34.1L12.9 34.2L12.5 34.3L12.1 34.4L11.7 34.5L11.3 34.6L10.9 34.6L10.5 34.6L10.2 34.6L9.8 34.6L9.5 34.6L9.2 34.5L9.0 34.5L8.7 34.4L8.5 34.3L8.2 34.2L8.1 34.1L7.9 33.9L7.7 33.8L7.6 33.6L7.5 33.4L7.4 33.2L7.4 33.0L7.3 32.8L7.3 32.6L7.3 32.3L7.4 32.1L7.4 31.8L7.5 31.5L7.6 31.2L7.7 31.0L7.9 30.7L8.1 30.4L8.3 30.1L8.5 29.8L8.7 29.4L9.0 29.1L9.3 28.8L9.6 28.5L10.0 28.1L10.3 27.8L10.7 27.5L11.1 27.2L11.5 26.8L12.0 26.5L12.4 26.2L12.9 25.9L13.4 25.6L13.9 25.2L14.4 24.9L15.0 24.6L15.6 24.3L16.1 24.1L16.7 23.8L17.3 23.5L17.9 23.2L18.5 23.0L19.2 22.7L19.8 22.5L20.5 22.2L21.1 22.0L21.8 21.8L22.5 21.6L23.1 21.4L23.8 21.2L24.5 21.1L25.2 20.9L25.8 20.8L26.5 20.7L27.2 20.5L27.9 20.4L28.5 20.3L29.2 20.3L29.9 20.2L30.5 20.1L31.2 20.1L31.8 20.1L32.4 20.0L33.0 20.0L33.7 20.0L34.2 20.1L34.8 20.1L35.4 20.1L35.9 20.2L36.5 20.3L37.0 20.3L37.5 20.4L38.0 20.5L38.5 20.6L38.9 20.7L39.3 20.9L39.7 21.0L40.1 21.2L40.5 21.3L40.8 21.5L41.1 21.6L41.4 21.8L41.7 22.0L41.9 22.2L42.2 22.4L42.4 22.6L42.5 22.8L42.7 23.0L42.8 23.2L42.9 23.4L42.9 23.6L43.0 23.8L43.0 24.0Z" fill="none" stroke="url(#skgTileInk)" stroke-width=".8" stroke-linejoin="round"/>
+          </svg></picture>
+          <span class="tile-text"><b>Magic Spirals</b><small id="tileGears">Spin a gear, draw glowing rangoli</small></span>
         </button>
         <button class="home-tile" id="btnDailySky" type="button">
           <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/daily-sky.webp"><img src="assets/menu/daily-sky.png" alt="" width="40" height="40" decoding="async"></picture>
           <span class="tile-text"><b>Daily Sky</b><small id="tileDaily">Today’s lanterns</small></span>
           <span class="tile-badge" id="badgeDaily">Today</span>
         </button>
-        <button class="home-tile wide" id="btnDiya" type="button">
-          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/diya-path.webp"><img src="assets/menu/diya-path.png" alt="" width="40" height="40" decoding="async"></picture>
-          <span class="tile-text"><b>Diya Path</b><small id="tileDiya">Join the diyas with light</small></span>
+        <!-- Live Sky: a never-ending show, hands off, for a TV on Diwali night (game.js) -->
+        <button class="home-tile" id="btnLiveSky" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/thumb-livesky.webp"><img src="assets/menu/thumb-livesky.webp" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Live Sky</b><small>A show that never ends</small></span>
+          <span class="tile-badge" aria-hidden="true">New</span>
         </button>
-        <button class="home-tile wide" id="btnRocket" type="button">
-          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/rocket-rush.webp"><img src="assets/menu/rocket-rush.png" alt="" width="40" height="40" decoding="async"></picture>
-          <span class="tile-text"><b>Rocket Rush</b><small id="tileRocket">Launch the rockets in the right order</small></span>
+        <!-- Live Wallpapers: the Android app's fireworks wallpapers for the phone's home screen (game.js; Android only) -->
+        <button class="home-tile" id="btnWallpapers" type="button" hidden>
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/thumb-wallpapers.webp"><img src="assets/menu/thumb-wallpapers.webp" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Live Wallpapers</b><small>Fireworks on your home screen</small></span>
+          <span class="tile-badge" aria-hidden="true">New</span>
         </button>
-        <button class="home-tile wide" id="btnChor" type="button">
-          <span class="tile-ico tile-art chor-ico" aria-hidden="true">🧨</span>
-          <span class="tile-text"><b>Fireworks Street</b><small id="tileChor">Sneak down the bazaar and find hidden crackers</small></span>
+        <!-- Sparkler Name: straight into the show's sparkler writing (game.js) -->
+        <button class="home-tile wide" id="btnSparkName" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/tab-spark.webp"><img src="assets/menu/tab-spark.png" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Sparkler Name</b><small>Your name in sparkler light</small></span>
           <span class="tile-badge" aria-hidden="true">New</span>
         </button>
         <button class="home-tile wide" id="btnBoard" type="button">
-          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/achievements.webp"><img src="assets/menu/achievements.jpg" alt="" width="40" height="40" decoding="async"></picture>
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/achievements.webp"><img src="assets/menu/achievements.webp" alt="" width="40" height="40" decoding="async"></picture>
           <span class="tile-text"><b>Leaderboard</b><small id="tileBoard">Who is winning the Daily Sky this week</small></span>
         </button>
-      </div>
+        </div>
+      </section>
+      <section class="home-sec people" aria-labelledby="homePeopleHead">
+        <div class="home-ch-head home-sec-head"><h3 id="homePeopleHead">For your people</h3></div>
+        <div class="home-tiles">
+        <!-- Wishes of India (Public Wishes, wishes.js): the names light up Live Sky for everyone -->
+        <button class="home-tile wide wishes-tile" id="btnWishes" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/thumb-livesky.webp"><img src="assets/menu/thumb-livesky.webp" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Public Wishes</b><small>Write a wish, or watch Wishes of India</small><small id="wishTileSky" hidden></small></span>
+        </button>
+        <!-- Event Sky (event-sky-boot.js): QR check-in and live photo wall for weddings, birthdays and office events -->
+        <button class="home-tile wide eventsky-tile" id="btnEventSky" type="button" hidden>
+          <picture class="tile-ico tile-art" aria-hidden="true"><img src="assets/menu/thumb-eventsky.webp" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Event Sky</b><small>Guest check-in and a live photo wall for your event</small></span>
+        </button>
+        <!-- Diwali week: a challenge each day from Dhanteras to Bhai Dooj (game.js renderFest) -->
+        <button class="home-tile wide fest-tile" id="btnFest" type="button" hidden>
+          <span class="tile-ico tile-art" aria-hidden="true"><img src="assets/menu/glyphs/diwali.webp" alt="" width="40" height="40" decoding="async"></span>
+          <span class="tile-text"><b>Diwali week</b><small id="tileFest"></small></span>
+          <span class="tile-badge" id="badgeFest">Today</span>
+        </button>
+        <button class="home-tile" id="btnJoy" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/daily-joy.webp"><img src="assets/menu/daily-joy.png" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Light someone up</b><small id="tileJoy">Who are you grateful for?</small></span>
+        </button>
+        <button class="home-tile" id="btnBirthdays" type="button">
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/birthdays.webp"><img src="assets/menu/birthdays.png" alt="" width="40" height="40" decoding="async"></picture>
+          <span class="tile-text"><b>Birthdays</b><small id="tileBday">Never miss a friend’s day</small></span>
+        </button>
+        </div>
+      </section>
+      <!-- Challenges: every way to play against a friend, side by side (game.js, duel.js, chor.js, the puzzles) -->
+      <section class="home-ch" aria-labelledby="homeChHead">
+        <div class="home-ch-head"><h3 id="homeChHead">Challenges</h3><button class="home-ch-all" id="btnChBoards" type="button">Leaderboards</button></div>
+        <div class="home-ch-row">
+          <button class="ch-card mela-card" id="btnMela" type="button" style="--j: 255, 150, 60"><i aria-hidden="true"><img class="ch-thumb" src="assets/chor/thumb/chor-thanjavur.webp" alt=""></i><b>Mela Night</b><small id="melaCount">Up to 4 at a temple</small><small id="melaNight"></small><em aria-hidden="true">LIVE</em></button>
+          <button class="ch-card" id="btnDuel" type="button" style="--j: 255, 95, 162"><i aria-hidden="true"><img class="ch-thumb" src="assets/menu/badges/rival.webp" alt=""></i><b>Sky Duel</b><small>Your show vs a friend’s</small><em aria-hidden="true">NEW</em></button>
+          <button class="ch-card" id="btnRush" type="button" style="--j: 80, 200, 150"><i aria-hidden="true"><img class="ch-thumb" src="assets/menu/badges/rush.webp" alt=""></i><b>Score Challenge</b><small id="tileRush">Beat a friend’s score</small><em aria-hidden="true">VS</em></button>
+          <button class="ch-card" id="btnChRace" type="button" style="--j: 255, 120, 60"><i aria-hidden="true"><img class="ch-thumb" src="assets/menu/bar/stopwatch.webp" alt=""></i><b>Street Heist</b><small>Find 9 stashes fastest</small></button>
+          <button class="ch-card" id="btnChRocket" type="button" style="--j: 255, 90, 78"><i aria-hidden="true"><img class="ch-thumb" src="assets/menu/thumb-rocket.webp" alt=""></i><b>Daily Rocket</b><small>Same board for everyone</small></button>
+          <button class="ch-card" id="btnChDiya" type="button" style="--j: 255, 176, 70"><i aria-hidden="true"><img class="ch-thumb" src="assets/menu/thumb-diya.webp" alt=""></i><b>Daily Diya</b><small>Fewest moves wins</small></button>
+        </div>
+      </section>
       <nav class="home-bar" id="homeBar" aria-label="Home menu">
-        <button type="button" data-open="eventsModal"><i aria-hidden="true">🎯</i><span>Events</span><em id="homeBarEventsN" hidden></em></button>
-        <button type="button" id="homeBarCards"><i aria-hidden="true">💌</i><span>Cards</span></button>
-        <button type="button" class="on" aria-current="page"><i aria-hidden="true">🏠</i><span>Home</span></button>
-        <button type="button" data-open="storeModal"><i aria-hidden="true">🛍️</i><span>Store</span></button>
+        <button type="button" data-open="eventsModal"><i aria-hidden="true"><img src="assets/menu/bar/goals.webp" alt="" width="34" height="34" decoding="async"></i><span>Goals</span><em id="homeBarEventsN" hidden></em></button>
+        <button type="button" id="homeBarCards"><i aria-hidden="true"><img src="assets/menu/bar/cards.webp" alt="" width="34" height="34" decoding="async"></i><span>Cards</span></button>
+        <button type="button" class="on" aria-current="page"><i aria-hidden="true"><img src="assets/menu/bar/home.webp" alt="" width="34" height="34" decoding="async"></i><span>Home</span></button>
+        <!-- My sky: what you lit up, day by day, on this phone only (timeline.js); its badge is the streak -->
+        <button type="button" id="btnMySky"><i aria-hidden="true"><img src="assets/menu/glyphs/lantern.webp" alt="" width="34" height="34" decoding="async"></i><span>My sky</span><em class="bar-streak" id="badgeMySky" hidden></em></button>
+        <button type="button" data-open="storeModal"><i aria-hidden="true"><img src="assets/menu/bar/store.webp" alt="" width="34" height="34" decoding="async"></i><span>Store</span></button>
       </nav>
       <p class="keys">Space pause · S sound · H hide controls</p>
     </div>
@@ -302,8 +430,28 @@
       <span class="env-label">A fireworks card for</span>
       <strong class="env-to" id="envTo"></strong>
       <span class="env-from" id="envFrom"></span>
+      <span class="env-note" id="envNote" hidden>Plays at your midnight if this page is open</span>
       <span class="env-cta">Tap to open</span>
     </button>
+  </section>
+
+  <!-- A New Year countdown: the time left to this screen's own midnight, in the sky above the landmark; the last ten
+       seconds one big digit. Live Sky shows it without its buttons (game.js startCountdown, cdLiveStart). -->
+  <section class="countdown" id="countdown" hidden>
+    <p class="cd-for" id="cdFor" data-no-i18n hidden></p>
+    <h2 class="cd-title" id="cdTitle"></h2>
+    <div class="cd-clock" id="cdClock" role="timer">
+      <span class="cd-unit" id="cdDays"><b>0</b><small>Days</small></span>
+      <span class="cd-unit" id="cdHours"><b>00</b><small>Hours</small></span>
+      <span class="cd-unit" id="cdMins"><b>00</b><small>Minutes</small></span>
+      <span class="cd-unit" id="cdSecs"><b>00</b><small>Seconds</small></span>
+    </div>
+    <b class="cd-final" id="cdFinal" hidden></b>
+    <p class="cd-note" id="cdNote">Plays at your midnight if this page is open</p>
+    <div class="cd-actions">
+      <button class="btn ghost" id="btnCdCal" type="button"><span aria-hidden="true">📅</span><span>Add to calendar · 11:58 pm</span></button>
+      <button class="btn ghost" id="btnCdClose" type="button">Close</button>
+    </div>
   </section>
 
   <!-- Room AR: the floor ring that follows the phone, and the spot where the next cracker stands -->
@@ -339,6 +487,7 @@
       </div>
       <button class="btn primary g-save" id="btnRecordCard"><span class="btn-ico rec-glyph" aria-hidden="true"></span>Save video</button>
       <button class="btn primary g-save" id="btnSendBack" hidden><span class="btn-ico card-glyph" aria-hidden="true"></span>Send one back</button>
+      <button class="btn primary g-save" id="btnMakeCountdown" hidden><span class="btn-ico card-glyph" aria-hidden="true"></span>Make one for someone</button>
       <div class="g-tools">
         <button class="g-tool" id="btnReplay"><span class="btn-ico replay-glyph" aria-hidden="true"></span>Replay</button>
         <button class="g-tool" id="btnSaveTool" hidden><span class="btn-ico rec-glyph" aria-hidden="true"></span>Save video</button>
@@ -362,14 +511,13 @@
     <div class="drawer-body">
       <div class="quick-row" role="group" aria-label="Quick actions">
         <button class="quick wide-only" id="setFull" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>Full screen</button>
-        <button class="btn ghost small" id="setAdPrivacy" type="button" hidden>Ad privacy choices</button>
       </div>
 
       <div class="set-group">
         <div class="premium-row" id="premiumRow">
           <span class="premium-crown" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 18h18l-1.6-10-4.6 4.2L12 5l-2.8 7.2L4.6 8z"/><path d="M4 21h16"/></svg></span>
-          <span class="premium-row-text"><b>Premium</b><small id="premiumRowNote">Remove all ads</small></span>
-          <button class="btn primary small" id="btnPremiumRow" type="button">Premium: every cracker free</button>
+          <span class="premium-row-text"><b>Premium</b><small id="premiumRowNote">Unlock every cracker and level</small></span>
+          <button class="btn primary small" id="btnPremiumRow" type="button"><i class="crown-ico" aria-hidden="true"></i>Premium: every cracker free</button>
           <a class="btn ghost small" id="premiumManage" target="_blank" rel="noopener" hidden>Manage</a>
         </div>
       </div>
@@ -383,7 +531,7 @@
       <div class="set-group">
         <h3 class="set-title">Scene</h3>
         <button class="world-entry" id="btnWorlds" type="button" aria-haspopup="dialog" aria-controls="worldPanel">
-          <img class="world-entry-thumb" id="worldEntryThumb" src="assets/worlds/thumb/default-night-sky.jpg" alt="" width="64" height="44">
+          <img class="world-entry-thumb" id="worldEntryThumb" src="assets/worlds/thumb/default-night-sky.webp" alt="" width="64" height="44">
           <span class="world-entry-text">
             <span class="world-entry-label">Worlds of India</span>
             <b id="worldEntryName">Default Night Sky</b>
@@ -441,7 +589,7 @@
 
       <div class="set-group">
         <button class="for-you" id="setAchievements" type="button">
-          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/achievements.webp"><img src="assets/menu/achievements.jpg" alt="" width="40" height="40" decoding="async" loading="lazy"></picture>
+          <picture class="tile-ico tile-art" aria-hidden="true"><source type="image/webp" srcset="assets/menu/achievements.webp"><img src="assets/menu/achievements.webp" alt="" width="40" height="40" decoding="async" loading="lazy"></picture>
           <span class="tile-text"><b>Achievements</b><small id="achCount">0 of 20 earned</small></span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
         </button>
@@ -458,6 +606,12 @@
         <button class="for-you" id="setRate" type="button">
           <span class="tile-ico tile-line" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/></svg></span>
           <span class="tile-text"><b>Rate and review</b><small>Tap the stars and tell others what you light up</small></span>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+        <!-- Feedback by email to the developer: its own thing, never tied to Play's rating card (game.js) -->
+        <button class="for-you" id="setFeedback" type="button">
+          <span class="tile-ico tile-line" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></svg></span>
+          <span class="tile-text"><b>Send feedback</b><small>An idea, a bug, anything: it comes straight to us</small></span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
         </button>
       </div>
@@ -484,15 +638,11 @@
       </div>
 
       <div class="set-group buttons">
+        <button class="btn ghost small" id="setHelp" type="button">How to play</button>
         <button class="btn ghost small" id="setReset">Reset settings</button>
       </div>
 
       <!-- For Google Play review only: shown after tapping the Settings title 7 times -->
-      <div class="set-group field" id="reviewerBox" hidden>
-        <label class="set-title" for="reviewerCode">Reviewer code</label>
-        <input id="reviewerCode" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false">
-        <button class="btn ghost small" type="button" id="btnReviewer">Unlock</button>
-      </div>
     </div>
   </aside>
 
@@ -538,7 +688,7 @@
       <h2 id="trialTitle">Keep the sky glowing</h2>
       <p>You’ve tried this cracker. Replay for 50 points, earn more launches, or unlock Premium.</p>
       <button class="btn primary" id="btnTrialRewards" type="button">Earn more launches</button>
-      <button class="btn primary" id="btnTrialPremium" type="button">Unlock Premium</button>
+      <button class="btn primary" id="btnTrialPremium" type="button"><i class="crown-ico" aria-hidden="true"></i>Unlock Premium</button>
       <button class="btn ghost" id="btnTrialAnother" type="button">Choose another</button>
     </section>
   </div>
@@ -546,11 +696,9 @@
     <section class="trial-box rewards-box" role="dialog" aria-modal="true" aria-labelledby="rewardsTitle">
       <header><h2 id="rewardsTitle">More moments of light</h2><button class="icon-btn" id="btnCloseRewards" aria-label="Close rewards" type="button"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
       <p><strong id="rewardPoints">0</strong> points <span class="reward-cost">50 points per replay</span></p>
-      <div class="reward-option"><b>Watch a reward video</b><span>150 points · 3 extra launches</span><button class="btn primary" id="btnRewardVideo" type="button">Watch video · +150 points</button><small id="adAvailability">Reward videos are not available yet.</small></div>
       <div class="reward-option"><b>Celebrate with friends</b><span id="referralOffer">Invite a friend to join your sky.</span><div class="invite-actions"><button class="btn ghost" id="btnInviteFriends" type="button">Invite friends</button><button class="btn ghost" id="btnInviteFacebook" type="button">Facebook</button></div><button class="btn ghost small" id="btnCheckInvites" type="button" hidden>Check rewards</button><small id="inviteAvailability">Invite rewards are not available yet.</small></div>
       <p class="reward-earned">Earn 10 points for every completed firework.</p>
       <p id="rewardStatus" role="status" aria-live="polite"></p>
-      <button class="btn ghost small" id="btnAdPrivacy" type="button" hidden>Ad privacy choices</button>
     </section>
   </div>
   <div class="premium-panel" id="premiumPanel" hidden>
@@ -561,9 +709,40 @@
       <div class="premium-hero" id="premiumHero" aria-hidden="true"></div>
       <div class="premium-body">
         <p class="premium-eyebrow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18h18l-1.6-10-4.6 4.2L12 5l-2.8 7.2L4.6 8z"/></svg>Light Up the Skies Premium</p>
-        <h2 id="premiumTitle">Celebrate with no ads</h2>
-        <p class="premium-sub" id="premiumSub">Everything in Light Up the Skies is free. Premium removes every banner and video.</p>
+        <h2 id="premiumTitle">Unlock the full celebration</h2>
+          <p class="premium-sub" id="premiumSub">Every cracker, every level, and exclusive ways to play.</p>
+        <!-- Diwali Pass: Premium for the festival, one small price, above everything while it is on sale (game.js PASS) -->
+        <button class="premium-pass" id="premiumPass" type="button" hidden><span aria-hidden="true">🪔</span><b>Diwali Pass</b><small>Everything Premium until 15 Nov, one payment</small><em id="premiumPassPrice"></em></button>
+        <ul class="premium-highlights" aria-label="Premium benefits">
+          <li>Every cracker free</li><li>All 1,000 puzzle levels</li><li>Clean photos and videos</li>
+        </ul>
+        <p class="premium-easy">Always ad-free for everyone. Premium unlocks more ways to play.</p>
+        <!-- Then the plans and the one action -->
+        <div class="premium-plans" id="premiumPlans" role="radiogroup" aria-label="Choose a plan"></div>
+        <button class="btn primary premium-cta" id="btnPremiumBuy" type="button">Continue</button>
+        <ul class="premium-trust" id="premiumTrust"></ul>
+        <p class="premium-status" id="premiumStatus" role="status"></p>
+        <p class="premium-soon" id="premiumSoon" hidden></p>
 
+        <p class="premium-fine" id="premiumFine"></p>
+        <div class="premium-links">
+          <button type="button" id="btnPremiumRestore">Restore purchases</button>
+          <a id="premiumTerms" target="_blank" rel="noopener">Terms of Use</a>
+          <a id="premiumPrivacy" target="_blank" rel="noopener">Privacy Policy</a>
+        </div>
+        <details class="premium-details">
+          <summary tabindex="0">See all benefits and compare plans</summary>
+        <!-- Value first, then the price. The offer as a value stack (Hormozi): the outcome first, then each thing Premium gives with what it would cost
+             in gems, the total, and the safety net. Built by game.js renderValue() from the game's own prices. -->
+        <section class="premium-sec premium-value" aria-labelledby="premiumValueTitle">
+          <h3 id="premiumValueTitle">Everything Premium gives you</h3>
+          <ul class="premium-vstack" id="premiumStack"></ul>
+          <p class="premium-total" id="premiumTotal"></p>
+          <p class="premium-proof" id="premiumProof" hidden></p>
+          <p class="premium-easy" id="premiumRefund" hidden>Changed your mind? You can ask Google Play for a refund within 48 hours of buying.</p>
+        </section>
+        <!-- Free vs Premium at a glance, above the fold (game.js renderVs); the long table below is the detail -->
+        <ul class="premium-vs" id="premiumVs" aria-label="Free and Premium"></ul>
         <!-- First: what everyone gets free (and every plan includes) -->
         <section class="premium-sec" aria-labelledby="premiumAllTitle">
           <h3 id="premiumAllTitle">Plus everything in Light Up the Skies</h3>
@@ -571,6 +750,7 @@
             <li><span aria-hidden="true">📸</span><b>Screen capture</b><small>Save the sky as a photo, no buttons in the way</small></li>
             <li><span aria-hidden="true">🎬</span><b>Video recording</b><small>Record a show and share it with your app link</small></li>
             <li><span aria-hidden="true">🎇</span><b>Sparkler shapes</b><small>Crowns, faces and hearts in sparkler light, then burst them</small></li>
+            <li><span aria-hidden="true">🎭</span><b>Character Festival &amp; Stickman Show</b><small>Free light shows: characters, animals and stickman stories drawn in light</small></li>
             <li><span aria-hidden="true">🌌</span><b>Particle Festival</b><small>An animated festival night sky</small></li>
             <li><span aria-hidden="true">💌</span><b>Love cards</b><small>A name written in fireworks, sent as a link or video</small></li>
             <li><span aria-hidden="true">🪔</span><b>Light someone up</b><small>Each day, someone you love written in fireworks</small></li>
@@ -582,26 +762,17 @@
           <p class="premium-easy">Free for everyone and included with every plan.</p>
         </section>
 
-        <!-- The offer as a value stack (Hormozi): the outcome first, then each thing Premium gives with what it would cost
-             in gems, the total, and the safety net. Built by game.js renderValue() from the game's own prices. -->
-        <section class="premium-sec premium-value" aria-labelledby="premiumValueTitle">
-          <h3 id="premiumValueTitle">Everything Premium gives you</h3>
-          <ul class="premium-vstack" id="premiumStack"></ul>
-          <p class="premium-total" id="premiumTotal"></p>
-          <p class="premium-proof" id="premiumProof" hidden></p>
-          <p class="premium-easy" id="premiumRefund" hidden>Changed your mind? You can ask Google Play for a refund within 48 hours of buying.</p>
-        </section>
 
         <!-- See it: what Premium adds -->
         <section class="premium-sec" aria-labelledby="premiumShowTitle">
           <h3 id="premiumShowTitle">See what Premium adds</h3>
           <div class="premium-shots">
-            <figure class="premium-shot"><picture><source type="image/webp" srcset="assets/premium/hazaar.webp"><img src="assets/premium/hazaar.jpg" alt="" width="450" height="600" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>Hazaar ladi</b><small>A thousand crackers on a bamboo pole</small></figcaption></figure>
-            <figure class="premium-shot"><picture><source type="image/webp" srcset="assets/premium/finale.webp"><img src="assets/premium/finale.jpg" alt="" width="450" height="600" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>Every cracker free</b><small>Finales, saravedi and seven shots, every night</small></figcaption></figure>
-            <figure class="premium-shot"><picture><source type="image/webp" srcset="assets/premium/world-3d.webp"><img src="assets/premium/world-3d.jpg" alt="" width="300" height="400" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>3D landmarks</b><small>All 15 in 3D. Drag to look around</small></figcaption></figure>
-            <figure class="premium-shot no-tv"><picture><source type="image/webp" srcset="assets/premium/ar-room.webp"><img src="assets/premium/ar-room.jpg" alt="" width="300" height="400" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>AR fireworks</b><small>Bursts right in your room</small></figcaption></figure>
-            <figure class="premium-shot no-tv"><picture><source type="image/webp" srcset="assets/premium/ar-sparkler.webp"><img src="assets/premium/ar-sparkler.jpg" alt="" width="300" height="400" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>AR sparkler</b><small>Draw light around anyone, then blast it</small></figcaption></figure>
-            <figure class="premium-shot"><picture><source type="image/webp" srcset="assets/premium/god-backgrounds.webp"><img src="assets/premium/god-backgrounds.jpg" alt="" width="300" height="400" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>Sacred backgrounds</b><small>Play Diya Path before Lakshmi, Ganesha, Balaji and more</small></figcaption></figure>
+            <figure class="premium-shot"><picture><source type="image/webp" srcset="assets/premium/hazaar.webp"><img src="assets/premium/hazaar.webp" alt="" width="450" height="600" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>Hazaar ladi</b><small>A thousand crackers on a bamboo pole</small></figcaption></figure>
+            <figure class="premium-shot"><picture><source type="image/webp" srcset="assets/premium/finale.webp"><img src="assets/premium/finale.webp" alt="" width="450" height="600" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>Every cracker free</b><small>Finales, saravedi and seven shots, every night</small></figcaption></figure>
+            <figure class="premium-shot"><picture><source type="image/webp" srcset="assets/premium/world-3d.webp"><img src="assets/premium/world-3d.webp" alt="" width="300" height="400" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>3D landmarks</b><small>All 15 in 3D. Drag to look around</small></figcaption></figure>
+            <figure class="premium-shot no-tv"><picture><source type="image/webp" srcset="assets/premium/ar-room.webp"><img src="assets/premium/ar-room.webp" alt="" width="300" height="400" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>AR fireworks</b><small>Bursts right in your room</small></figcaption></figure>
+            <figure class="premium-shot no-tv"><picture><source type="image/webp" srcset="assets/premium/ar-sparkler.webp"><img src="assets/premium/ar-sparkler.webp" alt="" width="300" height="400" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>AR sparkler</b><small>Draw light around anyone, then blast it</small></figcaption></figure>
+            <figure class="premium-shot"><picture><source type="image/webp" srcset="assets/premium/god-backgrounds.webp"><img src="assets/premium/god-backgrounds.webp" alt="" width="300" height="400" loading="lazy" decoding="async"></picture><figcaption><span class="premium-tag">Premium</span><b>Sacred backgrounds</b><small>Play Diya Path before Lakshmi, Ganesha, Balaji and more</small></figcaption></figure>
           </div>
           <p class="premium-easy no-tv">AR pictures are illustrations; the look on your phone depends on your camera and room. AR crackers on your real floor need a phone that supports Google Play Services for AR.</p>
         </section>
@@ -615,14 +786,18 @@
               <tr><th scope="row">Hazaar ladi, saravedi, seven shot and more</th><td>1 free try each</td><td><b>Any time</b></td></tr>
               <tr><th scope="row">Peacock, butterfly and magic wand shells</th><td>1 free try each</td><td><b>Any time</b></td></tr>
               <tr><th scope="row">Big crackers: finale, cake, sutli bomb…</th><td>Cost gems</td><td><b>All free</b></td></tr>
-              <tr class="no-tv"><th scope="row">Banner ads</th><td>Shown</td><td><b>None</b></td></tr>
-              <tr><th scope="row">Short videos between shows and levels</th><td>Shown</td><td><b>None</b></td></tr>
+              <tr><th scope="row">Cracker slots in your Sky and Ground bars</th><td>2 each, up to 8 with gems</td><td><b>Every slot</b></td></tr>
+              <tr><th scope="row">Ground crackers at once, and Fill street</th><td>8 (6 on smaller phones)</td><td><b>Up to 20, one tap</b></td></tr>
               <tr><th scope="row">Diya Path &amp; Rocket Rush levels, each</th><td>700 of 1,000</td><td><b>All 1,000</b></td></tr>
               <tr><th scope="row">Puzzle chapters</th><td>Open with stars</td><td><b>All open now</b></td></tr>
               <tr><th scope="row">Puzzle hints</th><td>3 a day</td><td><b>Unlimited</b></td></tr>
               <tr><th scope="row">Past daily puzzles</th><td>Today’s</td><td><b>Last 14 days</b></td></tr>
               <tr><th scope="row">Golden diyas &amp; royal boards</th><td>Classic</td><td><b>All styles</b></td></tr>
               <tr><th scope="row">Sacred backgrounds: Lakshmi, Ganesha, Balaji and more</th><td>Night</td><td><b>All 10</b></td></tr>
+              <tr><th scope="row">Your photos, videos, Live Sky and wallpapers</th><td>With our mark</td><td><b>Clean, no mark</b></td></tr>
+              <tr><th scope="row">Live Sky shows</th><td>3 shows + a daily one-minute preview</td><td><b>All 36, all night</b></td></tr>
+              <tr><th scope="row">Star mine, Niagara and 21 more Live Sky crackers</th><td>3 gems a launch</td><td><b>All free</b></td></tr>
+              <tr><th scope="row">Magic Spirals: every gear, pen and 5 signature slots</th><td>1 slot, more with gems</td><td><b>All</b></td></tr>
               <tr><th scope="row">Streaks forgive a missed day</th><td>Once a week</td><td><b>Twice a week</b></td></tr>
               <tr><th scope="row">15 landmarks in 3D, look around</th><td>2D</td><td><b>2D &amp; 3D</b></td></tr>
               <tr class="no-tv"><th scope="row">AR fireworks and sparkler in your room</th><td>–</td><td><b>✓</b></td></tr>
@@ -631,12 +806,7 @@
           </table>
         </section>
 
-        <!-- Then the plans and the one action, once the free things and the benefits have been shown -->
-        <div class="premium-plans" id="premiumPlans" role="radiogroup" aria-label="Choose a plan"></div>
-        <button class="btn primary premium-cta" id="btnPremiumBuy" type="button">Continue</button>
-        <ul class="premium-trust" id="premiumTrust"></ul>
-        <p class="premium-status" id="premiumStatus" role="status"></p>
-        <p class="premium-soon" id="premiumSoon" hidden></p>
+
 
 
         <!-- Can it deliver? Real landmarks, shown right here -->
@@ -655,7 +825,8 @@
           </ol>
           <p class="premium-easy">No sign-up · Plays offline · Restore on any phone with the same account</p>
         </section>
-        <p class="premium-fine" id="premiumFine"></p>
+        </details>
+
         <div class="premium-get" id="premiumGet" hidden>
           <p>Premium is available in the Android and iOS apps.</p>
           <div class="premium-get-links">
@@ -663,11 +834,7 @@
             <a class="btn ghost" id="premiumAppStore" target="_blank" rel="noopener">Download on the App Store</a>
           </div>
         </div>
-        <div class="premium-links">
-          <button type="button" id="btnPremiumRestore">Restore purchases</button>
-          <a id="premiumTerms" target="_blank" rel="noopener">Terms of Use</a>
-          <a id="premiumPrivacy" target="_blank" rel="noopener">Privacy Policy</a>
-        </div>
+
       </div>
     </div>
   </div>
@@ -723,6 +890,11 @@
               <div class="chips scroll occ-soon" id="occSoon" role="group" aria-label="Upcoming"></div>
               <div class="occ-cats" id="occCats" role="group" aria-label="Occasion types"></div>
               <div class="chips scroll" id="occasions" role="group" aria-label="Occasion"></div>
+            </div>
+            <!-- New Year, from mid-November: the show waits for the recipient's own midnight (game.js syncCountdown) -->
+            <div class="field cd-field" id="cdField" hidden>
+              <label class="switch" id="cCountdownRow"><span>Countdown to midnight <small>Plays at their midnight, wherever they are</small></span><input type="checkbox" id="cCountdown"><i></i></label>
+              <small class="help" id="cdHint">Free: 3 landmarks. Premium: every landmark and a drone finale with both names.</small>
             </div>
             <div class="field">
               <span class="label">Their photo <small>optional</small></span>
@@ -782,6 +954,10 @@
               <span class="label">Finale firework <small>your showpiece closes the show</small></span>
               <div class="chips" id="cFinale"></div>
             </div>
+            <!-- A countdown's drone finale spelling both names: Premium's switch; a free player's row wears the crown -->
+            <div class="field cd-drones" id="cdDrones" hidden>
+              <label class="switch" id="cDronesRow"><span>Drone finale with both names</span><input type="checkbox" id="cDrones"><i></i></label>
+            </div>
           </section>
 
           <section class="step" id="stepMusic" role="tabpanel" aria-label="Music" hidden>
@@ -800,6 +976,14 @@
                 <button type="button" class="btn ghost small" id="cMusicRemove">Remove</button>
               </div>
               <small class="help">Plays during your show and is saved in videos you record. It stays on this device and isn’t sent in the card link.</small>
+            </div>
+            <!-- Public Wishes (wishes.js): the two first names and the occasion's own wish, for everyone's Live Sky -->
+            <div class="field pub-wish" id="pubWish">
+              <span class="label">Public Wishes</span>
+              <small class="help">Both first names and this occasion’s wish light up Live Sky for everyone. Your own message, photo and music stay private.</small>
+              <div class="pub-btns"><button type="button" class="btn ghost small" id="btnPublishWish"><span aria-hidden="true">🎆</span> Publish wish</button><button type="button" class="pub-back" id="btnTakeBackWish" hidden>Take it back</button></div>
+              <button type="button" class="btn primary small pub-premium" id="btnWishPremium" hidden><i class="crown-ico" aria-hidden="true"></i> Premium · 10 wishes a day</button>
+              <small class="pub-status" id="pubStatus" role="status"></small>
             </div>
             <div class="field share-row">
               <span class="label" id="shareLabel">Or send it as a link</span>
@@ -843,7 +1027,7 @@
       <button class="icon-btn dlg-x" id="btnWelcomeX" aria-label="Close" type="button"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       <h2 id="welcomeTitle">Three things to try</h2>
       <ul class="welcome-list">
-        <li><span aria-hidden="true">👆</span><span><b>Your next firework</b><small>A little light, one moment at a time.</small></span></li>
+        <li><span aria-hidden="true">👆</span><span><b>Fire your first cracker</b><small>Drag the sparkler onto a cracker’s fuse. On a TV or computer, tap Fire.</small></span></li>
         <li><span aria-hidden="true">🧨</span><span><b>Ground and Sparkler</b><small>Light crackers on the street or write with a sparkler, from the tabs at the bottom.</small></span></li>
         <li><span aria-hidden="true">💌</span><span><b>Send a wish</b><small>Tap Create a love card on the home screen to write their name in fireworks, then save the video for WhatsApp.</small></span></li>
       </ul>
@@ -859,6 +1043,7 @@
       <div class="modal-body sheet-body">
         <section data-view="pick">
           <p class="mela-online" id="melaOnline"></p>
+          <p class="mela-online" id="melaCrew"></p>
           <div class="mela-modes" id="melaModes" role="group" aria-label="Game"><button type="button" data-mode="show" aria-pressed="true">🎆 Fireworks show</button><button type="button" data-mode="race" aria-pressed="false">⏱ Street race</button></div>
           <div class="mela-live" id="melaLive" hidden><h3>🔴 Live now</h3><ol></ol></div>
           <div class="mela-places" id="melaPlaces"></div>
@@ -882,6 +1067,7 @@
           <h3 class="mela-res-title" id="melaResTitle"></h3>
           <ol class="mela-rank" id="melaRank"></ol>
           <p class="mela-res-gems" id="melaResGems"></p>
+          <p class="mela-note" id="melaNext"></p>
           <button type="button" class="btn primary mela-big" id="melaAgain">Play again</button>
           <button type="button" class="btn primary mela-big mela-green" id="melaShare"><span aria-hidden="true">💬</span> Share</button>
           <button type="button" class="btn ghost" id="melaDone">Home</button>
@@ -906,8 +1092,14 @@
   </div>
   <div class="modal sheet-modal" id="storeModal" hidden>
     <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="storeTitle">
-      <header class="modal-head card-head"><button type="button" class="nav-back sheet-back" data-close="storeModal" aria-label="Back to home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Back</button><div><h2 id="storeTitle">Store</h2><p>Spin, watch, or get gems.</p></div></header>
+      <header class="modal-head card-head"><button type="button" class="nav-back sheet-back" data-close="storeModal" aria-label="Back to home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Back</button><div><h2 id="storeTitle">Store</h2><p>Buy gems or subscribe to Premium. The app is always ad-free.</p></div></header>
       <div class="modal-body sheet-body">
+        <section class="store-upgrades" aria-labelledby="storeUpgradesTitle">
+          <h3 id="storeUpgradesTitle">Gems &amp; Premium</h3>
+          <p>Pick what suits how you play.</p>
+          <button type="button" class="store-row" id="storeGems"><i aria-hidden="true">💎</i><span><b>Get gems</b><small id="storeGemsLine">Packs of gems for special crackers</small></span></button>
+          <button type="button" class="store-row" id="storePremium"><i aria-hidden="true"><i class="crown-ico" aria-hidden="true"></i></i><span><b>Explore Premium</b><small>Every cracker, all levels, and exclusive experiences</small></span></button>
+        </section>
         <section class="draw">
           <h3>🎡 Lucky Draw</h3>
           <div class="draw-wrap"><div class="draw-wheel" id="drawWheel"></div><i class="draw-pin" aria-hidden="true"></i></div>
@@ -915,9 +1107,8 @@
           <button type="button" class="btn primary" id="drawSpin">Spin free</button>
           <p class="draw-odds" id="drawOdds"></p>
         </section>
-        <button type="button" class="store-row" id="storeFree"><i aria-hidden="true">🎬</i><span><b>Free gems</b><small>Watch a short video: 💎 10 · <span id="storeFreeLeft">4 of 4 left today</span></small></span></button>
-        <button type="button" class="store-row" id="storeNoAds"><i aria-hidden="true">🚫</i><span><b>No ads</b><small>Premium: no ads, every cracker, every level</small></span></button>
-        <button type="button" class="store-row" id="storeGems"><i aria-hidden="true">💎</i><span><b>Gem shop</b><small>Packs of gems</small></span></button>
+        <!-- Light shows: every Live Sky show with its picture; a locked one opens its lock card, an open one plays (game.js storeShows) -->
+        <section class="store-shows" id="storeShows" aria-labelledby="storeShowsHead"><h3 id="storeShowsHead">📺 Light shows</h3><p id="storeShowsLine"></p><div class="store-shelf" id="storeShelf"></div></section>
       </div>
     </div>
   </div>
@@ -939,10 +1130,10 @@
       </header>
       <div class="modal-body sheet-body">
         <div class="gem-balance"><span aria-hidden="true">💎</span><b data-gems>0</b><small>your gems</small></div>
-        <button type="button" class="btn ghost gem-video" id="btnGemVideo" hidden><span aria-hidden="true">🎬</span><span>Watch a video</span></button>
-        <button type="button" class="gem-premium" id="btnGemPremium"><span class="premium-crown" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 18h18l-1.6-10-4.6 4.2L12 5l-2.8 7.2L4.6 8z"/></svg></span><span><b>Every cracker free with Premium</b><small>No gems needed, no ads</small></span></button>
+        <button type="button" class="gem-premium" id="btnGemPremium"><span class="premium-crown" aria-hidden="true"><i class="crown-ico" aria-hidden="true"></i></span><span><b>Every cracker free with Premium</b><small>No gems needed for Premium crackers</small></span></button>
         <div class="gem-packs" id="gemPacks"></div>
         <p class="gem-status" id="gemStatus" role="status"></p>
+        <details class="gem-vs"><summary>Free vs Premium</summary><ul class="premium-vs" id="gemVs" aria-label="Free and Premium"></ul></details>
         <ul class="gem-free">
           <li><span aria-hidden="true">🌅</span>A daily gift: 10 gems, growing to 40 for days in a row</li>
           <li><span aria-hidden="true">🎁</span>A bonus chest of 50 gems every 7th day in a row</li>
@@ -968,13 +1159,12 @@
       </header>
       <div class="modal-body sheet-body">
         <ol class="fest-days" id="festDays"></ol>
-        <button type="button" class="gem-premium" id="btnFestPremium"><span class="premium-crown" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 18h18l-1.6-10-4.6 4.2L12 5l-2.8 7.2L4.6 8z"/></svg></span><span><b>Celebrate Diwali with Premium</b><small>No ads, every cracker free, 1,000 levels each</small></span></button>
+        <button type="button" class="gem-premium" id="btnFestPremium"><span class="premium-crown" aria-hidden="true"><i class="crown-ico" aria-hidden="true"></i></span><span><b>Celebrate Diwali with Premium</b><small>Every cracker free, 1,000 levels each</small></span></button>
       </div>
     </div>
   </div>
 
-  <!-- The daily gift: today's gems, the week ahead, and a video to double them -->
-  <!-- A Premium cracker whose free light is used: one more light today for a short video, or Premium (game.js offerTry) -->
+  <!-- A Premium cracker whose free light is used: buy gems or subscribe to Premium (game.js offerTry) -->
   <div class="modal sheet-modal" id="tryModal" hidden>
     <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="tryTitle">
       <header class="modal-head card-head">
@@ -982,14 +1172,130 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Back
         </button>
         <div>
-          <h2 id="tryTitle">One more free light today</h2>
+          <h2 id="tryTitle">Keep lighting this cracker</h2>
           <p id="tryLine"></p>
         </div>
       </header>
       <div class="modal-body sheet-body">
-        <picture class="try-art"><source type="image/webp" srcset="assets/premium/hero-hazaar.webp"><img src="assets/premium/hero-hazaar.jpg" alt="" width="1100" height="614" loading="lazy" decoding="async"></picture>
-        <button type="button" class="btn primary gem-video" id="btnTryVideo"><span aria-hidden="true">🎬</span><span>Watch a video · light it once</span></button>
-        <button type="button" class="btn ghost" id="btnTryPremium">Light it any time with Premium</button>
+        <picture class="try-art"><source type="image/webp" srcset="assets/premium/hero-hazaar.webp"><img src="assets/premium/hero-hazaar.webp" alt="" width="1100" height="614" loading="lazy" decoding="async"></picture>
+        <button type="button" class="btn primary" id="btnTryGems"><span aria-hidden="true">💎</span><span>Get gems</span></button>
+        <button type="button" class="btn ghost" id="btnTryPremium"><i class="crown-ico" aria-hidden="true"></i>Light it any time with Premium</button>
+      </div>
+    </div>
+  </div>
+  <!-- The cracker loader: every sky and ground cracker on one screen; only what's loaded here shows in the bar (game.js) -->
+  <div class="modal sheet-modal" id="loadModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="loadTitle">
+      <header class="modal-head card-head">
+        <button type="button" class="nav-back" id="loadBack" aria-label="Back">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Back
+        </button>
+        <div>
+          <h2 id="loadTitle">Load your crackers</h2>
+          <p id="loadLine"></p>
+        </div>
+      </header>
+      <div class="modal-body sheet-body load-body">
+        <div class="load-tray" id="loadTray"></div>
+        <div class="load-offer" id="loadOffer" role="status" hidden>
+          <p id="loadOfferLine"></p>
+          <div>
+            <button type="button" class="btn primary" id="btnLoadSlot"></button>
+            <button type="button" class="btn ghost" id="btnLoadPremium"><i class="crown-ico" aria-hidden="true"></i>Every slot</button>
+          </div>
+        </div>
+        <div class="load-filters" id="loadFilters" role="group" aria-label="Show"></div>
+        <div class="load-grid" id="loadGrid" data-filter="all"></div>
+      </div>
+      <footer class="modal-foot">
+        <button type="button" class="btn ghost" id="btnLoadClear">Clear</button>
+        <span class="load-gems"><span aria-hidden="true">💎</span><b data-gems>0</b></span>
+        <button type="button" class="btn primary" id="btnLoadDone">Done</button>
+      </footer>
+    </div>
+  </div>
+  <!-- Live Sky's shows: Endless Sky and themed shows of a minute or two (game.js LIVE_SHOWS) -->
+  <!-- Public Wishes (wishes.js): watch Wishes of India, or write a wish for it (two first names and an occasion's own wish) -->
+  <div class="modal sheet-modal" id="wishModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="wishTitle">
+      <header class="modal-head card-head">
+        <button type="button" class="nav-back" data-close="wishModal" aria-label="Back to home">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Home
+        </button>
+        <div>
+          <h2 id="wishTitle">Public Wishes</h2>
+          <p>Write a wish for someone you love. Tonight, all of India sees their name in fireworks.</p>
+        </div>
+      </header>
+      <div class="modal-body sheet-body wish-body">
+        <div class="wish-sky" id="wishSky">
+          <b id="wishSkyNames"></b>
+          <small id="wishSkyPlace" hidden></small>
+          <small id="wishSkyOcc"></small>
+        </div>
+        <button type="button" class="btn primary wish-watch" id="btnWishWatch"><span aria-hidden="true">🎆</span> Watch Wishes of India</button>
+        <div class="wish-form">
+          <div class="wish-own" id="wOwn" hidden>
+            <div class="wish-own-head"><span class="label">Your wishes</span><button type="button" class="wish-new" id="btnWishNew">New wish</button></div>
+            <div class="wish-own-list" id="wOwnList"></div>
+          </div>
+          <label class="wish-field"><span>From</span><input id="wFrom" maxlength="18" autocomplete="off" enterkeyhint="next" placeholder="Your name"></label>
+          <label class="wish-field"><span>To</span><input id="wTo" maxlength="18" autocomplete="off" enterkeyhint="next" placeholder="Their name"></label>
+          <label class="wish-field"><span>Place</span><input id="wPlace" maxlength="18" autocomplete="off" enterkeyhint="done" placeholder="City or country"></label>
+          <span class="label">Occasion</span>
+          <div class="chips wish-occ" id="wOcc" role="radiogroup" aria-label="Occasion"></div>
+          <span class="label">Wishes to share</span>
+          <div class="wish-lines" id="wLines"></div>
+          <button type="button" class="btn ghost wish-spark" id="btnWishSpark" aria-pressed="false" aria-describedby="wishSparkHelp"><span class="wish-tick" aria-hidden="true"></span>Write it in sparkler light</button>
+          <small class="wish-spark-help" id="wishSparkHelp">Turn on to trace their name and wish across the sky.</small>
+          <div class="wish-sign" id="wishSignBox" hidden>
+            <span class="label">Draw your signature (optional)</span>
+            <canvas id="wishSign" aria-label="Draw your signature"></canvas>
+            <button type="button" class="btn ghost wish-sign-clear" id="btnWishSignClear">Clear</button>
+          </div>
+          <button type="button" class="btn ghost wish-spark" id="btnWishShare">Share</button>
+          <small class="help">Both first names and this occasion’s wish light up Live Sky for everyone. Your own message, photo and music stay private.</small>
+          <div class="pub-btns"><button type="button" class="btn primary" id="btnWPublish"><span aria-hidden="true">🎆</span> Publish wish</button><button type="button" class="pub-back" id="btnWTakeBack" hidden>Take it back</button></div>
+          <button type="button" class="btn primary small pub-premium" id="btnWPremium" hidden><i class="crown-ico" aria-hidden="true"></i> Premium · 10 wishes a day</button>
+          <small class="pub-status" id="wStatus" role="status"></small>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal sheet-modal" id="liveModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="liveTitle">
+      <header class="modal-head card-head">
+        <button type="button" class="nav-back" id="liveBack" aria-label="Back">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Back
+        </button>
+        <div>
+          <h2 id="liveTitle">Live Sky</h2>
+          <p>Choose a show and sit back: no tapping, just fireworks.</p>
+        </div>
+      </header>
+      <p class="live-today" id="liveToday" hidden></p>
+      <!-- Who the shows' finale writes in light first (game.js gratefulNames): Amma until it is changed -->
+      <label class="live-for"><span>Tonight’s sky is for…</span><input id="liveFor" type="text" maxlength="18" autocomplete="off" enterkeyhint="done" spellcheck="false" placeholder="Amma"></label>
+      <div class="modal-body sheet-body live-list" id="liveList"></div>
+    </div>
+  </div>
+  <!-- Live Wallpapers: each opens the phone's own preview, where Set wallpaper applies it (GameWebView.android.kt) -->
+  <div class="modal sheet-modal" id="wallModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="wallTitle">
+      <header class="modal-head card-head">
+        <button type="button" class="nav-back" id="wallBack" aria-label="Back">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Back
+        </button>
+        <div>
+          <h2 id="wallTitle">Live Wallpapers</h2>
+          <p>Fireworks on your home screen, over India’s landmarks. Tap your screen to light more.</p>
+        </div>
+      </header>
+      <div class="modal-body sheet-body wall-list">
+        <button type="button" class="btn ghost" data-wall="LoveSky"><img src="assets/menu/thumb-card.webp" alt="" width="52" height="52" loading="lazy" decoding="async"><span><b>Love Sky</b><small>Heart fireworks from the love card</small></span></button>
+        <button type="button" class="btn ghost" data-wall="SkyShow"><img src="assets/menu/thumb-show.webp" alt="" width="52" height="52" loading="lazy" decoding="async"><span><b>Sky Show</b><small>Rockets and shells over the landmarks</small></span></button>
+        <button type="button" class="btn ghost" data-wall="Sparkler"><img src="assets/menu/tab-spark.webp" alt="" width="52" height="52" loading="lazy" decoding="async"><span><b>Sparkler</b><small>Hearts and stars in sparkler light</small></span></button>
+        <button type="button" class="btn ghost" data-wall="GroundCrackers"><img src="assets/menu/tab-ground.webp" alt="" width="52" height="52" loading="lazy" decoding="async"><span><b>Ground Crackers</b><small>Flowerpots and chakras on the street</small></span></button>
       </div>
     </div>
   </div>
@@ -1010,7 +1316,6 @@
         <p class="gift-saved" id="giftSaved" hidden>🛡️ You missed a day, but your streak is safe. One missed day a week is forgiven.</p>
         <ol class="gift-days" id="giftDays"></ol>
         <p class="gift-next" id="giftNext"></p>
-        <button type="button" class="btn ghost gem-video" id="btnGiftDouble" hidden><span aria-hidden="true">🎬</span><span>Double it</span></button>
         <button type="button" class="btn primary gift-collect" id="btnGiftCollect">Collect</button>
         <div class="gift-remind" id="giftRemind" hidden>
           <p>Remind you at 7:30 pm when tomorrow’s gift is ready?</p>
@@ -1098,6 +1403,27 @@
         </div>
       </header>
       <div class="modal-body sheet-body">
+        <!-- The month at a glance: birthdays as small faces, festivals as a diya or rangoli; tap a day for its wishes -->
+        <section class="bcal" id="bdayCal" aria-label="Birthday calendar">
+          <div class="bcal-head">
+            <button type="button" class="bcal-nav" id="bcalPrev" aria-label="Previous month"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>
+            <b class="bcal-title" id="bcalTitle" aria-live="polite"></b>
+            <button type="button" class="bcal-nav" id="bcalNext" aria-label="Next month"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>
+          </div>
+          <div class="bcal-week" id="bcalWeek" aria-hidden="true"></div>
+          <div class="bcal-grid" id="bcalGrid" role="grid" aria-labelledby="bcalTitle"></div>
+          <div class="bcal-month">
+            <b>This month</b>
+            <ul class="bcal-up" id="bcalUp"></ul>
+          </div>
+        </section>
+        <div class="bcal-day" id="bdayDay" role="dialog" aria-modal="true" aria-labelledby="bdayDayTitle" hidden>
+          <div class="bcal-day-box">
+            <div class="bcal-day-head"><b id="bdayDayTitle"></b><button type="button" class="row-icon" id="bdayDayX" aria-label="Close"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17"/></svg></button></div>
+            <ul class="sheet-list" id="bdayDayList"></ul>
+            <button type="button" class="btn ghost small" id="bdayDayAdd">Add a birthday on this day</button>
+          </div>
+        </div>
         <form class="bday-form" id="bdayForm" autocomplete="off" novalidate hidden>
           <label class="field">
             <span class="label">Name <em>*</em></span>
@@ -1109,6 +1435,7 @@
             <div class="bday-date">
               <select id="bDay" aria-label="Day"></select>
               <select id="bMonth" aria-label="Month"></select>
+              <select id="bYear" aria-label="Year (optional)"></select>
             </div>
           </div>
           <div class="field">
@@ -1125,13 +1452,22 @@
           </div>
         </form>
         <div class="import-row" id="bdayImport">
-          <button type="button" class="btn ghost small" id="btnImportContacts" hidden>📇 Import from contacts</button>
+          <button type="button" class="btn ghost small" id="btnImportContacts" hidden>📇 Find birthdays in my contacts</button>
           <label class="btn ghost small" for="bVcf" id="bVcfLabel">📇 Import a contacts file</label>
           <input type="file" id="bVcf" accept=".vcf,text/vcard,text/x-vcard" hidden>
         </div>
+        <div class="import-panel" id="bdayNotify" hidden>
+          <b>Remind me on their birthday</b>
+          <small>Allow notifications and the app reminds you the day before and on the morning of each birthday. The reminders are made on this phone; nothing is sent anywhere.</small>
+          <div class="bday-form-btns">
+            <button type="button" class="btn ghost" id="bdayNotifyNo">Not now</button>
+            <button type="button" class="btn primary" id="bdayNotifyYes">Turn on</button>
+          </div>
+        </div>
         <div class="import-panel" id="importConsent" hidden>
           <b>Find birthdays in your contacts</b>
-          <small>The app reads the names, birthdays and photos of contacts that have a birthday, so it can remind you. They stay on this phone and are never uploaded.</small>
+          <small><b>Birthdays are read from your contacts on this phone only. Nothing is uploaded.</b></small>
+          <small>Next, your phone asks to let the app read your contacts and, if you like, your calendar: only the names, birthdays and photos of people with a birthday, and the birthdays in your Google Birthdays calendar. You pick who to add, and they stay on this phone. Not now keeps everything else working.</small>
           <div class="bday-form-btns">
             <button type="button" class="btn ghost" id="consentNo">Not now</button>
             <button type="button" class="btn primary" id="consentYes">Continue</button>
@@ -1183,6 +1519,58 @@
   </div>
 
   <!-- Light someone up (once Daily joy): a reason, a name and today's landmark, written in the sky every day -->
+  <!-- Send feedback: a kind, a message, and the phone's email app opens addressed to us (game.js) -->
+  <div class="modal sheet-modal" id="feedbackModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="fbTitle">
+      <header class="modal-head card-head">
+        <button type="button" class="nav-back" data-close="feedbackModal" aria-label="Back">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Back
+        </button>
+        <div>
+          <h2 id="fbTitle">Send feedback</h2>
+          <p>Tell us what to make better. We read every message.</p>
+        </div>
+      </header>
+      <div class="modal-body sheet-body">
+        <div class="fb-kinds" id="fbKinds" role="radiogroup" aria-label="What is it about?">
+          <button type="button" data-kind="idea" aria-pressed="true">💡 <span>An idea</span></button>
+          <button type="button" data-kind="bug" aria-pressed="false">🐞 <span>Something broke</span></button>
+          <button type="button" data-kind="hard" aria-pressed="false">🧩 <span>Too hard or confusing</span></button>
+          <button type="button" data-kind="other" aria-pressed="false">💬 <span>Something else</span></button>
+        </div>
+        <textarea class="fb-text" id="fbText" rows="6" maxlength="1500" placeholder="Write it here…"></textarea>
+        <button class="btn primary" id="fbSend" type="button">Send by email</button>
+        <p class="fb-note">Opens your email app, addressed to gemmyapps@gmail.com, with your app version for us. Nothing is sent until you press send there.</p>
+      </div>
+    </div>
+  </div>
+  <!-- My sky (timeline.js): the player's own timeline, newest first, grouped by day; on this phone only -->
+  <div class="modal sheet-modal" id="timeModal" hidden>
+    <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="timeTitle">
+      <header class="modal-head card-head">
+        <button type="button" class="nav-back" data-close="timeModal" aria-label="Back to home">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>Home
+        </button>
+        <div>
+          <h2 id="timeTitle">My sky</h2>
+          <p>Everything you lit up, day by day. Kept on this phone only.</p>
+        </div>
+      </header>
+      <div class="modal-body sheet-body tl-body">
+        <div class="tl-top" id="tlTop"></div>
+        <div class="tl-empty" id="tlEmpty" hidden>
+          <b>Your sky is still dark</b>
+          <p>Make a love card or light someone up, and it shows here, day by day.</p>
+          <div class="tl-empty-go">
+            <button type="button" class="btn primary" data-go="#btnIntroCard">Create a love card</button>
+            <button type="button" class="btn ghost" data-go="#btnJoy">Light someone up</button>
+          </div>
+        </div>
+        <div class="tl-list" id="tlList"></div>
+        <button type="button" class="btn ghost tl-clear" id="tlClear" hidden>Clear my sky</button>
+      </div>
+    </div>
+  </div>
   <div class="modal sheet-modal" id="joyModal" hidden>
     <div class="modal-box card-sheet" role="dialog" aria-modal="true" aria-labelledby="joyTitle">
       <header class="modal-head card-head">
@@ -1295,11 +1683,26 @@
   <script src="launch-controller.js"></script>
   <script src="diya-path.js"></script>
   <script src="rocket-rush.js"></script>
+  <script src="sky-gears.js"></script>
+  <script src="character-art.js"></script>
+  <script src="drone-show.js"></script>
+  <script src="laser-show.js"></script>
   <script src="chor.js"></script>
+  <script src="home-thumbs.js"></script>
+  <script src="festivals.js"></script>
+  <script src="timeline.js"></script>
+  <script src="scene-layout.js"></script>
+  <script src="mela-night.js"></script>
   <script src="game.js"></script>
   <script src="duel.js"></script>
+  <script src="wishes.js"></script>
   <script src="events.js"></script>
   <script src="rooms.js"></script>
+  <script src="cloudsave.js"></script>
   <script src="tv.js"></script>
+  <script src="home-menu.js"></script>
+  <script src="event-sky-boot.js"></script>
+  <script src="home-focus.js"></script>
+  <script src="gameplay-focus.js"></script>
 </body>
 </html>

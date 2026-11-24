@@ -217,8 +217,9 @@
     return { id: `daily-${n}`, waves, par: parFor(rockets, waves.length, 1.9) };
   }
   // Boards are stored compactly: "8x8:" then the rockets, comma-separated, each a colour digit and one character per
-  // square (tail to nose). The safe launch order is the reverse of the stored order, so it isn't stored.
-  const CH = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/';
+  // square (tail to nose). The safe launch order is the reverse of the stored order, so it isn't stored. The first 64
+  // characters cover boards up to 8×8; the accented letters after them, squares 64–99 of a 9×9 or 10×10 board.
+  const CH = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖØÙÚÛÜÝÞßàáâãä';
   const encodeWave = (wv) => `${wv.w}x${wv.h}:` + wv.rockets.map((r) => r.k + r.c.map((i) => CH[i]).join('')).join(',');
   function decodeWave(str) {
     if (typeof str !== 'string') return str;
@@ -242,11 +243,14 @@
   const BURST = { I: 'peony', L: 'willow', S: 'crossette' };
   const WORLDS = { spark: 'First Spark', rooftop: 'Rooftop', temple: 'Temple Festival', bazaar: 'Night Bazaar', ghat: 'Ghat Lights',
     palace: 'Palace Gardens', harbour: 'Harbour Lights', fort: 'Fort Walls', mela: 'Grand Mela', starfall: 'Starfall Sky' };
+  // Each world's painted level map (Google Flow art): its levels as a trail (LUTSTrail, diya-path.js).
+  const MAP_ART = { spark: 'map-spark.webp', rooftop: 'map-rooftop.webp', temple: 'map-temple.webp', bazaar: 'map-bazaar.webp', ghat: 'map-ghat.webp',
+    palace: 'map-palace.webp', harbour: 'map-harbour.webp', fort: 'map-fort.webp', mela: 'map-mela.webp', starfall: 'map-starfall.webp' };
   // Whole phrases, so each language can put the number where it belongs.
   const levelName = (lv) => (lv.daily ? `Daily Rocket #${lv.no}` : `${WORLDS[data.worlds[lv.world].id]} ${lv.index + 1}`);
   // Gems come from the game's shared puzzle rule (LUTSGame.reward). The last 3 worlds are Premium; free players can play
   // their first 5 levels. Premium also opens every world now, gives unlimited hints and every past daily.
-  const UNLOCK = 2 / 3, HINTS_A_DAY = 1, HINT_VIDEOS_A_DAY = 3, HINTS_PER_VIDEO = 2, PREMIUM_WORLDS = 3, TASTER = 5, ARCHIVE_DAYS = 14;
+  const UNLOCK = 2 / 3, HINTS_A_DAY = 1, PREMIUM_WORLDS = 3, TASTER = 5, ARCHIVE_DAYS = 14;
   const TUTORIAL = [
     'Tap a rocket. It flies along its body and out the way its arrow points.',
     'A rocket flies only if its arrow’s lane is empty. A blocked tap burns a fuse.',
@@ -263,13 +267,14 @@
     let v = null;
     try { v = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { v = null; }
     if (!v || typeof v !== 'object') v = {};
-    for (const k of ['stars', 'best', 'daily', 'vids']) v[k] = v[k] && typeof v[k] === 'object' ? v[k] : {};
+    for (const k of ['stars', 'best', 'daily']) v[k] = v[k] && typeof v[k] === 'object' ? v[k] : {};
     if (!Number.isFinite(v.hints)) v.hints = HINTS_A_DAY;
-    // A free hint comes back every day; more cost gems (or a video, or Premium).
-    if (v.hintDay !== today()) { v.hints = Math.max(v.hints, HINTS_A_DAY); v.hintDay = today(); for (const d of Object.keys(v.vids)) if (d !== today()) delete v.vids[d]; }
+    // A free hint comes back every day; more cost gems or come with Premium.
+    if (v.hintDay !== today()) { v.hints = Math.max(v.hints, HINTS_A_DAY); v.hintDay = today(); }
     return v;
   }
   let prog = load();
+  window.LUTSRocketHints = (n) => { prog.hints += n; save(); }; // a bundle's hints from the gem shop
   const save = () => { try { localStorage.setItem(KEY, JSON.stringify(prog)); } catch (e) { /* storage full: progress stays for this visit */ } };
 
   let data = null, loading = null;
@@ -374,7 +379,7 @@
           <p class="diya-res-stars" id="rrResStars" aria-hidden="true"></p>
           <p class="diya-res-line" id="rrResLine"></p>
           <p class="diya-res-gems"><span id="rrResGain"></span> <span id="rrResStreak"></span></p>
-          <div class="diya-chest" id="rrChest" hidden><span id="rrChestText"></span><button class="btn ghost small" id="rrChestDouble" type="button">Watch a video · double it</button></div>
+          <div class="diya-chest" id="rrChest" hidden><span id="rrChestText"></span></div>
           <div class="diya-res-actions">
             <button class="btn primary" id="rrNext" type="button">Next level</button>
             <button class="btn ghost" id="rrLevels" type="button">Map</button>
@@ -385,7 +390,7 @@
             </div>
             <button class="btn ghost" id="rrAgain" type="button">Play again</button>
           </div>
-          <button class="diya-upsell" id="rrResPremium" type="button" hidden><span aria-hidden="true">👑</span>Unlock all 1000 levels with Premium</button>
+          <button class="diya-upsell" id="rrResPremium" type="button" hidden><i class="crown-ico" aria-hidden="true"></i>Unlock all 1000 levels with Premium</button>
         </div>
       </div>
       <div class="diya-hintbox" id="rrHintBox" hidden>
@@ -395,8 +400,7 @@
           <p class="diya-res-line">A free hint comes back every day.</p>
           <div class="diya-res-actions">
             <button class="btn primary diya-gem-hint" id="rrHintGems" type="button"></button>
-            <button class="btn ghost" id="rrHintVideo" type="button">Watch a video · +2 hints</button>
-            <button class="diya-upsell" id="rrHintPremium" type="button"><span aria-hidden="true">👑</span>Unlimited hints with Premium</button>
+            <button class="diya-upsell" id="rrHintPremium" type="button"><i class="crown-ico" aria-hidden="true"></i>Unlimited hints with Premium</button>
             <button class="btn ghost" id="rrHintClose" type="button">Not now</button>
           </div>
         </div>
@@ -412,7 +416,6 @@
     $('#rrDaily').addEventListener('click', () => play(daily()));
     $('#rrRestart').addEventListener('click', () => { if (run && !run.over) play(current); });
     $('#rrHint').addEventListener('click', useHint);
-    $('#rrHintVideo').addEventListener('click', hintVideo);
     $('#rrHintClose').addEventListener('click', () => { el.hintBox.hidden = true; });
     $('#rrResClose').addEventListener('click', () => { el.result.hidden = true; });
     $('#rrHintX').addEventListener('click', () => { el.hintBox.hidden = true; });
@@ -424,12 +427,6 @@
     });
     $('#rrHintPremium').addEventListener('click', () => { el.hintBox.hidden = true; if (game()) game().openPremium({ hints: true }); });
     $('#rrResPremium').addEventListener('click', () => { if (game()) game().openPremium({ levels: true }); });
-    $('#rrChestDouble').addEventListener('click', async () => {
-      const g = game(), btn = $('#rrChestDouble');
-      if (!g || !award || !award.chest || btn.disabled) return;
-      btn.disabled = true;
-      if (await g.doubleChest(award.chest)) { $('#rrChestText').textContent = `🎁 Chest +${award.chest * 2}`; btn.hidden = true; } else btn.disabled = false;
-    });
     $('#rrNext').addEventListener('click', () => { const nx = nextLevel(); if (nx) play(nx); else showMap(); });
     $('#rrSave').addEventListener('click', saveSky);
     $('#rrShareVideo').addEventListener('click', shareVideo);
@@ -508,8 +505,9 @@
       }
       box.append(sec);
       if (!shown || !open) return;
-      const grid = document.createElement('div');
-      grid.className = 'diya-levels';
+      const T = window.LUTSTrail, art = MAP_ART[wd.id], trail = !!(T && art);
+      const grid = trail ? T.grid(wd.levels.length, `assets/rocket-rush/${art}`) : document.createElement('div');
+      if (!trail) grid.className = 'diya-levels';
       wd.levels.forEach((lv, j) => {
         const b = document.createElement('button'), st = prog.stars[lv.id] || 0, crown = premiumLocked(i, j), can = !crown && levelOpen(wd, j);
         b.type = 'button'; b.className = `diya-level${st ? ' won' : ''}${st === 3 ? ' gold' : ''}${lv.breather ? ' rr-breather' : ''}${crown ? ' premium-only' : ''}`;
@@ -519,12 +517,14 @@
         b.querySelector('small').textContent = crown ? '👑' : can ? starText(st) : '🔒';
         b.setAttribute('aria-label', `Level ${j + 1}`);
         b.addEventListener('click', () => (crown ? game() && game().openPremium({ levels: true }) : play({ ...lv, world: i, index: j })));
-        if (can && !st && !next) next = b;
+        if (can && !st && !next) { next = b; if (trail) b.classList.add('next'); }
+        if (trail) T.place(grid, b, j);
         grid.append(b);
       });
       sec.append(grid);
     });
     if (scrollToNext && next) requestAnimationFrame(() => next.scrollIntoView({ block: 'center' }));
+    if (window.LUTSTrail) LUTSTrail.pan(el.worlds.closest('.diya-scroll'));
   }
   function nextLevel() {
     if (!current || current.daily) return null;
@@ -582,6 +582,7 @@
     stopShow(); cancelFinale();
     if (!lv.daily) shownWorld = lv.world; // back on the map, this world stays open
     current = lv; run = new Run(lv); secs = 0;
+    if (root.LUTSTrack) { root.LUTSTrack.screen('rocket_rush'); root.LUTSTrack.level('rocket_rush', lv.daily ? 'daily' : lv.id); }
     el.root.classList.remove('rr-clean'); replay = null;
     fly = []; shakes = []; sparks = []; smoke = []; hintId = -1; slide = null;
     el.map.hidden = true; el.result.hidden = true; el.hintBox.hidden = true; el.skip.hidden = true; el.chain.hidden = true; el.banner.hidden = true;
@@ -718,35 +719,21 @@
     changed();
   }
   function openHintBox() {
-    const g = game(), left = HINT_VIDEOS_A_DAY - (prog.vids[today()] || 0), btn = $('#rrHintVideo');
-    btn.hidden = !(g && g.videoReady());
-    btn.disabled = left <= 0;
-    btn.textContent = left <= 0 ? 'Videos are done for today' : `Watch a video · +${HINTS_PER_VIDEO} hints`;
+    const g = game();
     $('#rrHintPremium').hidden = !g;
     const gb = $('#rrHintGems'), cost = g ? g.hintCost() : 10, have = g ? g.gems() : 0;
     gb.hidden = !g;
     gb.textContent = have >= cost ? `Use 💎 ${cost} for a hint` : `Buy gems · a hint is 💎 ${cost}`;
     el.hintBox.hidden = false;
   }
-  async function hintVideo() {
-    const g = game(), btn = $('#rrHintVideo');
-    if (!g || btn.disabled) return;
-    btn.disabled = true;
-    const ok = await g.watchVideo();
-    if (ok) {
-      prog.vids[today()] = (prog.vids[today()] || 0) + 1;
-      prog.hints += HINTS_PER_VIDEO; save();
-      el.hintBox.hidden = true;
-      changed();
-    } else btn.disabled = false;
-  }
-
   // ----- The end of a level -----
   function failed() {
+    if (root.LUTSTrack) root.LUTSTrack.levelEnd('rocket_rush', 'lose');
     award = { fail: true };
     showResult();
   }
   function win() {
+    if (root.LUTSTrack) root.LUTSTrack.levelEnd('rocket_rush', 'win');
     const r = run, stars = r.stars(secs), id = current.id, g = game();
     swell();
     if (g) g.buzz([30, 60, 30]);
@@ -763,6 +750,7 @@
     const rw = g ? g.reward({ stars, had, index: current.index || 0, daily: !!current.daily }) : { gain: 0, chest: 0 };
     award = { stars, gain: rw.gain, chest: rw.chest, newBest, streak: current.daily && current.day === today() && g ? g.markDaily(today(), 'rocket') : 0, launches: r.launches.slice() };
     if (current.daily && current.day === today() && g && g.dailyScore) g.dailyScore('rocket', r.score); // the Daily Rocket's leaderboard
+    if (root.LUTSTimeline) root.LUTSTimeline.add({ kind: 'rocket', icon: '🚀', line: 'Rocket Rush · {0} · {1}★', args: [levelName(current), stars], thumb: 'assets/menu/thumb-rocket.webp', key: `rr:${current.id}`, within: 60000, best: stars }); // My sky (a worse replay within the minute keeps the better line)
     finale(stars);
   }
   // The level is won: the message and its stars over the board, bursts in the rockets' colours across it and a shower of
@@ -809,7 +797,7 @@
       $('#rrResTitle').textContent = 'Out of fuses';
       $('#rrResStars').textContent = starText(0);
       $('#rrResLine').textContent = 'Three fuses burnt. Try a different order.';
-      $('#rrResGain').textContent = ''; $('#rrResStreak').textContent = ''; $('#rrChest').hidden = true;
+      $('#rrResGain').textContent = ''; $('#rrResStreak').textContent = ''; $('#rrChest').hidden = true; $('#rrBonus').hidden = true;
       $('#rrNext').hidden = true; $('#rrSave').hidden = true; $('#rrShareVideo').hidden = true;
       $('#rrAgain').textContent = 'Try again';
     } else {
@@ -822,7 +810,7 @@
       $('#rrResGain').textContent = gain ? `💎 +${gain}` : '';
       const g = game();
       $('#rrChest').hidden = !a.chest;
-      if (a.chest && !replay) { $('#rrChestText').textContent = `🎁 Chest +${a.chest}`; const d = $('#rrChestDouble'); d.disabled = false; d.hidden = !(g && g.videoReady()); }
+      if (a.chest && !replay) $('#rrChestText').textContent = `🎁 Chest +${a.chest}`;
       $('#rrResStreak').textContent = streak ? `🔥 ${streak}-day streak` : '';
       $('#rrNext').hidden = !nextLevel();
       $('#rrSave').hidden = false;
@@ -838,7 +826,6 @@
     $('#rrResPremium').hidden = !game() || isPremium();
     el.result.hidden = false;
     $('#rrNext').hidden ? $('#rrAgain').focus() : $('#rrNext').focus();
-    if (game() && !replay) game().adBreak(); // a video at this break, at most one every 2 minutes (the game decides); never mid-show
   }
 
   // ----- The finale: every launched rocket again, as a firework, in launch order -----
@@ -933,7 +920,10 @@
     const i = Math.max(0, Math.min(pts.length - 2, Math.floor(u))), f = u - i, a = pts[i], b = pts[i + 1];
     return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
   };
+  // Nothing on screen to move (the level map): no frames, a look 5 times a second for a board, a show or a replay.
+  let idleTimer = 0;
   function frame(now) {
+    if (!show && !replay && (!run || el.play.hidden)) { raf = 0; clearTimeout(idleTimer); idleTimer = setTimeout(() => { if (!el.root.hidden && !raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }, 200); return; }
     raf = requestAnimationFrame(frame);
     const dt = Math.min(0.05, (now - last) / 1000 || 0);
     last = now;
@@ -1256,11 +1246,12 @@
   }
   function close() {
     if (!el || el.root.hidden) return;
+    if (root.LUTSTrack) { root.LUTSTrack.levelEnd('rocket_rush', 'quit'); root.LUTSTrack.screen('home'); }
     stopShow(); cancelFinale();
     el.root.hidden = true;
     el.root.classList.remove('showing');
     document.body.classList.remove('rr-open');
-    cancelAnimationFrame(raf); raf = 0;
+    cancelAnimationFrame(raf); raf = 0; clearTimeout(idleTimer);
     run = null;
     if (game()) game().leave();
     tile();

@@ -1,6 +1,8 @@
 /* Light Up the Skies — interactive fireworks show + greeting cards */
 (() => {
   'use strict';
+  // Saved before this run wrote anything: a player from an older build (it decides who keeps all light shows).
+  const LUTS_OLD = (() => { try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith('luts:') && !k.startsWith('luts:live')) return true; } } catch (e) { /* none */ } return false; })();
 
   // ---------- Helpers ----------
   const $ = (s) => document.querySelector(s);
@@ -8,6 +10,41 @@
   const ANDROID_WEBVIEW = !!(window.LUTSNative && window.LUTSNative.platform === 'android');
   if (ANDROID_WEBVIEW) document.documentElement.classList.add('android-webview');
   const rand = (a, b) => a + Math.random() * (b - a);
+  // Anonymous usage events for Google Analytics for Firebase (the Android app only: window.LUTSAndroid.logEvent; a no-op
+  // on the website and in tests). Only fixed ids, counts and enums: never a name, card text, contact, birthday or photo.
+  const track = window.LUTSTrack = (() => {
+    const clean = (v) => (typeof v === 'number' ? (Number.isFinite(v) ? v : 0) : String(v).toLowerCase().replace(/[^a-z0-9_.:-]+/g, '_').slice(0, 100));
+    const once = new Set(), runs = {};
+    let screen = '';
+    const send = (name, params) => {
+      try {
+        const a = window.LUTSAndroid;
+        if (!a || typeof a.logEvent !== 'function' || !/^[a-z][a-z0-9_]{0,39}$/.test(name)) return;
+        const p = {};
+        for (const [k, v] of Object.entries(params || {}).slice(0, 10)) if (v !== undefined && v !== null && v !== '') p[k] = clean(v);
+        a.logEvent(name, JSON.stringify(p));
+      } catch (e) { /* analytics never breaks the game */ }
+    };
+    send.screen = (name) => { if (name && name !== screen) { screen = name; send('screen_view', { screen_name: name, screen_class: name }); } };
+    // The mode under any sheet (a closed sheet goes back to it, not to 'home'): enter() a mode, home() on leaving it.
+    let base = 'home';
+    send.enter = (name) => { base = name; send.screen(name); };
+    send.home = () => { base = 'home'; send.screen('home'); };
+    send.back = () => send.screen(base);
+    send.once = (name, params, key) => { const k = `${name}|${key}`; if (!once.has(k)) { once.add(k); send(name, params); } };
+    // A level: start (a run still open in that mode ends as a quit), then end once with win, lose or quit.
+    send.level = (mode, level) => { send.levelEnd(mode, 'quit'); runs[mode] = { level: String(level), at: Date.now() }; send('level_start', { mode, level }); };
+    send.levelEnd = (mode, result) => { send.last = { mode, result, at: Date.now() }; const r = runs[mode]; if (!r) return; delete runs[mode]; send('level_end', { mode, level: r.level, result, seconds: Math.round(((r.paused || Date.now()) - r.at) / 1000) }); };
+    // Backgrounded mid-level: level_pause (seconds so far), the clock stops; pagehide (swiped away) ends it as 'background'.
+    const away = () => { const now = Date.now(); for (const [mode, r] of Object.entries(runs)) if (!r.paused) { r.paused = now; send('level_pause', { mode, level: r.level, seconds: Math.round((now - r.at) / 1000) }); } };
+    const back = () => { const now = Date.now(); for (const r of Object.values(runs)) if (r.paused) { r.at += now - r.paused; r.paused = 0; } };
+    document.addEventListener('visibilitychange', () => (document.hidden ? away() : back()));
+    window.addEventListener('pagehide', () => { back(); for (const mode of Object.keys(runs)) send.levelEnd(mode, 'background'); });
+    send.user = (name, value) => { try { const a = window.LUTSAndroid; if (a && typeof a.setUserProperty === 'function') a.setUserProperty(name, String(value)); } catch (e) { /* none */ } };
+    return send;
+  })();
+  try { track.user('lang', (window.LUTSLang && window.LUTSLang.lang) || document.documentElement.lang || 'en'); } catch (e) { /* none */ }
+  track.screen('home');
   const pick = (arr) => arr[(Math.random() * arr.length) | 0];
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const mulberry = (seed) => () => {
@@ -71,6 +108,9 @@
     item: 'flowerpot', spark: 'gold', view3d: false, signVideos: true, scene3d: false,
   };
   const settings = { ...DEFAULTS };
+  // This phone has played before (the settings are written on every launch): the cracker loader leaves such a player's bar whole.
+  let returning = false;
+  try { returning = ['luts:settings', 'luts:welcomed', 'luts:firstshow', 'luts:gems'].some((k) => localStorage.getItem(k) !== null); } catch (e) { /* storage unavailable */ }
   try {
     const saved = JSON.parse(localStorage.getItem('luts:settings') || '{}');
     for (const k in DEFAULTS) if (k in saved && typeof saved[k] === typeof DEFAULTS[k]) settings[k] = saved[k];
@@ -127,72 +167,74 @@
   const color = () => pick(palette);
 
   // ---------- Worlds of India: background configuration ----------
-  // image: file name under assets/worlds/bg (.webp, .jpg fallback). focus: [x, y] focal position of the landmark (as object-position).
-  // skyline: top of the tallest structure as a fraction of image height. keep: horizontal span of the structure.
-  // overlay: how strongly the sky above the landmark is darkened. sacred: bursts are lifted clear of the structure.
+  // image: the landmark's file name. The sky uses the portrait night scene in assets/worlds/scenes.
+  // The world card uses assets/worlds/thumb.
+  // sacred: bursts are lifted clear of the structure.
   const WORLDS = [
     { id: 'default', name: 'Default Night Sky', place: 'Classic', image: null, thumb: 'default-night-sky' },
     // live: an animated scene drawn by particle-sky.js instead of a photo; always the festival night.
     { id: 'particle-festival', name: 'Particle Festival', place: 'Animated night', image: null, live: true, thumb: 'particle-festival',
       preset: { name: 'Diya glow', colors: ['#ffd36b', '#ff8fb8', '#fff1c9', '#c9a6ff', '#ffb347'] } },
-    { id: 'taj-mahal', name: 'Taj Mahal', place: 'Agra', image: 'taj-mahal', focus: [0.5, 1], skyline: 0.4, keep: [0.08, 0.92], overlay: 0.6, sacred: true,
+    { id: 'taj-mahal', name: 'Taj Mahal', place: 'Agra', image: 'taj-mahal', scene: true, sceneRoof: 0.38, sacred: true,
       preset: { name: 'Pearl & royal blue', colors: ['#fff6ea', '#ffd36b', '#4a6dff', '#9fc0ff', '#fff1c9'] } },
-    { id: 'india-gate', name: 'India Gate', place: 'New Delhi', image: 'india-gate', focus: [0.5, 1], skyline: 0.4, keep: [0.3, 0.7], overlay: 0.55,
+    { id: 'india-gate', name: 'India Gate', place: 'New Delhi', image: 'india-gate', scene: true, sceneRoof: 0.4,
       preset: { name: 'Tiranga', colors: ['#ff9933', '#fff4e0', '#3ddc84', '#ffd36b'] } },
-    { id: 'hawa-mahal', name: 'Hawa Mahal', place: 'Jaipur', image: 'hawa-mahal', focus: [0.45, 1], skyline: 0.46, keep: [0.18, 1], overlay: 0.5,
+    { id: 'hawa-mahal', name: 'Hawa Mahal', place: 'Jaipur', image: 'hawa-mahal', scene: true, sceneRoof: 0.39,
       preset: { name: 'Pink City', colors: ['#ff7eb6', '#ff3fb4', '#ffc46b', '#ffd1e1'] } },
-    { id: 'mysore-palace', name: 'Mysore Palace', place: 'Mysuru', image: 'mysore-palace', focus: [0.5, 1], skyline: 0.54, keep: [0, 1], overlay: 0.5,
+    { id: 'mysore-palace', name: 'Mysore Palace', place: 'Mysuru', image: 'mysore-palace', scene: true, sceneRoof: 0.42,
       preset: { name: 'Dasara royal', colors: ['#ffd36b', '#a56bff', '#ff4a4a', '#ffb347'] } },
-    { id: 'gateway-of-india', name: 'Gateway of India', place: 'Mumbai', image: 'gateway-of-india', focus: [0.5, 1], skyline: 0.37, keep: [0.2, 0.82], overlay: 0.55,
+    { id: 'gateway-of-india', name: 'Gateway of India', place: 'Mumbai', image: 'gateway-of-india', scene: true, sceneRoof: 0.33,
       preset: { name: 'Arabian Sea', colors: ['#4dc3ff', '#e6ecf5', '#ffd36b', '#4a7dff'] } },
-    { id: 'charminar', name: 'Charminar', place: 'Hyderabad', image: 'charminar', focus: [0.5, 1], skyline: 0.31, keep: [0.28, 0.72], overlay: 0.6,
+    { id: 'charminar', name: 'Charminar', place: 'Hyderabad', image: 'charminar', scene: true, sceneRoof: 0.25,
       preset: { name: 'Emerald & magenta', colors: ['#3ddc97', '#ff3fb4', '#ffd36b', '#fff4e0'] } },
-    { id: 'konark-sun-temple', name: 'Konark Sun Temple', place: 'Odisha', image: 'konark-sun-temple', focus: [0.5, 1], skyline: 0.33, keep: [0.18, 0.82], overlay: 0.5, sacred: true,
+    { id: 'konark-sun-temple', name: 'Konark Sun Temple', place: 'Odisha', image: 'konark-sun-temple', scene: true, sceneRoof: 0.32, sacred: true,
       preset: { name: 'Sun chariot', colors: ['#ffbf3c', '#ff8a2b', '#e0975a', '#ffe08a'] } },
-    { id: 'golden-temple', name: 'Golden Temple', place: 'Amritsar', image: 'golden-temple', focus: [0.52, 1], skyline: 0.33, keep: [0.18, 0.85], overlay: 0.6, sacred: true,
+    { id: 'golden-temple', name: 'Golden Temple', place: 'Amritsar', image: 'golden-temple', scene: true, sceneRoof: 0.35, sacred: true,
       preset: { name: 'Golden glow', colors: ['#ffd36b', '#fff4e0', '#4a6dff', '#ffe9a8'] } },
-    { id: 'victoria-memorial', name: 'Victoria Memorial', place: 'Kolkata', image: 'victoria-memorial', focus: [0.5, 1], skyline: 0.31, keep: [0.15, 0.85], overlay: 0.55,
+    { id: 'victoria-memorial', name: 'Victoria Memorial', place: 'Kolkata', image: 'victoria-memorial', scene: true, sceneRoof: 0.37,
       preset: { name: 'Marble night', colors: ['#fff4e0', '#9fc8ff', '#c9a6ff', '#ffd36b'] } },
-    { id: 'red-fort', name: 'Red Fort', place: 'Delhi', image: 'red-fort', focus: [0.5, 1], skyline: 0.38, keep: [0.1, 0.95], overlay: 0.5,
+    { id: 'red-fort', name: 'Red Fort', place: 'Delhi', image: 'red-fort', scene: true, sceneRoof: 0.37,
       preset: { name: 'Independence Day', colors: ['#ff9933', '#fff4e0', '#3ddc84', '#ff6a4d'] } },
-    { id: 'meenakshi-amman-temple', name: 'Meenakshi Amman Temple', place: 'Madurai', image: 'meenakshi-amman-temple', focus: [0.32, 1], skyline: 0.08, keep: [0.18, 0.45], overlay: 0.5, sacred: true,
+    { id: 'meenakshi-amman-temple', name: 'Meenakshi Amman Temple', place: 'Madurai', image: 'meenakshi-amman-temple', scene: true, sceneRoof: 0.3, sacred: true,
       preset: { name: 'Temple jewels', colors: ['#ff4a6a', '#3ddc97', '#4a8dff', '#ffd36b', '#b56bff'] } },
-    { id: 'brihadeeswarar-temple', name: 'Brihadeeswarar Temple', place: 'Thanjavur', image: 'brihadeeswarar-temple', focus: [0.42, 1], skyline: 0.08, keep: [0.18, 0.64], overlay: 0.5, sacred: true,
+    { id: 'brihadeeswarar-temple', name: 'Brihadeeswarar Temple', place: 'Thanjavur', image: 'brihadeeswarar-temple', scene: true, sceneRoof: 0.28, sacred: true,
       preset: { name: 'Chola bronze', colors: ['#e0975a', '#ffbf3c', '#ffd36b', '#fff1d6'] } },
-    { id: 'vivekananda-rock-memorial', name: 'Vivekananda Rock Memorial', place: 'Kanyakumari', image: 'vivekananda-rock-memorial', focus: [0.5, 1], skyline: 0.33, keep: [0.18, 0.78], overlay: 0.55, sacred: true,
+    { id: 'vivekananda-rock-memorial', name: 'Vivekananda Rock Memorial', place: 'Kanyakumari', image: 'vivekananda-rock-memorial', scene: true, sceneRoof: 0.42, sacred: true,
       preset: { name: 'Three seas', colors: ['#3fe0d0', '#ff9933', '#4aa8ff', '#fff4e0'] } },
-    { id: 'velankanni-basilica', name: 'Velankanni Basilica', place: 'Velankanni', image: 'velankanni-basilica', focus: [0.42, 1], skyline: 0.22, keep: [0.25, 0.66], overlay: 0.5, sacred: true,
+    { id: 'velankanni-basilica', name: 'Velankanni Basilica', place: 'Velankanni', image: 'velankanni-basilica', scene: true, sceneRoof: 0.34, sacred: true,
       preset: { name: 'Basilica lights', colors: ['#fff4e0', '#ffd36b', '#ff4a6a', '#4a8dff', '#ff9fd0'] } },
-    { id: 'cross-by-the-sea', name: 'Cross by the Sea', place: 'Tamil Nadu coast', image: 'cross-by-the-sea', focus: [0.62, 1], skyline: 0.16, keep: [0.38, 0.86], overlay: 0.5, sacred: true,
+    { id: 'cross-by-the-sea', name: 'Cross by the Sea', place: 'Tamil Nadu coast', image: 'cross-by-the-sea', scene: true, sceneRoof: 0.45, sacred: true,
       preset: { name: 'Sea of light', colors: ['#ffd36b', '#fff4e0', '#ff5fa2', '#4aa8ff', '#ffb347'] } },
     // Not a landmark: a country house and its garden, built only in code; in 3D its evening turns to night.
-    { id: 'golden-manor', name: 'Golden Manor', place: 'Garden estate', image: 'golden-manor', focus: [0.5, 1], skyline: 0.41, keep: [0.13, 0.87], overlay: 0.5,
+    { id: 'golden-manor', name: 'Golden Manor', place: 'Garden estate', image: 'golden-manor', scene: true, sceneRoof: 0.3,
       preset: { name: 'Golden hour', colors: ['#ffd36b', '#ffb070', '#fff1c9', '#ff8fb8', '#c9a6ff'] } },
   ];
+  const WORLD_ROOF = 0.36, WORLD_SPAN = [0.02, 0.98]; // where every landmark picture has its roofline (of its height) and its width
   const WORLD_BY_ID = Object.fromEntries(WORLDS.map((w) => [w.id, w]));
   const isWorld = (id) => typeof id === 'string' && Object.prototype.hasOwnProperty.call(WORLD_BY_ID, id);
   // img is null for the default painted sky. rect is the landmark's on-screen placement, set by drawWorldSky().
-  const world = { id: 'default', cfg: WORLD_BY_ID.default, img: null, rect: null, preset: false, pending: null, blur: null, masked: null, maskKey: '' };
+  const world = { id: 'default', cfg: WORLD_BY_ID.default, img: null, rect: null, preset: false, pending: null };
 
   // ---------- Premium: what's free ----------
-  // Everything is free: every landmark in 2D and 3D, AR, Burst all, Tap Sky, Celebration Colours and unlimited launches.
-  // Free players see ads (a banner, and a short video at natural breaks); Premium, a subscription in the apps, removes them.
+  // The app is always ad-free. Gems buy special launches; Premium unlocks every cracker, level, and exclusive experience.
   // status: web (no store here) | loading | ready | purchasing | restoring | error | unavailable
   const premium = { active: false, status: window.LUTSNative ? 'loading' : 'web', plans: [], pick: 'annual', intent: null, manageUrl: null, message: '' };
   let crackerEntitled = false; // A known native store response grants cracker replays.
   // In the app, start from the last state the store confirmed, so a subscriber's landmark shows at once, even offline.
   if (window.LUTSNative) { try { premium.active = localStorage.getItem('luts:premium') === '1'; } catch (e) { /* storage unavailable */ } }
-  // Google Play reviewers can't buy subscriptions, so a code given to them in Play Console unlocks Premium on that
-  // device (tap the Settings title 7 times). Only the code's SHA-256 is here; the code itself is in mobile/reviewer-code.txt.
-  const REVIEWER_HASH = 'aa1dd98c26cbea88ede1bfc82fbd1a072ca0af1998190ea7e6f21ca7a9f641ed';
+  // The reviewer code is gone from the app; a device that entered it earlier (and the browser tests) keep this flag.
   let reviewerAccess = false;
   try { reviewerAccess = localStorage.getItem('luts:reviewer') === '1'; } catch (e) { /* storage unavailable */ }
   if (reviewerAccess) premium.active = true;
+  // Diwali Pass (₹49, Play product diwali_pass, bought like a gem pack): everything Premium gives until the end of 15 Nov.
+  const PASS = { id: 'diwali_pass', until: new Date(2026, 10, 16).getTime(), sellUntil: new Date(2026, 10, 15).getTime() };
+  const passActive = () => { try { return localStorage.getItem('luts:pass') === '1' && Date.now() < PASS.until; } catch (e) { return false; } };
+  if (passActive()) premium.active = true;
   const worldLocked = () => false;
   // Streaks forgive one missed day a week; Premium forgives one every 3 days (up to two a week).
   const graceDays = () => (premium.active ? 3 : 7);
   const CROWN_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18h18l-1.6-10-4.6 4.2L12 5l-2.8 7.2L4.6 8z"/></svg>';
-  let runningGroundEffect = false, frameRaf = 0, rewardBusy = false, lastLaunchState = 'READY';
+  let runningGroundEffect = false, frameRaf = 0, rewardBusy = false, lastLaunchState = 'READY', scaleStrokes = () => {};
   const camera = { x: 0, y: 0, zoom: 1, travel: 0 };
   const launch = new window.LUTSLaunchController({
     storage: { getItem: (k) => localStorage.getItem(k), setItem: (k, v) => localStorage.setItem(k, v) },
@@ -220,8 +262,6 @@
   let curAnchor = null;
   const sctx = skyC.getContext('2d');
   const ctx = fxC.getContext('2d');
-  // #glow: the sky's glowing heads and lights, cleared each frame they were drawn (the trails on #fx persist and fade).
-  const glowC = $('#glow'), glx = glowC.getContext('2d');
   const cctx = cityC.getContext('2d');
   const skyGlow = $('#skyGlow');
   const flightC = document.createElement('canvas'), flightCtx = flightC.getContext('2d');
@@ -231,7 +271,7 @@
   // instead of sliding down with the sky (which cut its halo against the flight starfield).
   const moonC = document.createElement('canvas'), moonCtx = moonC.getContext('2d');
   moonC.id = 'moon'; moonC.setAttribute('aria-hidden', 'true'); flightC.after(moonC);
-  let cloudSprite = null, flightStars = null;
+  let cloudSprite = null, flightStars = null, stripRect = null;
   let W = 0, H = 0, DPR = 1, U = 1;
   // Particle Festival world: animated offscreen and copied onto the sky layer, so fireworks, the 3D view, photos and
   // recorded videos treat it like any other sky. It is always night (lanterns, sparklers, diyas); ?tod=<hour> previews
@@ -243,8 +283,10 @@
     // The ghat rises to where the Sky tube stands (just above the world chip), so crackers sit on the ground, not the sky.
     horizon: (portrait) => {
       if (mode === 'play' && playMode === 'ground' && !arOn) return clamp((floorTop() + 6) / H, 0.35, 0.75); // the street's far edge
-      const chip = document.getElementById('worldStrip'), r = chip && chip.getBoundingClientRect();
-      if (!r || !r.height || !window.innerHeight) return portrait ? 0.7 : 0.68;
+      // The chip's place, measured once per screen size (resize() clears it): read every frame it forced a layout.
+      const chip = document.getElementById('worldStrip');
+      const r = stripRect || (stripRect = (chip && chip.getBoundingClientRect()) || { height: 0 });
+      if (!r.height || !window.innerHeight) return portrait ? 0.7 : 0.68;
       return Math.min(0.75, Math.max(0.45, (r.top - 6) / window.innerHeight - 0.035));
     },
     onDraw: (c) => { if (liveShown()) sctx.drawImage(c, 0, 0, W, H); },
@@ -253,6 +295,10 @@
     const tod = new URLSearchParams(location.search).get('tod');
     liveSky.setHour(tod != null && tod !== '' && !Number.isNaN(+tod) ? +tod : 22);
   }
+  // Live Sky's Drone Show (drone-show.js) while it runs: its lights are drawn on the items layer each frame, over the
+  // fireworks and the landmark, so photos and videos have them.
+  let drones = null;
+  let lasers = null; // Laser Light Gala's rig (laser-show.js), only while that show runs
   // The menu keeps the classic night sky; the animated world only shows once the show starts.
   const liveShown = () => world.cfg.live && !!liveSky && !arOn && !document.body.classList.contains('home') && !w3dShown();
   const syncLiveSky = () => { if (liveSky) (liveShown() && !document.hidden ? liveSky.start() : liveSky.stop()); syncWorld3d(); };
@@ -297,7 +343,9 @@
     else if (w3d) sizeWorld3d();
   }
   function resize() {
-    W = window.innerWidth; H = window.innerHeight;
+    const prevW = W, prevH = H;
+    const turned = prevW > 0 && prevH > 0 && (prevW > prevH) !== (window.innerWidth > window.innerHeight);
+    W = window.innerWidth; H = window.innerHeight; stripRect = null;
     document.documentElement.style.setProperty('--app-h', `${H}px`); // vh units resolve to 0 in the app's WebView
     // Android WebView devices can report a dense screen while the emulator/GPU still has to
     // rasterize every canvas pixel. Keep effects crisp, but avoid a multi-canvas 1080x2400 frame.
@@ -305,15 +353,29 @@
     // The effects' unit: the screen's width, but on a wide screen (a TV) its height, so fountains and bursts keep the
     // proportions they have on a phone and stay on screen.
     U = clamp(Math.min(W, H * 0.8) / 800, 0.5, 1.6);
-    for (const c of [skyC, fxC, glowC, cityC, floorC, itemsC, paintC, gfxC, atmoC, flightC, moonC]) { c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
-    for (const g of [sctx, ctx, glx, cctx, fctx, ictx, pctx, gctx, actx, flightCtx, moonCtx]) g.setTransform(DPR, 0, 0, DPR, 0, 0);
+    for (const c of [skyC, fxC, cityC, floorC, itemsC, paintC, gfxC, atmoC, flightC, moonC]) { c.width = Math.round(W * DPR); c.height = Math.round(H * DPR); }
+    for (const g of [sctx, ctx, cctx, fctx, ictx, pctx, gctx, actx, flightCtx, moonCtx]) g.setTransform(DPR, 0, 0, DPR, 0, 0);
     ctx.lineCap = gctx.lineCap = pctx.lineCap = 'round';
     pctx.lineJoin = 'round';
     if (w3d) sizeWorld3d();
+    if (turned) scaleStrokes(W / prevW, H / prevH);
     drawFloor();
     repaintStrokes();
     drawSky();
     drawCity();
+    refitWaitingItems();
+    refreshWorldViewport();
+    if (turned) settleTurnedScreen();
+  }
+  // Turning the phone rebuilds the canvases. A show already in the air was drawn for the old
+  // shape, so it would sit off the new screen while the controls stayed locked. End that show
+  // and put the waiting cracker back. A sparkler drawing is only rescaled, so the line stays.
+  function settleTurnedScreen() {
+    if (mode !== 'play' || launch.state === 'READY' || rush.on || document.body.classList.contains('live-sky')) return;
+    lastLaunchState = 'IGNITING'; // turning the phone is not the end of a show, so it asks for no ad or rating
+    abortLaunch();
+    if (playMode === 'sky') placeSkyLauncher();
+    else if (playMode === 'ground') placeSelectedCracker();
   }
 
   // Whether the moon and city layers hold anything: a landmark picture or a live sky brings its own, and then the empty
@@ -358,7 +420,7 @@
     }
 
     // Moon
-    const mx = W * 0.84, my = H * 0.13, mr = Math.max(12, 20 * U);
+    const mx = W * 0.84, my = H * (W < H ? 0.24 : 0.13), mr = Math.max(12, 20 * U); // (a phone held upright: below the top bar's two rows, off their labels)
     const halo = g.createRadialGradient(mx, my, mr * 0.5, mx, my, mr * 6);
     halo.addColorStop(0, 'rgba(255,240,210,0.16)');
     halo.addColorStop(1, 'rgba(255,240,210,0)');
@@ -459,12 +521,12 @@
   // ---------- Glow sprites ----------
   // One atlas of light sprites, three 32px cells per colour: head (white-hot core, saturated band, soft halo), glint (a
   // 4-ray pop) and soft (a colour gaussian). Drawn with drawImage from a single ImageBitmap, so a frame of glowing
-  // heads costs one texture and no gradients. 1024x512 stays GPU-backed (Chrome keeps canvases under 128x129 on the CPU).
+  // heads costs one texture and no gradients. 24 rows: the warm set (~162 colours) leaves room for a rainbow Sky Gears drawing (12 hues x 4 tints) without a full clear.
   // Full: everything is cleared and gen bumps, and holders re-resolve their slots lazily (ramp(), p.rg !== SPR.gen).
   const SPR = (() => {
-    const CELL = 32, COLS = 32, ROWS = 16, atlas = document.createElement('canvas');
+    const CELL = 32, COLS = 32, ROWS = 24, atlas = document.createElement('canvas');
     atlas.width = CELL * COLS; atlas.height = CELL * ROWS;
-    const g = atlas.getContext('2d'), ids = new Map();
+    const g = atlas.getContext('2d', { willReadFrequently: true }), ids = new Map();
     let next = 0, ver = 0, bmp = null, bmpVer = -1, pending = 0;
     const S = { gen: 0, hexOf: [], atlas, HEAD: 0, GLINT: 1, SOFT: 2, get size() { return ids.size; }, get bitmap() { return bmpVer === ver ? bmp : null; } };
     const at = (c) => [(c % COLS) * CELL + CELL / 2, ((c / COLS) | 0) * CELL + CELL / 2];
@@ -508,8 +570,11 @@
       const c = s + kind;
       gc.drawImage(bmpVer === ver ? bmp : atlas, (c % COLS) * CELL, ((c / COLS) | 0) * CELL, CELL, CELL, x - r, y - r, r * 2, r * 2);
     };
+    // Android WebView: no ImageBitmap. The atlas stays in CPU memory (willReadFrequently): a full-screen video can leave the
+    // game's canvases off the GPU, and a GPU atlas drawn onto one is read back every draw (a Vivo I2219 fell to one frame
+    // in 2 s after a video, stars on screen, and stayed there). From the CPU it uploads once to a GPU canvas and copies to any other.
     S.refresh = () => {
-      if (bmpVer === ver || pending === ver || !window.createImageBitmap) return;
+      if (ANDROID_WEBVIEW || bmpVer === ver || pending === ver || !window.createImageBitmap) return;
       const v = pending = ver;
       createImageBitmap(atlas).then((b) => {
         if (v === ver) { if (bmp && bmp.close) bmp.close(); bmp = b; bmpVer = v; } else if (b.close) b.close();
@@ -556,8 +621,9 @@
   function star(x, y, vx, vy, col, life, o) {
     o = o || {};
     // Scripted picture stars (the tiger, the flag) may go 200 past the budget: a picture needs its points, and they
-    // are cheap (no glitter, no tails, no physics while scripted).
-    if (stars.length + sparks.length + smokes.length + confettis.length >= Q().maxStars + (o.follow ? 200 : 0)) return null;
+    // are cheap (no glitter, no tails, no physics while scripted). A word's stars too (o.word), up to 700: they come row by
+    // row from the top, so a full sky cut a name to the tops of its letters (seen in a Live Sky finale).
+    if (stars.length + sparks.length + smokes.length + confettis.length >= Q().maxStars + (o.word ? 700 : o.follow ? 200 : 0)) return null;
     const p = starPool.pop() || {};
     p.x = p.px = x; p.y = p.py = y;
     p.vx = vx; p.vy = vy;
@@ -586,6 +652,7 @@
     p.twinkle = !!o.twinkle;
     p.fade = o.fade || 0.35;
     p.onDeath = o.onDeath || null;
+    p.net = o.net || null; // a Sky Gears drawing's star: its burst joins it to its neighbours with light (drawNets)
     p.L = o.L ?? curLayer;
     p.an = curAnchor;
     p.dim = o.dim ?? curDim;
@@ -788,6 +855,41 @@
       const tng = (k) => [[-0.03, 0.27], [0, 0.27 + 0.16 * k], [0.03, 0.27]];
       add('#ff5f7a', tng(1), 'fang', (k, i) => tng(k)[i]);
     },
+    // Japan's red-crowned crane, the bird of the crane dance. Wings fold at its sides, then open on the beat
+    // the way a drone god lifts an arm. The green pheasant is the official bird; it does not read in lights.
+    crane(add) {
+      const white = '#f4f6ff', ink = '#c5cedc', red = '#e10600';
+      add(white, arc(0, 0.28, 0.22, 0.32, 0, TAU, 16));
+      add(white, [[0, 0.02], [-0.02, -0.28], [0.04, -0.62]]);
+      add(ink, [[0.03, -0.08], [0.01, -0.42]]); // the black neck
+      add(white, arc(0.1, -0.72, 0.12, 0.09, 0, TAU, 10));
+      add(red, arc(0.06, -0.86, 0.08, 0.05, 0, TAU, 8)); // the red crown
+      add('#1c2430', [[0.16, -0.74], [0.2, -0.76], [0.15, -0.71]], 'eye');
+      add('#ffffff', [[0.17, -0.75], [0.165, -0.745]], 'eye');
+      const beak = (k) => [[0.2, -0.7], [0.48 + 0.04 * k, -0.68], [0.2, -0.64 - 0.04 * k]];
+      add('#ff8a2b', beak(0), 'mouth', (k, i) => beak(k)[i]);
+      add(ink, [[-0.06, 0.56], [-0.1, 1.02]]); add(ink, [[0.07, 0.56], [0.12, 1.02]]);
+      // A fan of feathers, rooted on the body. Stored at full spread so the stars stay on the open wing
+      // instead of stretching a short fold into a dotted line. They hang down, then lift on the beat.
+      const feather = (sg, k, a) => {
+        const reach = a.near + (a.far - a.near) * k, lift = a.down + (a.up - a.down) * k, n = 7, pts = [];
+        for (let i = 0; i <= n; i++) {
+          const t = i / n, bow = Math.sin(t * Math.PI) * (a.arch0 + (a.arch1 - a.arch0) * k);
+          pts.push([sg * (0.22 + (reach - 0.22) * t), a.shoulder + (lift - a.shoulder) * t + bow]);
+        }
+        return pts;
+      };
+      const fans = [
+        { near: 0.32, far: 1.12, down: 0.34, up: -0.78, shoulder: 0.02, arch0: 0.05, arch1: -0.06 },
+        { near: 0.3, far: 0.96, down: 0.46, up: -0.4, shoulder: 0.14, arch0: 0.04, arch1: -0.03 },
+        { near: 0.28, far: 0.78, down: 0.56, up: -0.02, shoulder: 0.26, arch0: 0.03, arch1: 0.02 },
+        { near: 0.26, far: 0.58, down: 0.64, up: 0.28, shoulder: 0.38, arch0: 0.02, arch1: 0.04 },
+      ];
+      for (const sg of [-1, 1]) for (const a of fans) {
+        const wing = (k) => feather(sg, k, a);
+        add(white, wing(1), 'mouth', (k, i) => wing(k)[i]);
+      }
+    },
     // The giant panda: a round white face, grey ear and eye patches, a small nose and a smile that grows.
     panda(add) {
       add('#f4f6ff', arc(0, 0.04, 0.86, 0.78, 0, TAU, 36));
@@ -804,7 +906,7 @@
     },
   };
   // How each animal's big moment plays: a roar (tiger, jaguar, lion), a screech (eagle) or a burst of hearts (panda).
-  const ANIMAL_FX = { tiger: 'roar', jaguar: 'roar', lion: 'roar', eagle: 'screech', panda: 'hearts' };
+  const ANIMAL_FX = { tiger: 'roar', jaguar: 'roar', lion: 'roar', eagle: 'screech', panda: 'hearts', crane: 'wings' };
   // Points spread evenly along an animal's lines by length (about 220 even on a low phone); each is
   // [x, y, colour, role, at(open) -> [x, y] or null], scaled by S.
   function animalPts(kind, sz) {
@@ -830,14 +932,23 @@
   // feathers) or a burst of hearts; then it calms, breathes and the stars fall away. Timed on each star's own age.
   function animalCinema(kind, x, y0, sz, from) {
     const T = animalPts(kind, sz), S = tigerS(sz), fx = ANIMAL_FX[kind], show = { roared: false };
-    const y = Math.max(y0, safeTop() + S * 1.35 + 64 * U); // the ears (or the mane) stay clear of the top buttons
+    const badge = document.querySelector('.duel-champ');
+    const belowBadge = badge && !badge.hidden ? badge.getBoundingClientRect().bottom + 8 : 0;
+    // The crown (or the ears) stays under the champion badge and clear of the top buttons.
+    const y = Math.max(y0, safeTop() + S * 1.35 + 64 * U, belowBadge + S * 1.15);
     const back = (u) => 1 + 2.70158 * (u - 1) ** 3 + 1.70158 * (u - 1) ** 2, ease = (u) => 1 - (1 - u) ** 3, sm = (u) => u * u * (3 - 2 * u);
-    const EYES = 0.9, FORM = 0.8, LUNGE = 0.8, ROAR = 1.7, CALM = 0.9;
+    const { EYES, FORM, LUNGE, ROAR, CALM } = ANIMAL_BEAT;
     const tF = EYES, tL = tF + FORM, tR = tL + LUNGE, tC = tR + ROAR, tEnd = tC + CALM;
     const ring = (mx, my, v, col) => { for (let i = 0; i < 30; i++) { const a = (i / 30) * TAU; star(mx, my, Math.cos(a) * v * U, Math.sin(a) * v * 0.8 * U, col, 0.45, { drag: 3.2, grav: 0, size: 1.6, flicker: false }); } };
     const momentFx = () => {
       show.roared = true;
       const my = y + S * (kind === 'eagle' ? 0.3 : kind === 'panda' ? 0.36 : 0.5);
+      if (fx === 'wings') { // the crane's dance: the wings are already opening; feathers leave them
+        flash(x, y, '#ffffff', 1.3); addLight('#fff4e6', 1.6);
+        for (const sg of [-1, 1]) for (let i = 0; i < 6; i++) star(x + sg * rand(0.4, 1.15) * S, y + rand(-0.7, 0.2) * S, sg * rand(40, 120) * U, rand(-20, 30) * U, i % 2 ? '#f4f6ff' : '#a8b0c0', rand(1.4, 2.2), { drag: 1.3, grav: 0.2, size: 2, wig: 500 });
+        Sound.pop(pan(x)); Sound.crackle(pan(x)); buzz(18);
+        return;
+      }
       if (fx === 'hearts') { // the panda's smile: little hearts float up and sparkle
         flash(x, my, '#ff8ab0', 1.2); addLight('#ff8ab0', 1.8);
         for (let h = 0; h < 6; h++) {
@@ -917,10 +1028,23 @@
         return l;
       },
     },
+    japan: { ar: 2 / 3, at: (u, v) => ((u - 0.5) / (2 / 3)) ** 2 + (v - 0.5) ** 2 < 0.3 ** 2 ? '#e10600' : '#fff4e6' },
     brazil: {
       ar: 0.7,
-      at: (u, v) => (((u - 0.5) / 0.7) ** 2 + (v - 0.5) ** 2 < 0.25 ** 2 ? '#2f55ff' : Math.abs(u - 0.5) / 0.415 + Math.abs(v - 0.5) / 0.41 <= 1 ? '#ffd400' : '#0fb23a'),
-      extra: () => arc(0.5, 0.62, 0.22, 0.2, Math.PI * 1.15, Math.PI * 1.85, 8).map(([u, v]) => [u, v, '#ffffff']),
+      at: (u, v) => {
+        const x = (u - 0.5) / 0.7, y = v - 0.5;
+        if (x * x + y * y < 0.25 ** 2) {
+          // The white banner across the globe. Ends sit lower than the middle.
+          if (Math.abs((v - 0.56) - 0.18 * x * x) < 0.045) return '#fff4e6';
+          return '#2f55ff';
+        }
+        return Math.abs(u - 0.5) / 0.415 + Math.abs(v - 0.5) / 0.41 <= 1 ? '#ffd400' : '#0fb23a';
+      },
+      // The southern cross, above the banner, each star a small cross so it reads at this size.
+      extra: () => [[0.44, 0.40], [0.56, 0.39], [0.50, 0.33], [0.47, 0.45], [0.54, 0.44]].flatMap(([u, v]) => {
+        const s = 0.014;
+        return [[u, v, '#fff4e6'], [u + s, v, '#fff4e6'], [u - s, v, '#fff4e6'], [u, v + s, '#fff4e6'], [u, v - s, '#fff4e6']];
+      }),
     },
   };
   function flagPts(id, sz) {
@@ -933,6 +1057,12 @@
     for (const [u, v, c] of F.extra ? F.extra() : []) { const px = -w + u * w * 2; pts.push([px, -h + v * h * 2 + Math.sin(px / w * Math.PI * 1.6) * h * 0.06, c]); }
     return pts;
   }
+  // The animal's beats, in seconds. The country picture is the flag's hold plus every beat: the camera stays up
+  // until that sum, then glides back to the ground. (Eyes 0.9, form 0.8, lunge 0.8, the moment 1.7, calm 0.9.)
+  const ANIMAL_BEAT = { EYES: 0.9, FORM: 0.8, LUNGE: 0.8, ROAR: 1.7, CALM: 0.9 };
+  const ANIMAL_SHOW = Object.values(ANIMAL_BEAT).reduce((a, t) => a + t, 0); // 5.1s, through the calm
+  const FLAG_HOLD = 1.9;
+  const COUNTRY_SHOW = FLAG_HOLD + ANIMAL_SHOW; // 7.0s from the burst: flag, then the whole bird
   // A country in one shot: its flag forms and holds, then every star becomes its national animal (animalCinema).
   function countryShow(x, y, sz, F, kind) {
     // The flag's stars are scripted (fly out, hold with a slow wave), so even a low phone draws the whole flag.
@@ -941,7 +1071,10 @@
       return [x + p[0] * e, y + p[1] * e + wave * u];
     } }));
     addLight(F[0][2], 0.8); addLight(F[F.length - 1][2], 0.6);
-    after(1.9, () => {
+    // Keep the camera in the sky until the bird has finished. A normal shell comes down after 1.6s of sparks,
+    // which cuts the crane off just as its wings open.
+    if (launch.sequence) launch.sequence.pictureUntil = gameTime + COUNTRY_SHOW;
+    after(FLAG_HOLD, () => {
       const from = made.filter((p) => p && stars.includes(p)).map((p) => [p.x, p.y]);
       // The flag's stars become the animal's: freed now, so a low phone's star budget has room for it.
       for (const p of made) { const i = p ? stars.indexOf(p) : -1; if (i >= 0) { stars[i] = stars[stars.length - 1]; stars.pop(); release(starPool, p); } }
@@ -1299,6 +1432,7 @@
     uk: { label: 'UK', icon: '🦁', fn(x, y, sz) { countryShow(x, y, sz, flagPts('uk', sz), 'lion'); } }, // the lion
     china: { label: 'China', icon: '🐼', fn(x, y, sz) { countryShow(x, y, sz, flagPts('china', sz), 'panda'); } }, // the giant panda
     brazil: { label: 'Brazil', icon: '🐆', fn(x, y, sz) { countryShow(x, y, sz, flagPts('brazil', sz), 'jaguar'); } }, // the jaguar
+    japan: { label: 'Japan', icon: '🇯🇵', fn(x, y, sz) { countryShow(x, y, sz, flagPts('japan', sz), 'crane'); } }, // the rising sun, then the crane's dance
     grandshow: {
       label: 'Grand show', icon: '🎇',
       fn(x, y, sz, c1, c2) {
@@ -1436,7 +1570,7 @@
     bomb: 5, laddi: 5, mine: 5, shell: 5, basket: 5, multishot: 5,
     cake: 10, rocketcombo: 10, finale: 25, sutli: 5, twosound: 3,
     // The Sivakasi crackers: gems since the Hazaar ladi became the Premium one (Build 31).
-    fancake: 10, minerow: 10, chrysline: 10, cometchain: 5, cometburst: 5, silvertower: 5, starwheel: 5, kingsalute: 5, // the real-show pieces
+    fancake: 10, minerow: 10, chrysline: 10, cometchain: 5, cometburst: 5, silvertower: 5, starwheel: 5, kingsalute: 5, luckystar: 5, // the real-show pieces
     singleshot: 1, chakri: 1, firecracker: 1, popper: 1, smoke: 1, snake: 1, // 1 gem: note shower, rang pencil, flower pot, anar, bijili, kuruvi and the sparkler stay free
     anilvedi: 2, // the Sivakasi Premium five (PREMIUM_ITEMS) have no gem price: they are Premium's, with one free try each
   };
@@ -1446,16 +1580,36 @@
   // The real-show kings (research/fireworks-videos) join them: King willow, Multi-break, Shell of shells and Ghost.
   const PREMIUM_SHELLS = new Set(['grandshow', 'peacock', 'butterfly', 'wand', 'kingwillow', 'multibreak', 'shellofshells', 'ghost']);
   const SHELL_GEM_COST = { heart: 3, kamuro: 3, star: 2, smile: 2, dahlia: 2, brocade: 3, senrin: 3, spider: 2, rondelle: 3,
-    pistil: 2, doublepetal: 2, colorchange: 3, fish: 2, timerain: 3, barrel: 2, sunflower: 3, bouquet: 3, twotone: 2, doublering: 2, whistle: 2, flagindia: 2, tiger: 2, india: 3, bangladesh: 3, usa: 3, uk: 3, china: 3, brazil: 3,
-    willow: 1, palm: 1, crossette: 1, crackle: 1, horsetail: 1, kaleido: 1 }; // 1 gem: Random, Peony, Chrysanthemum, Ring and Strobe stay free
+    pistil: 2, doublepetal: 2, colorchange: 3, fish: 2, timerain: 3, barrel: 2, sunflower: 3, bouquet: 3, twotone: 2, doublering: 2, whistle: 2, flagindia: 2, tiger: 2, india: 3, bangladesh: 3, usa: 3, uk: 3, china: 3, brazil: 3, japan: 3,
+    willow: 1, palm: 1, crossette: 1, crackle: 1, horsetail: 1, kaleido: 1,
+    ...Object.fromEntries(['lsfan', 'lsdomes', 'lscomb', 'lstiers', 'lsfence', 'lstents', 'lsarch', 'lsmountain', 'lsniagara', 'lscloud', 'lsringrow', 'lspalms', 'lsecho', 'lshang', 'lsbelt', 'lsmist', 'lsvcross', 'lswash', 'lsbloom', 'lscurtain', 'lsaurora', 'lspetals', 'lstide'].map((k) => [k, 3])) }; // 1 gem: Random, Peony, Chrysanthemum, Ring and Strobe stay free
   // Random and Peony, then the Premium shells, then every gem shell (the real-show ones among them), then the free classics.
   const DOCK_ORDER = ['random', 'peony', 'grandshow', 'peacock', 'butterfly', 'wand', 'kingwillow', 'multibreak', 'shellofshells', 'ghost', 'heart', 'kamuro', 'star', 'smile',
-    'dahlia', 'brocade', 'senrin', 'spider', 'rondelle', 'pistil', 'doublepetal', 'colorchange', 'fish', 'timerain', 'barrel', 'sunflower', 'bouquet', 'twotone', 'doublering', 'whistle', 'flagindia', 'tiger', 'india', 'bangladesh', 'usa', 'uk', 'china', 'brazil',
+    'dahlia', 'brocade', 'senrin', 'spider', 'rondelle', 'pistil', 'doublepetal', 'colorchange', 'fish', 'timerain', 'barrel', 'sunflower', 'bouquet', 'twotone', 'doublering', 'whistle', 'flagindia', 'tiger', 'india', 'bangladesh', 'usa', 'uk', 'china', 'brazil', 'japan',
     'willow', 'palm', 'crossette', 'crackle', 'horsetail', 'kaleido', 'chrysanthemum', 'ring', 'strobe'];
+  // Live Sky's set pieces as sky crackers of their own: the shell breaks where it was sent, then the whole piece plays
+  // across the sky in its colours (Live Sky's director, one piece). Last in the dock, 3 gems a launch, free with Premium.
+  const LIVE_CRACKERS = [
+    ['lsfan', 'fan', 'Star mine', '🎇'], ['lsdomes', 'domes', 'Half domes', '⛲'], ['lscomb', 'galaxy', 'Rainbow comb', '🌈'],
+    ['lstiers', 'tiers', 'Three tiers', '🎆'], ['lsfence', 'fence', 'Light fence', '🎋'], ['lstents', 'tents', 'Fountain tents', '🔺'],
+    ['lsarch', 'arch', 'Rainbow arch', '🌉'], ['lsmountain', 'mountain', 'Flower mountain', '⛰️'], ['lsniagara', 'waterfall', 'Niagara', '🌊'],
+    ['lscloud', 'cloud', 'White cloud', '☁️'], ['lsringrow', 'ringrow', 'Ring row', '⭕'], ['lspalms', 'palms', 'Palm forest', '🌴'],
+    ['lsecho', 'spheres', 'Echo spheres', '🔁'], ['lshang', 'hang', 'Hanging lights', '🏮'], ['lsbelt', 'belt', 'Colour belt', '🎀'],
+    ['lsmist', 'mist', 'Colour mist', '🌫️'], ['lsvcross', 'vcross', 'V crossing', '✖️'],
+    ['lswash', 'wash', 'Colour wash', '🎨', true], ['lsbloom', 'bloom', 'Bloom', '🌸', true], ['lscurtain', 'curtain', 'Colour curtain', '🎐', true],
+    ['lsaurora', 'aurora', 'Aurora', '🌌', true], ['lspetals', 'petals', 'Petal storm', '🌺', true], ['lstide', 'tide', 'Colour tide', '🌗', true],
+  ];
+  for (const [key, piece, label, icon, wash] of LIVE_CRACKERS) {
+    TYPES[key] = { label, icon, livePiece: piece, fn(x, y, sz, c1, c2) {
+      TYPES.peony.fn(x, y, sz * 0.45, c1, c2); // the shell's own small break, then the piece
+      liveDirector(0, { one: piece, colors: [c1, c2], wash: wash ? [c1, c2, '#ffffff'] : null, soft: wash ? 0.4 : undefined });
+    } };
+    DOCK_ORDER.push(key);
+  }
   const WEIGHTS = { peony: 3, chrysanthemum: 3, willow: 2, palm: 2, ring: 2, crossette: 2, crackle: 2, strobe: 1.4, horsetail: 1.4, kamuro: 1.6, kaleido: 2, heart: 0.6, star: 0.6, butterfly: 0.5, peacock: 0.8, wand: 0.5, smile: 0.3,
     dahlia: 1, pistil: 1.2, doublepetal: 1.2, brocade: 1, kingwillow: 0.5, colorchange: 1, ghost: 0.5, fish: 0.8, timerain: 0.8, senrin: 0.9,
     shellofshells: 0.5, multibreak: 0.4, spider: 0.8, rondelle: 0.6, barrel: 0.6, sunflower: 0.8, bouquet: 0.8, twotone: 1, doublering: 0.9, whistle: 0.7 };
-  // Dock artwork (assets/crackers/<name>.webp, .jpg fallback). Crackers without artwork keep their drawn icon.
+  // Dock artwork (assets/crackers/<name>.webp). Crackers without artwork keep their drawn icon.
   const CRACKER_ART = {
     flowerpot: 'flower-pot', anar: 'anar', fountain: 'fountain', chakri: 'ground-spinner', heli: 'chakra', rocket: 'rocket', rocketcombo: 'rocket-combo',
     mine: 'sky-shot', multishot: 'multi-color-shot', roman: 'roman-candle', shell: 'shell', cake: 'wedding-cake', finale: 'grand-finale', basket: 'flower-basket',
@@ -1464,6 +1618,11 @@
     random: 'random', peony: 'peony', chrysanthemum: 'chrysanthemum', willow: 'willow', palm: 'palm', ring: 'ring', crossette: 'crossette',
     crackle: 'crackle', strobe: 'strobe-shell', horsetail: 'horsetail', kamuro: 'kamuro', kaleido: 'kaleido', smile: 'smile',
   };
+  // Live Sky's set-piece crackers: their pictures (Google Flow), assets/crackers/live-*.webp
+  Object.assign(CRACKER_ART, { lsfan: 'live-fan', lsdomes: 'live-domes', lscomb: 'live-comb', lstiers: 'live-tiers', lsfence: 'live-fence',
+    lstents: 'live-tents', lsarch: 'live-arch', lsmountain: 'live-mountain', lsniagara: 'live-niagara', lscloud: 'live-cloud', lsringrow: 'live-ringrow',
+    lspalms: 'live-palms', lsecho: 'live-echo', lshang: 'live-hang', lsbelt: 'live-belt', lsmist: 'live-mist', lsvcross: 'live-vcross',
+    lswash: 'live-wash', lsbloom: 'live-bloom', lscurtain: 'live-curtain', lsaurora: 'live-aurora', lspetals: 'live-petals', lstide: 'live-tide' });
   function randomType(romantic) {
     let total = 0;
     const w = { ...WEIGHTS };
@@ -1516,6 +1675,7 @@
   }
 
   function textBurst(x, y, s) {
+    if (s.sparkler) { sparklerWrite(x, y, s); return; }
     const target = Math.min(1500, 950 * Q().count);
     const { pts, step, width } = textPoints(s.text, W * 0.9, s.textH, target);
     const k = 3.2, hold = s.hold || 2.8;
@@ -1523,9 +1683,427 @@
     const w = clamp(step * 0.6, 1.3, 3.4);
     for (const p of pts) {
       const idx = clamp(Math.floor(((p[0] / width) + 0.5) * cols.length), 0, cols.length - 1);
-      star(x, y, p[0] * k, p[1] * k, cols[idx], hold + rand(1.1, 1.7), { drag: k, grav: 0.9, hold, w, twinkle: true, glitter: 0.015, gcol: cols[idx] });
+      star(x, y, p[0] * k, p[1] * k, cols[idx], hold + rand(1.1, 1.7), { drag: k, grav: 0.9, hold, w, twinkle: true, glitter: 0.015, gcol: cols[idx], word: true });
     }
     sphere(cnt(40), (dx, dy) => star(x, y, dx * 260 * U, dy * 260 * U, '#ffe2a0', rand(1, 1.5), { drag: 1.4, size: 1.6, glitter: 0.4 }));
+  }
+  // A wish ticked "Write it in sparkler light": one sparkler signs the name, then the place, then the wish.
+  // The pen follows the middle of each letter — a single stroke, not the hollow rim — with gold and white needles at the tip.
+  let sparklerSig = null;
+  const sigGlyphs = (value) => {
+    const text = String(value || '');
+    return typeof Intl.Segmenter === 'function'
+      ? Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text), (part) => part.segment)
+      : Array.from(text);
+  };
+  // How long that pen takes. The name is signed slowly; the place and the wish share a shorter budget so a sentence still finishes in the sky.
+  function sparklerSeconds(text, name) {
+    const n = sigGlyphs(text).filter((c) => c.trim() !== '').length;
+    return name ? clamp(n * 0.62, 2.6, 4.4) : clamp(n * 0.11, 0.8, 5.4);
+  }
+  // The centerline of one glyph: thin the ink to a spine, then walk that spine as pen strokes. An outline would draw both edges.
+  function letterSpine(glyph, fs) {
+    const font = `800 ${fs}px Outfit, "Segoe UI", system-ui, sans-serif`;
+    tctx.font = font;
+    const m = tctx.measureText(glyph);
+    const ascent = m.actualBoundingBoxAscent || fs * 0.8;
+    const descent = m.actualBoundingBoxDescent || fs * 0.22;
+    const pad = Math.ceil(fs * 0.28);
+    const cw = Math.max(8, Math.ceil((m.width || fs * 0.6) + pad * 2));
+    const base = Math.ceil(ascent + pad);
+    const boxH = Math.max(8, Math.ceil(base + descent + pad));
+    textCanvas.width = cw; textCanvas.height = boxH;
+    tctx.font = font; tctx.textAlign = 'center'; tctx.textBaseline = 'alphabetic'; tctx.fillStyle = '#fff';
+    tctx.clearRect(0, 0, cw, boxH);
+    tctx.fillText(glyph, cw / 2, base);
+    const data = tctx.getImageData(0, 0, cw, boxH).data;
+    const cell = clamp(Math.round(fs / 26), 1, 3), gw = Math.ceil(cw / cell), gh = Math.ceil(boxH / cell);
+    const ink = new Uint8Array(gw * gh);
+    for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+      let on = 0;
+      for (let yy = gy * cell; yy < Math.min(boxH, (gy + 1) * cell) && !on; yy++) {
+        const row = yy * cw;
+        for (let xx = gx * cell; xx < Math.min(cw, (gx + 1) * cell); xx++) if (data[(row + xx) * 4 + 3] > 128) { on = 1; break; }
+      }
+      ink[gy * gw + gx] = on;
+    }
+    const Wd = gw + 2, a = new Uint8Array((gw + 2) * (gh + 2)), kill = new Uint8Array(a.length);
+    for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) a[(y + 1) * Wd + x + 1] = ink[y * gw + x];
+    const B = (i) => a[i - Wd - 1] + a[i - Wd] + a[i - Wd + 1] + a[i + 1] + a[i + Wd + 1] + a[i + Wd] + a[i + Wd - 1] + a[i - 1];
+    const Ap = (i) => {
+      const n = [a[i - Wd], a[i - Wd + 1], a[i + 1], a[i + Wd + 1], a[i + Wd], a[i + Wd - 1], a[i - 1], a[i - Wd - 1], a[i - Wd]];
+      let c = 0; for (let k = 0; k < 8; k++) if (!n[k] && n[k + 1]) c++; return c;
+    };
+    let changed = true, guard = 0;
+    while (changed && guard++ < 40) {
+      changed = false;
+      for (let pass = 0; pass < 2; pass++) {
+        kill.fill(0);
+        for (let y = 1; y <= gh; y++) for (let x = 1; x <= gw; x++) {
+          const i = y * Wd + x; if (!a[i]) continue;
+          const b = B(i); if (b < 2 || b > 6 || Ap(i) !== 1) continue;
+          const p2 = a[i - Wd], p4 = a[i + 1], p6 = a[i + Wd], p8 = a[i - 1];
+          if (pass === 0) { if (p2 * p4 * p6 === 0 && p4 * p6 * p8 === 0) kill[i] = 1; }
+          else if (p2 * p4 * p8 === 0 && p2 * p6 * p8 === 0) kill[i] = 1;
+        }
+        for (let i = 0; i < a.length; i++) if (kill[i]) { a[i] = 0; changed = true; }
+      }
+    }
+    const sk = new Uint8Array(gw * gh);
+    for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) sk[y * gw + x] = a[(y + 1) * Wd + x + 1];
+    const around = (i) => {
+      const x = i % gw, y = (i / gw) | 0, o = [];
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= gw || yy >= gh || !sk[yy * gw + xx]) continue;
+        o.push(yy * gw + xx);
+      }
+      return o;
+    };
+    // Thinning shortens a diagonal foot. Walk each end a few steps back out through the original ink.
+    const tips = [];
+    for (let i = 0; i < sk.length; i++) if (sk[i] && around(i).length === 1) tips.push(i);
+    for (const tip of tips) {
+      let cur = tip, prev = around(tip)[0];
+      for (let step = 0; step < 5; step++) {
+        const cx = cur % gw, cy = (cur / gw) | 0, px = prev % gw, py = (prev / gw) | 0;
+        const dx = Math.sign(cx - px), dy = Math.sign(cy - py);
+        let best = 0, bi = -1;
+        for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+          if (!ox && !oy) continue;
+          const xx = cx + ox, yy = cy + oy;
+          if (xx < 0 || yy < 0 || xx >= gw || yy >= gh || !ink[yy * gw + xx] || sk[yy * gw + xx]) continue;
+          const score = ox * dx + oy * dy;
+          if (score > best) { best = score; bi = yy * gw + xx; }
+        }
+        if (best <= 0) break;
+        sk[bi] = 1; prev = cur; cur = bi;
+      }
+    }
+    const seen = new Uint8Array(sk.length), raw = [];
+    const walk = (start) => {
+      const pts = [start]; seen[start] = 1;
+      let prev = -1, cur = start, steps = 0;
+      while (steps++ < gw * gh) {
+        const opts = around(cur).filter((j) => !seen[j]);
+        if (!opts.length) break;
+        let pick = opts[0], best = -99;
+        for (const j of opts) {
+          let s = 0;
+          if (prev >= 0) {
+            const ax = (cur % gw) - (prev % gw), ay = ((cur / gw) | 0) - ((prev / gw) | 0);
+            const bx = (j % gw) - (cur % gw), by = ((j / gw) | 0) - ((cur / gw) | 0);
+            s = ax * bx + ay * by;
+          }
+          if (s > best) { best = s; pick = j; }
+        }
+        seen[pick] = 1; pts.push(pick); prev = cur; cur = pick;
+      }
+      return pts;
+    };
+    const pixels = [];
+    for (let i = 0; i < sk.length; i++) if (sk[i]) pixels.push(i);
+    const ends = pixels.filter((i) => around(i).length <= 1).sort((p, q) => (p % gw) - (q % gw) || p - q);
+    for (const i of ends.concat(pixels)) if (!seen[i]) raw.push(walk(i));
+    const toPx = (idx) => [((idx % gw) + 0.5) * cell, ((idx / gw) | 0) * cell + cell * 0.5 - base];
+    let strokes = raw.filter((s) => s.length >= 2).map((s) => s.map(toPx));
+    // A one-pixel speck beside a real stroke is the thick joint, not a second line. An isolated speck (the dot on an i) stays.
+    for (const s of raw) {
+      if (s.length !== 1) continue;
+      const p = toPx(s[0]);
+      let beside = false;
+      for (const o of strokes) for (const q of o) if (Math.hypot(q[0] - p[0], q[1] - p[1]) < cell * 2.4) { beside = true; break; }
+      if (!beside) strokes.push([p, [p[0] + Math.max(2, cell), p[1]]]);
+    }
+    const keep = strokes.map(() => true);
+    for (let i = 0; i < strokes.length; i++) for (let j = i + 1; j < strokes.length; j++) {
+      if (!keep[i] || !keep[j] || strokes[i].length < 4 || strokes[j].length < 4) continue;
+      const short = strokes[i].length <= strokes[j].length ? i : j;
+      const s = strokes[short], o = strokes[short === i ? j : i];
+      let near = 0;
+      for (const p of s) {
+        let md = Infinity;
+        for (const q of o) md = Math.min(md, Math.hypot(p[0] - q[0], p[1] - q[1]));
+        if (md < cell * 1.7) near++;
+      }
+      if (near / s.length > 0.72) keep[short] = false;
+    }
+    strokes = strokes.filter((s, i) => keep[i]);
+    let minX = Infinity, maxX = -Infinity;
+    for (const s of strokes) {
+      if (s.length > 2 && s[s.length - 1][0] < s[0][0] - fs * 0.12) s.reverse();
+      const c = s.map((p) => [p[0], p[1]]);
+      for (let i = 1; i < s.length - 1; i++) { s[i][0] = (c[i - 1][0] + c[i][0] + c[i + 1][0]) / 3; s[i][1] = (c[i - 1][1] + c[i][1] + c[i + 1][1]) / 3; }
+      for (const p of s) { minX = Math.min(minX, p[0]); maxX = Math.max(maxX, p[0]); }
+    }
+    return { strokes, w: maxX > minX ? maxX - minX : fs * 0.28, minX: Number.isFinite(minX) ? minX : 0 };
+  }
+  // Round the corners of one open stroke so the sparkler glides instead of stepping along the pixels.
+  function smoothOpen(pts) {
+    let s = pts.map((p) => [p[0], p[1]]);
+    for (let pass = 0; pass < 2; pass++) {
+      if (s.length < 3) break;
+      const next = [[s[0][0], s[0][1]]];
+      for (let i = 0; i < s.length - 1; i++) {
+        const a = s[i], b = s[i + 1];
+        next.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25]);
+        next.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
+      }
+      next.push([s[s.length - 1][0], s[s.length - 1][1]]);
+      s = next;
+    }
+    return s;
+  }
+  function resampleStroke(pts, step) {
+    if (!pts.length) return [];
+    const out = [[pts[0][0], pts[0][1]]];
+    let walked = 0, next = step;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
+      const d = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (d < 1e-6) continue;
+      while (next <= walked + d + 1e-6) {
+        const t = clamp((next - walked) / d, 0, 1);
+        out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+        if (out.length > 2000) return out;
+        next += step;
+      }
+      walked += d;
+    }
+    const last = pts[pts.length - 1], e = out[out.length - 1];
+    if (Math.hypot(e[0] - last[0], e[1] - last[1]) > step * 0.35) out.push([last[0], last[1]]);
+    return out;
+  }
+  // Break a wish sentence onto a few lines that fit the sky. Leftover words stay on the last line and that line shrinks to fit.
+  function wrapSig(text, maxW, fs) {
+    tctx.font = `800 ${fs}px Outfit, "Segoe UI", system-ui, sans-serif`;
+    const words = String(text || '').split(/\s+/).filter(Boolean);
+    const lines = [];
+    let cur = '';
+    for (const word of words) {
+      const next = cur ? `${cur} ${word}` : word;
+      if (cur && tctx.measureText(next).width > maxW) { lines.push(cur); cur = word; }
+      else cur = next;
+    }
+    if (cur) lines.push(cur);
+    if (lines.length > 3) return [lines[0], lines[1], lines.slice(2).join(' ')];
+    return lines.length ? lines : [String(text || '')];
+  }
+  // Name, place and wish as one signature. The first line's baseline is y = 0; the rest sit below it. cum is seconds.
+  function signaturePath(lines, maxW) {
+    const font = (px) => `800 ${px}px Outfit, "Segoe UI", system-ui, sans-serif`;
+    const px = [], py = [], hop = [], cum = [];
+    let span = 0, prev = null, baseline = 0, nameH = 0;
+    const pushPt = (x, y, isHop) => {
+      px.push(x); py.push(y); hop.push(isHop ? 1 : 0); cum.push(span); prev = [x, y];
+    };
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
+      const whole = String(line.text || '');
+      if (!whole.trim()) continue;
+      const minFs = line.name ? 16 : 11;
+      let fs = Math.max(minFs, line.h);
+      tctx.font = font(fs);
+      const tw = tctx.measureText(whole).width;
+      if (tw > maxW) fs = Math.max(minFs, (fs * maxW) / Math.max(1, tw));
+      const strokes = [];
+      let cursor = 0;
+      const gap = fs * 0.15;
+      for (const glyph of sigGlyphs(whole)) {
+        if (glyph.trim() === '') { cursor += fs * 0.34; continue; }
+        const letter = letterSpine(glyph, fs);
+        if (!letter.strokes.length) { cursor += fs * 0.32; continue; }
+        for (const s of letter.strokes) strokes.push(s.map(([x, y]) => [x - letter.minX + cursor, y + baseline]));
+        cursor += Math.max(letter.w, fs * 0.2) + gap;
+      }
+      const width = Math.max(0, cursor - gap), shift = width / 2;
+      // Glyph-by-glyph spacing can be wider than measureText's whole-string width.
+      // Fit the actual pen path so long wishes never run off the edge of the sky.
+      const fit = Math.min(1, maxW / Math.max(1, width));
+      let geo = 0;
+      const ready = [];
+      for (const s of strokes) {
+        for (const p of s) { p[0] = (p[0] - shift) * fit; p[1] = baseline + (p[1] - baseline) * fit; }
+        const pts = resampleStroke(smoothOpen(s), Math.max(2.8, fs / 26));
+        if (pts.length < 2) continue;
+        ready.push(pts);
+        for (let i = 1; i < pts.length; i++) geo += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+      }
+      const secs = line.name ? sparklerSeconds(whole, true) : sparklerSeconds(line.full || whole, false) * (sigGlyphs(whole).filter((c) => c.trim()).length / Math.max(1, sigGlyphs(line.full || whole).filter((c) => c.trim()).length));
+      const per = secs / Math.max(geo, 1);
+      for (const pts of ready) {
+        for (let i = 0; i < pts.length; i++) {
+          if (i === 0) {
+            if (prev) span += clamp(Math.hypot(pts[0][0] - prev[0], pts[0][1] - prev[1]) / Math.max(1, fs * 18), 0.065, 0.12);
+            pushPt(pts[0][0], pts[0][1], !!prev);
+          }
+          else { span += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) * per; pushPt(pts[i][0], pts[i][1], false); }
+        }
+      }
+      if (li === 0) nameH = fs;
+      baseline += fs * 1.22;
+    }
+    return px.length >= 8 ? { px, py, hop, cum, n: px.length, span, blockH: baseline, nameH } : null;
+  }
+  function sigPoint(g, dist) {
+    let lo = 1, hi = g.n - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (g.cum[mid] < dist) lo = mid + 1; else hi = mid; }
+    const i = lo;
+    if (dist >= g.span) return { x: g.x + g.px[g.n - 1], y: g.y + g.py[g.n - 1], lift: false };
+    const sl = g.cum[i] - g.cum[i - 1] || 1, f = clamp((dist - g.cum[i - 1]) / sl, 0, 1);
+    return { x: g.x + g.px[i - 1] + (g.px[i] - g.px[i - 1]) * f, y: g.y + g.py[i - 1] + (g.py[i] - g.py[i - 1]) * f, lift: !!g.hop[i] };
+  }
+  // The line is painted fresh each frame (the sky fades underneath it) up to where the pen has reached.
+  function drawSparklerSig() {
+    const g = sparklerSig;
+    if (!g || !live.on) return;
+    const t = gameTime - g.t0, u = t >= g.write ? 1 : Math.max(0, t / g.write), dist = u * g.span;
+    const fade = t <= g.hold ? 1 : 1 - (t - g.hold) / 0.6;
+    if (fade <= 0) return;
+    const fa = litA() * fade, k = Math.max(U, 0.72);
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.globalCompositeOperation = 'lighter';
+    // One burning stroke: a soft gold halo and a single white core. A second core would read as a double line.
+    for (const [lw, col, alpha] of [[8 * k, '#ffcf6b', 0.32 * fa], [2.5 * k, '#fffaf0', fa]]) {
+      ctx.beginPath();
+      let on = false;
+      for (let i = 1; i < g.n; i++) {
+        const x0 = g.x + g.px[i - 1], y0 = g.y + g.py[i - 1];
+        if (g.hop[i]) { on = false; if (g.cum[i] >= dist) break; continue; }
+        if (g.cum[i - 1] >= dist) break;
+        const x1 = g.x + g.px[i], y1 = g.y + g.py[i];
+        let xe = x1, ye = y1;
+        if (g.cum[i] > dist) {
+          const f = (dist - g.cum[i - 1]) / ((g.cum[i] - g.cum[i - 1]) || 1);
+          xe = x0 + (x1 - x0) * f; ye = y0 + (y1 - y0) * f;
+        }
+        if (!on) { ctx.moveTo(x0, y0); on = true; }
+        ctx.lineTo(xe, ye);
+        if (g.cum[i] > dist) break;
+      }
+      ctx.strokeStyle = col; ctx.lineWidth = lw; ctx.globalAlpha = alpha; ctx.stroke();
+    }
+    if (t < g.write) {
+      const tip = sigPoint(g, dist);
+      if (!tip.lift) {
+      ctx.globalAlpha = 0.55 * fa; ctx.fillStyle = '#ffd27a';
+      ctx.beginPath(); ctx.arc(tip.x, tip.y, 11 * k, 0, TAU); ctx.fill();
+      ctx.strokeStyle = '#ffe7b0'; ctx.lineWidth = 1.35; ctx.globalAlpha = 0.9 * fa; ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const a = gameTime * 18 + i * 0.8, len = (11 + (0.5 + 0.5 * Math.sin(gameTime * 28 + i)) * 16) * k;
+        ctx.moveTo(tip.x, tip.y); ctx.lineTo(tip.x + Math.cos(a) * len, tip.y + Math.sin(a) * len);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = fa; ctx.fillStyle = '#fffaf0';
+      ctx.beginPath(); ctx.arc(tip.x, tip.y, 4.2 * k, 0, TAU); ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+  function stepSparklerSig() {
+    const g = sparklerSig;
+    if (!g) return;
+    if (!live.on) { sparklerSig = null; try { Sound.sparklerStop(); } catch (e) { /* already quiet */ } return; }
+    const t = gameTime - g.t0;
+    if (t > g.hold + 0.6) { sparklerSig = null; return; }
+    if (t < 0 || t > g.write) return;
+    const dist = (t / g.write) * g.span;
+    while (g.lit < g.n && g.cum[g.lit] <= dist) {
+      const i = g.lit++;
+      if (g.hop[i] || i % 3) continue;
+      const left = g.hold - t;
+      star(g.x + g.px[i], g.y + g.py[i], rand(-6, 6) * U, rand(-8, 2) * U, i % 2 ? '#fff4dc' : '#ffd27a', left + 0.5, { drag: 2.2, grav: 0.06, hold: left, w: 2.4, twinkle: true, glitter: 0.03, word: true });
+    }
+    const tip = sigPoint(g, dist);
+    if (tip.lift) return;
+    const n = Q().count < 0.85 ? 3 : 5;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * TAU, v = (80 + Math.random() * 240) * U;
+      spark(tip.x, tip.y, Math.cos(a) * v, Math.sin(a) * v, Math.random() < 0.62 ? '#fff4dc' : '#ffcf6b', 0.12 + Math.random() * 0.26, { drag: 1.5, grav: 0.28 });
+    }
+  }
+  // Dots, if a name will not thin into a pen path (a mark the font draws as a speck).
+  function sparklerDots(x, y, s) {
+    const target = Math.min(1500, 950 * Q().count);
+    const { pts, step } = textPoints(s.text, W * 0.88, s.textH, target);
+    if (!pts.length) return;
+    pts.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const write = Math.min(4.2, 1.6 + String(s.text || '').length * 0.18);
+    const slices = clamp(Math.round(write / 0.08), 24, 48);
+    const dot = clamp(step * 0.75, 2.2, 3.8);
+    const gold = ['#fff4dc', '#ffe7b0', '#ffd27a', '#ffcf6b'];
+    try { Sound.sparklerStart(); } catch (e) { /* sound is optional */ }
+    after(write + 0.25, () => { try { Sound.sparklerStop(); } catch (e) { /* already stopped */ } }, 'director');
+    for (let i = 0; i < slices; i++) {
+      const lo = Math.floor(i * pts.length / slices), hi = Math.floor((i + 1) * pts.length / slices);
+      const at = (i / (slices - 1)) * write;
+      after(at, () => {
+        if (!live.on) return;
+        for (let j = lo; j < hi; j++) {
+          const p = pts[j], px = x + p[0], py = y + p[1];
+          star(px, py, rand(-8, 8) * U, rand(-12, 2) * U, gold[j % gold.length], write - at + 2.8, { drag: 2.4, grav: 0.12, hold: write - at + 2.4, w: dot, twinkle: true, glitter: 0.04, word: true });
+        }
+        const tip = pts[Math.min(pts.length - 1, hi - 1)];
+        if (!tip) return;
+        const tx = x + tip[0], ty = y + tip[1];
+        star(tx, ty, 0, 0, '#fffaf0', 0.18, { drag: 2, grav: 0, hold: 0.12, w: dot * 1.8, word: true });
+        for (let n = 0; n < 10; n++) {
+          const a = Math.random() * TAU, v = (80 + Math.random() * 240) * U;
+          spark(tx, ty, Math.cos(a) * v, Math.sin(a) * v, Math.random() < 0.5 ? '#fff4dc' : '#ffcf6b', 0.16 + Math.random() * 0.3, { drag: 1.4, grav: 0.3 });
+        }
+      }, 'director');
+    }
+  }
+  // The player's own signature, one smooth stroke, then the place and the wish underneath it.
+  function attachSign(path, sign, nameH) {
+    const raw = window.LUTSWishes && LUTSWishes.unpackSign(sign);
+    if (!raw || raw.length < 8) return path;
+    const size = Math.min(W * 0.62, H * 0.14, nameH * 1.6);
+    let pts = raw.map(([x, y]) => [x * size, y * size]);
+    pts = resampleStroke(smoothOpen(pts), Math.max(3.2, size / 36));
+    if (pts.length < 2) return path;
+    let minY = Infinity, maxY = -Infinity, geo = 0;
+    for (const p of pts) { minY = Math.min(minY, p[1]); maxY = Math.max(maxY, p[1]); }
+    for (let i = 1; i < pts.length; i++) geo += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    const mid = (minY + maxY) / 2, drop = (maxY - minY) / 2 + size * 0.16;
+    const secs = clamp(geo / Math.max(120, size * 0.7), 2.6, 4.2), per = secs / Math.max(geo, 1);
+    const px = [], py = [], hop = [], cum = [];
+    let span = 0;
+    for (let i = 0; i < pts.length; i++) {
+      if (i) span += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]) * per;
+      px.push(pts[i][0]); py.push(pts[i][1] - mid); hop.push(0); cum.push(span);
+    }
+    if (path && path.n >= 2) {
+      span += 0.14;
+      for (let i = 0; i < path.n; i++) {
+        const prevT = i ? path.cum[i - 1] : path.cum[0];
+        if (i === 0) { px.push(path.px[0]); py.push(path.py[0] + drop); hop.push(1); cum.push(span); }
+        else { span += path.cum[i] - prevT; px.push(path.px[i]); py.push(path.py[i] + drop); hop.push(path.hop[i] ? 1 : 0); cum.push(span); }
+      }
+    }
+    return { px, py, hop, cum, n: px.length, span, blockH: (path && path.blockH || 0) + size, nameH: size };
+  }
+  function sparklerWrite(x, y, s) {
+    const nameH = s.textH || 48;
+    const lines = [];
+    if (!s.sign) lines.push({ text: String(s.text || ''), h: nameH, name: true });
+    if (s.where) lines.push({ text: String(s.where), h: nameH * 0.46, full: String(s.where) });
+    if (s.wish) {
+      const wh = nameH * 0.36, full = String(s.wish);
+      for (const part of wrapSig(full, W * 0.65, wh)) lines.push({ text: part, h: wh, full });
+    }
+    let path = null;
+    try {
+      path = lines.length ? signaturePath(lines, W * 0.9) : null;
+      if (s.sign) path = attachSign(path, s.sign, nameH);
+    } catch (e) { path = null; }
+    if (!path) { sparklerDots(x, y, s); return; }
+    const write = reduceMotion() ? 0.2 : path.span;
+    // The shell arrives on the name. The place and the wish are already laid out below that baseline.
+    sparklerSig = { x, y, px: path.px, py: path.py, hop: path.hop, cum: path.cum, n: path.n, span: path.span, t0: gameTime, write, hold: write + 2.6, lit: 1 };
+    try { Sound.sparklerStart(); } catch (e) { /* sound is optional */ }
+    after(write + 0.2, () => { try { Sound.sparklerStop(); } catch (e) { /* already stopped */ } }, 'director');
   }
 
   // ---------- Recipient photo revealed inside a ring of fireworks ----------
@@ -1538,6 +2116,156 @@
       { drag: 2.6, life: hold + 1.4, hold, grav: 0.8, size: 2.4, twinkle: true });
     const R = r * 2.4, k = 1.5;
     sphere(cnt(70), (dx, dy) => star(x, y, dx * R * k, dy * R * k, color(), rand(1.3, 1.7), { drag: k, size: 2, glitter: 0.3 }));
+  }
+  // ---------- A Sky Gears drawing as a firework (sky-gears.js Launch, and its signatures in Live Sky) ----------
+  // s.pts: [x, y, colour] spread evenly along the drawing, in a unit box (max |x|, |y| = 1). Each point is a star that
+  // glides out to its place on the outline (scripted, as the picture shells' stars are, all at one pace, so the shape
+  // grows out of the break whole), holds there so it reads, then is let go to droop under gravity and flicker out; a
+  // small white glitter sphere goes with it. While they hold, neighbouring stars along each stroke are joined by thin
+  // lines of their colour (drawNets: a path per colour a frame, not particles), so a dense pattern reads as its lines
+  // and not as a cloud of dots; the lines fade as the stars fall.
+  // The stars use the budget picture shells may use (Q().maxStars + 200, star()'s o.follow allowance); past what is free
+  // at the moment of the burst the points are thinned evenly, so the whole shape still shows. At most 12 colours (the
+  // sprite atlas keeps a few slots per colour).
+  const drawingR = (sz = 1) => Math.min(R0() * sz * 1.55, W * 0.46, H * 0.3);
+  const liveParticles = () => stars.length + sparks.length + smokes.length + confettis.length;
+  const drawingRoom = () => Math.max(0, Q().maxStars + 200 - liveParticles() - 40);
+  const drawingNets = [];
+  // A moving figure (character-art.js anims): neon rainbow lines that step from pose to pose, each star gliding from its
+  // place in one pose to its place in the next, joined along its stroke (drawNets); at its beat the batsman's ball flies
+  // off the bat into a burst high in the sky. Lets go after the last pose, as a drawing does.
+  function animBurst(x, y, s) {
+    const n = clamp(Math.round(drawingRoom() * 0.7), 60, 260);
+    let A = window.LUTSCharacters && window.LUTSCharacters.anim(s.anim, n);
+    // Two figures (a love story for a wish, the friends' story): twice the stars, or each head comes out square.
+    if (A && A.stars.some((q) => q.s >= 12)) A = window.LUTSCharacters.anim(s.anim, Math.min(480, n * 2));
+    if (!A) { TYPES.peony.fn(x, y, s.size, '#ffcf6b', '#ffffff', s); return; }
+    const R = drawingR(s.size), end = A.times[A.times.length - 1] + 0.9, K = 6, pose = window.LUTSCharacters.poseAt;
+    sphere(cnt(20), (dx, dy) => star(x, y, dx * 110 * U, dy * 110 * U, '#fff4e6', rand(0.8, 1.2), { drag: 1.8, size: 1.4, glitter: 0.4 }));
+    const cols = [...new Set(A.stars.map((q) => q.c))], net = { t0: gameTime, hold: end, L: curLayer, cols, stars: [], byCol: cols.map(() => []) };
+    let prev = -1;
+    for (const q of A.stars) {
+      const st = star(x, y, 0, 0, q.c, end + rand(1.2, 1.8), {
+        follow: (p) => { if (p.age >= end) return null; const f = 1 - Math.exp(-K * p.age), at = pose(q, A.times, p.age); return [x + at[0] * R * f, y + at[1] * R * f]; },
+        drag: 1.6, grav: 0.5, size: 1.7, twinkle: true, glitter: 0.03, gcol: q.c, net, word: true, // (a figure, like a word, is never cut by a full sky)
+      });
+      if (!st) { prev = -1; continue; }
+      net.stars.push(st);
+      const i = net.stars.length - 1;
+      if (prev === q.s && i > 0) net.byCol[cols.indexOf(q.c)].push(i); // joined to the star before it on the same stroke
+      prev = q.s;
+    }
+    if (net.stars.length > 1) drawingNets.push(net);
+    for (const [at, line] of A.captions || []) after(at, () => { if (live.on) toast(inLang(line), 2600); }, 'director'); // a story's words
+    // Every other figure's story ends in love and happiness: as its lines fall away, a heart, a smiley, a star, a
+    // butterfly or a pink and gold flower rises to where it stood and bursts (its own sound with it). Fired once the
+    // figure has let go, so the burst has its stars (a blast while the figure still held them was heard, not seen).
+    if (!A.sky) after(end + 0.4, () => {
+      if (!live.on) return;
+      const [type, c1, c2] = pick([['heart', '#ff5fa2', '#ffd1e1'], ['smile', '#ffd23d', '#ffffff'], ['star', '#ffd23d', '#ff8a2b'], ['butterfly', '#b56bff', '#5ff0ff'], ['peony', '#ff5fa2', '#ffd36b'], ['heart', '#ff3355', '#ffffff']]);
+      launchShell({ tap: true, type, x, y: y - R * 0.15, size: 1.15, c1, c2, exact: true, straight: true, fast: 1.5 });
+    }, 'director');
+    if (A.sky) after(A.beat, () => { // the six: off the bat, up and away, and a big gold burst
+      if (!live.on) return; // the show was left meanwhile
+      launchShell({ tap: true, type: 'chrysanthemum', sx: x + A.sky[0] * R * 0.9, sy: y - 0.2 * R, x: clamp(x + R * 1.1, W * 0.15, W * 0.85), y: Math.max(H * 0.1, safeTop() + 60), size: 1.1, c1: '#ffcf6b', c2: '#ffffff', exact: true, lift: 'comet', straight: false, fast: 1.6 });
+    }, 'director');
+  }
+  function drawingBurst(x, y, s) {
+    if (s.drone) { if (drones) drones.fire(s.drone); sphere(cnt(36), (dx, dy) => star(x, y, dx * 170 * U, dy * 170 * U, '#ffe7b0', rand(0.8, 1.3), { drag: 1.8, size: 1.6, glitter: 0.5 })); return; }
+    if (s.anim) { animBurst(x, y, s); return; }
+    // A character picture is laid out now, when the stars free are known: shared with the pictures still to burst
+    // beside it (s.share), about 0.6 of a grid's cells painted, so it never has to be thinned into stripes.
+    let charN = 0;
+    if (s.char && window.LUTSCharacters) {
+      const roomN = clamp(Math.floor(Math.sqrt(drawingRoom() / Math.max(1, s.share || 1) / 0.6)), 10, s.grid || 24);
+      charN = s.still ? 36 : roomN; // an outline portrait keeps its lines; a coarse grid turned the face into a beak
+      s.pts = window.LUTSCharacters.points(s.char, charN);
+    }
+    const src = Array.isArray(s.pts) ? s.pts : [];
+    if (src.length < 2) { TYPES.peony.fn(x, y, s.size, s.c1 || '#ffcf6b', s.c2 || '#ffffff', s); return; }
+    const R = drawingR(s.size), hold = s.hold || 1.5, K = 5; // scripted for `hold` s (about 0.5 s out, 1 s still)
+    if (!s.still) sphere(cnt(24), (dx, dy) => star(x, y, dx * 120 * U, dy * 120 * U, '#fff4e0', rand(0.9, 1.4), { drag: 1.8, size: 1.5, glitter: 0.4 }));
+    const n = Math.min(src.length, s.still ? 450 : drawingRoom(), 1000), step = src.length / Math.max(1, n);
+    const cols = [], colIdx = new Map();
+    const colOf = (c) => {
+      c = typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c) ? c.toLowerCase() : '#ffcf6b';
+      if (!colIdx.has(c)) { if (cols.length < 12) cols.push(c); colIdx.set(c, colIdx.size < 12 ? cols.length - 1 : colIdx.size % 12); }
+      return colIdx.get(c);
+    };
+    const net = { t0: gameTime, hold, L: curLayer, cols, stars: [], byCol: [] };
+    const ox = [], oy = [];
+    for (let i = 0; i < n; i++) {
+      const p = src[Math.floor(i * step)], dx = clamp(+p[0] || 0, -1, 1) * R, dy = clamp(+p[1] || 0, -1, 1) * R, ci = colOf(p[2]);
+      const st = star(x, y, 0, 0, cols[ci], hold + rand(1.4, 2.2), {
+        follow: (q) => {
+          if (q.age >= hold) return null;
+          const f = 1 - Math.exp(-K * q.age);
+          if (!s.fill || s.still) return [x + dx * f, y + dy * f];
+          // A character comes alive while it holds: a happy hop as it arrives, then a gentle wiggle and a little bounce.
+          const a = q.age, w = Math.sin(a * 5.2) * 0.14 * Math.min(1, a / 0.6), c = Math.cos(w), sn = Math.sin(w);
+          const sq = 1 + Math.sin(a * 10.4) * 0.06, hop = -Math.abs(Math.sin(a * 5.2)) * R * 0.11 - Math.max(0, 1 - Math.abs(a - 0.55) / 0.35) * R * 0.12;
+          const ex = dx * f, ey = dy * f * sq;
+          return [x + ex * c - ey * sn, y + ex * sn + ey * c + hop];
+        },
+        drag: 1.6, grav: 0.55, size: s.still ? 2.1 : (charN ? clamp((R * 1.1) / charN / UV(), 1.8, 4) : 2.2), twinkle: !s.still, glitter: s.still ? 0 : 0.03, gcol: cols[ci], net,
+      });
+      if (!st) continue;
+      net.stars.push(st); ox.push(dx); oy.push(dy);
+      (net.byCol[ci] = net.byCol[ci] || []).push(net.stars.length - 1);
+    }
+    // Joined only along a stroke: a gap much wider than the usual spacing is a jump to another stroke.
+    const gaps = [];
+    for (let i = 1; i < ox.length; i++) gaps.push(Math.hypot(ox[i] - ox[i - 1], oy[i] - oy[i - 1]));
+    const med = gaps.slice().sort((a, b) => a - b)[gaps.length >> 1] || 0;
+    for (const list of net.byCol) if (list) for (let j = list.length - 1; j >= 0; j--) { const i = list[j]; if (!i || gaps[i - 1] > med * 3 + 1) list.splice(j, 1); }
+    if (net.stars.length > 1 && !s.fill) drawingNets.push(net); // a filled picture reads as its dots, not as lines
+    // A necklace of colour spins around a character while it holds, then falls away. Two directions, so it never sits still.
+    if (s.fill && charN && !s.still) {
+      const dye = ['#ff3355', '#ff8a2b', '#ffd23d', '#33dd66', '#5ff0ff', '#4a9dff', '#b56bff', '#ff4fd8'];
+      for (let i = 0; i < 32; i++) {
+        const col = dye[i % dye.length], base = (i / 32) * TAU, spin = i % 2 ? 2.4 : -1.7, rad = R * (i % 2 ? 1.18 : 1.08);
+        star(x, y, 0, 0, col, hold + 1.1, {
+          follow: (q) => {
+            if (q.age >= hold) return null;
+            const f = 1 - Math.exp(-K * q.age), a = base + q.age * spin, rr = rad * (1 + Math.sin(q.age * 5 + i) * 0.05);
+            return [x + Math.cos(a) * rr * f, y + Math.sin(a) * rr * f];
+          },
+          drag: 1.6, grav: 0.4, size: 1.7, twinkle: true, glitter: 0, color2: dye[(i + 3) % dye.length], changeT: 0.45 + (i % 6) * 0.22,
+        });
+      }
+    }
+    // An outline portrait holds still. Loose gold sparks fall around it, the way that picture is drawn in the sky.
+    if (s.still) {
+      for (let i = 0; i < 42; i++) {
+        const a = rand(0, TAU), rr = R * rand(1.05, 1.7);
+        star(x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.8, Math.cos(a) * rand(6, 28) * U, rand(12, 48) * U, Math.random() < 0.72 ? '#fff6e0' : '#ffd23d', rand(1.2, 2), { drag: 1.2, grav: 0.35, size: 1.25, twinkle: true });
+      }
+    }
+  }
+  function drawNets() {
+    const fa = litA(), w1 = 4 * UV(), w2 = Math.max(1, 1.3 * UV());
+    for (let k = drawingNets.length - 1; k >= 0; k--) {
+      const net = drawingNets[k], t = gameTime - net.t0, a = t < net.hold ? Math.min(1, t / 0.3) : 1 - (t - net.hold) / 1.2;
+      if (t >= net.hold && a <= 0) { drawingNets.splice(k, 1); continue; }
+      if (a <= 0.01) continue;
+      const g = net.L ? gctx : ctx, st = net.stars;
+      g.lineCap = 'round'; g.lineJoin = 'round';
+      net.byCol.forEach((list, c) => {
+        if (!list) return;
+        g.beginPath();
+        let any = false;
+        for (const i of list) {
+          const p = st[i], q = st[i - 1];
+          if (p.net !== net || q.net !== net || p.age >= p.life || q.age >= q.life) continue; // gone (or reused)
+          g.moveTo(q.x, q.y); g.lineTo(p.x, p.y); any = true;
+        }
+        if (!any) return;
+        g.strokeStyle = net.cols[c];
+        if (measuredTier > 1) { g.lineWidth = w1; g.globalAlpha = a * 0.16 * fa; g.stroke(); } // the wide glow: only on a fast phone (on a Samsung M11 it froze a dense spiral)
+        g.lineWidth = w2; g.globalAlpha = a * (measuredTier > 1 ? 0.55 : 0.7) * fa; g.stroke();
+      });
+    }
+    ctx.globalAlpha = gctx.globalAlpha = 1;
   }
   function drawPortrait() {
     const p = portrait, t = gameTime - p.t0;
@@ -1571,6 +2299,15 @@
   const pan = (x) => (x / W) * 2 - 1;
 
   const shellTally = {}; // shells sent up, by type (for the tests)
+  // At most n sounds of a kind in any quarter of a second (the show's volleys, see launchShell and burstShell).
+  const soundTimes = { lift: [], burst: [] };
+  function soundBudget(kind, n) {
+    const now = performance.now(), q = soundTimes[kind];
+    while (q.length && now - q[0] > 250) q.shift();
+    if (q.length >= n) return false;
+    q.push(now);
+    return true;
+  }
   function launchShell(o = {}) {
     // In play, shells come from taps, a ground show's crackers, or crackers the sparkler lit (no show of their own).
     if (mode === 'play' && !rush.on && !o.tap && !(runningGroundEffect === 'swept' || (runningGroundEffect && launch.sequence && launch.sequence.ground))) return;
@@ -1578,12 +2315,12 @@
     const sz = o.size ?? sizeScale();
     const tx = clamp(o.x ?? rand(W * 0.12, W * 0.88), 16, W - 16);
     let ty = clamp(o.y ?? rand(H * 0.1, H * 0.42), H * 0.05, H * 0.78);
-    if (world.rect && world.cfg.sacred && !o.exact && o.type !== 'text' && o.type !== 'photo') ty = worldSkyY(tx, ty);
+    if (world.rect && world.cfg.sacred && !o.exact && o.type !== 'text' && o.type !== 'photo' && o.type !== 'drawing') ty = worldSkyY(tx, ty);
     // The whole burst stays on screen: its top ring below the status bar (a recorded video showed the top cut off).
     if (!o.exact) ty = Math.max(ty, Math.min(H * 0.45, safeTop() + R0() * sz * 0.95));
     const sx = o.sx ?? (o.straight ? tx : clamp(tx + rand(-50, 50) * U, 0, W));
     // 3D view: the show's own shells burst at different distances; your taps, words and photos burst right here.
-    const z = o.z ?? (!view.on() || o.user || o.straight || o.type === 'text' || o.type === 'photo' ? 1 : rand(0.72, 1.06));
+    const z = o.z ?? (!view.on() || o.user || o.straight || o.type === 'text' || o.type === 'photo' || o.type === 'drawing' ? 1 : rand(0.72, 1.06));
     const sy = o.sy ?? H + 8;
     // A shell must rise to burst: from a mouth at or above its burst height (a tall tube, a cracker on a high street) the
     // lift would be the root of a negative, NaN, and a NaN shell never bursts, trailing sparks for ever and holding the
@@ -1595,24 +2332,41 @@
     const t = -vy / g;
     shells.push({
       x: sx, y: sy, px: sx, py: sy, vx: (tx - sx) / t, vy, g, age: 0,
-      type: o.type, size: sz * z, z, c1: o.c1, c2: o.c2, text: o.text, textH: o.textH, hold: o.hold, user: !!o.user,
-      img: o.img, r: o.r, L: o.L || 0, aim: o.aim, tint: !!o.tint,
+      type: o.type, size: sz * z, z, c1: o.c1, c2: o.c2, text: o.text, textH: o.textH, hold: o.hold, user: !!o.user, sparkler: !!o.sparkler, where: o.where || '', wish: o.wish || '', sign: o.sign || '',
+      img: o.img, r: o.r, L: o.L || 0, aim: o.aim, tint: !!o.tint, soft: o.soft,
+      drone: o.drone, // the Drone Show's god: this cracker breaks into its lights (drone-show.js)
+      pts: o.type === 'drawing' ? o.pts : undefined, // a Sky Gears drawing: [x, y, colour] in a unit box (drawingBurst)
+      fill: !!o.fill, still: !!o.still, // a filled picture (Live Sky's characters): its stars are not joined into lines. still: an outline portrait, held without the hop
+      char: o.char, share: o.share, grid: o.grid, anim: o.anim, // a character (character-art.js), drawn at its burst on as fine a grid as the stars free then allow
       // How it rises: 'gold' sparks (default), a fat white 'comet' head with a brocade trail, or a 'crackle' tail.
       lift: o.lift || (TYPES[o.type] && TYPES[o.type].lift) || 'gold',
       // A dark beat at the top before the break (not in Rocket Rush, whose rockets are aimed at targets).
-      apex: rush.on || o.type === 'text' || o.type === 'photo' || o.fast ? 0 : rand(0.12, 0.26),
+      apex: rush.on || o.type === 'text' || o.type === 'photo' || o.type === 'drawing' || o.fast ? 0 : rand(0.12, 0.26),
       // In a 3D world a shell is pinned far out along its path, so it keeps its place in the sky as you look around.
       an: o.an !== undefined ? o.an : w3dShown() ? anchorAt(tx, ty, 150) : null,
     });
     shellTally[o.type || 'random'] = (shellTally[o.type || 'random'] || 0) + 1;
-    Sound.lift(pan(sx), t, o.whistle || !!(TYPES[o.type] && TYPES[o.type].whistle));
+    // A volley of the show's own shells (a fan, a fence, a comb) is heard as a few lifts, not dozens at once: each lift
+    // builds its own audio nodes, and thirty in one frame stalled a slow phone for a tenth of a second.
+    if (o.tap && !o.user && !soundBudget('lift', 4)) return;
+    const loud = Sound.dist;
+    if (o.soft != null) Sound.dist = loud * o.soft;
+    try { Sound.lift(pan(sx), t, o.whistle || !!(TYPES[o.type] && TYPES[o.type].whistle)); } finally { Sound.dist = loud; }
   }
 
+  // How each shell sounds as it breaks (Sound.TONES); any not listed is a plain boom.
+  const SHELL_TONE = {};
+  for (const [tone, keys] of Object.entries({
+    crack: 'crackle crossette strobe senrin tiger rondelle',
+    soft: 'willow kamuro kingwillow horsetail brocade ghost timerain',
+    whump: 'ring doublering palm heart kaleido fish twotone',
+    sharp: 'salute multibreak shellofshells barrel spider',
+  })) for (const k of keys.split(' ')) SHELL_TONE[k] = tone;
   function burstShell(s) {
     const [c1, c2raw] = [s.c1 || color(), s.c2 || color()];
     let c2 = c2raw;
     if (c2 === c1 && palette.length > 1) c2 = palette[(palette.indexOf(c1) + 1) % palette.length];
-    const special = s.type === 'text' || s.type === 'photo';
+    const special = s.type === 'text' || s.type === 'photo' || s.type === 'drawing';
     const z = s.z || 1;
     const was = curAnchor;
     curAnchor = s.an || null;
@@ -1621,19 +2375,28 @@
     if (!special) curHang = 1 + 0.3 * clamp(s.size - 1, 0, 1.5);
     if (s.type === 'text') textBurst(s.x, s.y, s);
     else if (s.type === 'photo') photoBurst(s.x, s.y, s);
-    else TYPES[resolveType(s.type)].fn(s.x, s.y, s.size, c1, c2, s);
+    else if (s.type === 'drawing') drawingBurst(s.x, s.y, s);
+    const kind = special ? s.type : resolveType(s.type);
+    if (!special) TYPES[kind].fn(s.x, s.y, s.size, c1, c2, s);
     curDim = 1; curHang = 1;
     if (!special) breakSmoke(s.x, s.y, s.size * z);
     addLight(c1, (special ? 1.5 : s.size) * z, s.x, s.y);
     // Heard a moment after it is seen: farther in 3D, higher on the flat sky (0.1 s low down, 0.4 s at the top).
-    Sound.burst(special ? 1.3 : s.size, pan(s.x), w3dShown() ? Math.max(0, (1 - z) * 0.6) : 0.15 + 0.4 * clamp(1 - s.y / (H * 0.6), 0, 1) + 0.1 * clamp(s.size - 1, 0, 1));
+    // A soft shell (Live Sky's colour washes: soft 0..1) is heard as a hush, not a boom; small show bursts share a
+    // budget like the lifts (big ones always sound).
+    const loud = Sound.dist;
+    if (s.soft != null) Sound.dist = loud * s.soft;
+    if (!s.user && s.size < 0.5 && !soundBudget('burst', 5)) Sound.dist = 0;
+    try { if (Sound.dist > 0) Sound.burst(special ? 1.3 : s.size, pan(s.x), w3dShown() ? Math.max(0, (1 - z) * 0.6) : 0.15 + 0.4 * clamp(1 - s.y / (H * 0.6), 0, 1) + 0.1 * clamp(s.size - 1, 0, 1), { tone: SHELL_TONE[kind] }); }
+    finally { Sound.dist = loud; }
     if (w3dShown()) w3d.startle(s.an ? { x: s.an.wx, y: s.an.wy, z: s.an.wz } : null, s.size, 'sky'); // a fist shaken at it from the forecourt
     curAnchor = was;
     onBurst(s);
   }
 
-  // Burst light is a short-lived entity drawn fresh each frame (sky: #glow, ground: #items), never painted into the
-  // fading trail canvases, where it left a grey disc. Kind 0: white pop then a colour bloom; kind 1: the shell's glow.
+  // Burst light is a short-lived entity drawn each frame in 'lighter' (sky: onto the fading #fx, at the frame's fade
+  // share litA() so it settles at its own brightness instead of stacking up; ground: #items, cleared every frame). A
+  // separate #glow layer cost the compositor a whole-screen blend a frame on a phone. Kind 0: white pop then a colour bloom; kind 1: the shell's glow.
   // Not particles: outside the budget and the FADING check (they last 1.6s at most).
   const fxLights = [];
   function flash(x, y, c, sz, cx = ctx) {
@@ -1644,30 +2407,29 @@
   function drawLights() {
     if (!fxLights.length) return;
     const white = SPR.id('#ffffff');
-    glx.globalCompositeOperation = ictx.globalCompositeOperation = 'lighter';
+    const fa = litA();
+    ctx.globalCompositeOperation = ictx.globalCompositeOperation = 'lighter';
     for (const l of fxLights) {
-      const t = l.age / l.life, g = l.L ? ictx : glx;
-      if (!l.L) glowUsed = true;
-      if (l.kind) { g.globalAlpha = 0.16 * Math.min(1, l.age / 0.25) * (1 - t) * l.dim; SPR.draw(g, l.s, SPR.SOFT, l.x, l.y, l.R); continue; }
-      if (l.age < 0.06) { g.globalAlpha = 0.8 * (1 - l.age / 0.06) * l.dim; SPR.draw(g, white, SPR.SOFT, l.x, l.y, l.R * (0.3 + l.age * 3)); }
-      g.globalAlpha = 0.4 * (1 - t) ** 2 * l.dim; SPR.draw(g, l.s, SPR.SOFT, l.x, l.y, l.R * (1 + 0.6 * t));
+      const t = l.age / l.life, g = l.L ? ictx : ctx, k = l.L ? 1 : fa;
+      if (l.kind) { g.globalAlpha = k * 0.16 * Math.min(1, l.age / 0.25) * (1 - t) * l.dim; SPR.draw(g, l.s, SPR.SOFT, l.x, l.y, l.R); continue; }
+      if (l.age < 0.06) { g.globalAlpha = k * 0.8 * (1 - l.age / 0.06) * l.dim; SPR.draw(g, white, SPR.SOFT, l.x, l.y, l.R * (0.3 + l.age * 3)); }
+      g.globalAlpha = k * 0.4 * (1 - t) ** 2 * l.dim; SPR.draw(g, l.s, SPR.SOFT, l.x, l.y, l.R * (1 + 0.6 * t));
     }
     // On a water world each burst's light shimmers in the water below the landmark, squashed and dimmer.
     const wy = world.waterY;
     if (wy && !w3dShown() && Q().bloom) {
-      glx.save(); glx.beginPath(); glx.rect(0, wy, W, H - wy); glx.clip();
-      glx.translate(0, wy * 1.55); glx.scale(1, -0.55);
+      ctx.save(); ctx.beginPath(); ctx.rect(0, wy, W, H - wy); ctx.clip();
+      ctx.translate(0, wy * 1.55); ctx.scale(1, -0.55);
       for (const l of fxLights) {
         if (l.L || !l.kind || l.y > wy) continue;
         const t = l.age / l.life;
-        glx.globalAlpha = 0.22 * Math.min(1, l.age / 0.25) * (1 - t) * l.dim * (0.8 + 0.2 * Math.random());
-        SPR.draw(glx, l.s, SPR.SOFT, l.x, l.y, l.R * 0.8);
-        glowUsed = true;
+        ctx.globalAlpha = fa * 0.22 * Math.min(1, l.age / 0.25) * (1 - t) * l.dim * (0.8 + 0.2 * Math.random());
+        SPR.draw(ctx, l.s, SPR.SOFT, l.x, l.y, l.R * 0.8);
       }
-      glx.restore();
+      ctx.restore();
     }
-    glx.globalAlpha = ictx.globalAlpha = 1;
-    glx.globalCompositeOperation = ictx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = ictx.globalAlpha = 1;
+    ctx.globalCompositeOperation = ictx.globalCompositeOperation = 'source-over';
   }
 
   // ---------- Sky light ----------
@@ -1693,7 +2455,11 @@
   }
   function renderGlow(dt) {
     gI *= Math.exp(-2.4 * dt); gPop *= Math.exp(-14 * dt);
-    const a = Math.min(0.5, gI * 0.17 + gPop * 0.3) * SKY_LIGHT[settings.skyLight];
+    // Continuous shows stack many bursts. Keep the wide scene's dark sky legible
+    // while the individual sparks and the landmark still receive light. A New Year countdown and its climax keep each
+    // burst's whole-sky flare softer still (at most 0.3), so no burst flashes the screen.
+    const a = Math.min(0.5, gI * 0.17 + gPop * 0.3) * SKY_LIGHT[settings.skyLight]
+      * (document.body.classList.contains('live-sky') ? 0.55 : 1) * (document.body.classList.contains('countdown-on') ? 0.6 : 1);
     let at = lastGlowAt;
     if (a >= 0.005 && gWX >= 0) {
       const [sx, sy] = fxToScreen(gWX, gWY);
@@ -1701,14 +2467,20 @@
       at = `${gX}% ${gY}%`;
     }
     if (Math.abs(a - lastGlowA) < 0.004 && at === lastGlowAt) return;
+    // A restyle of this full-screen layer costs a style recalc and a repaint: at most ~15 a second, except to turn it off/on.
+    const now = performance.now(), off = a < 0.005, wasOff = lastGlowA < 0.005;
+    if (off === wasOff && now - glowStyledAt < 66 && Math.abs(a - lastGlowA) < 0.06) return;
+    glowStyledAt = now;
     lastGlowA = a; lastGlowAt = at;
     const r = gR | 0, g = gG | 0, b = gB | 0;
     skyGlow.style.background = a < 0.005 ? 'none'
       : `radial-gradient(130% 90% at ${at || '50% 30%'}, rgba(${r},${g},${b},${a}), rgba(${r},${g},${b},${a * 0.3}) 70%, rgba(${r},${g},${b},${a * 0.15}))`;
     // Unlit, it is taken out altogether: a full-screen blended layer, even empty, holds graphics memory a low-memory
     // phone needs for the sky (it dropped tiles and flashed black blocks).
-    skyGlow.style.display = a < 0.005 ? 'none' : '';
+    if (off !== wasOff || !glowStyledOnce) skyGlow.style.display = off ? 'none' : '';
+    glowStyledOnce = true;
   }
+  let glowStyledAt = 0, glowStyledOnce = false;
   const glowAlpha = () => Math.max(0, lastGlowA);
   // The same glow for photos and videos (sx, sy: output px per CSS px). The one gradient a frame may make.
   function drawGlow(g, sx, sy) {
@@ -1802,24 +2574,47 @@
       if (t - this.lastBurst < 0.06) return;
       this.lastBurst = t;
       const [r, k] = this.vary(opt);
-      const out = this.dest(p), vol = clamp((0.3 + size * 0.45) * k, 0.25, 1.2), end = t + 1.3 + size * 0.5;
+      // Each family of shell has its own voice (opt.tone, see SHELL_TONE), and every break is a little different
+      // in brightness and length, so a run of the same shell never sounds stamped out.
+      const T = this.TONES[(opt && opt.tone) || 'boom'] || this.TONES.boom, len = rand(0.8, 1.25) * T.len;
+      const out = this.dest(p), vol = clamp((0.3 + size * 0.45) * k * T.vol, 0.2, 1.2), end = t + (1.3 + size * 0.5) * len;
       const n = this.noiseSrc(), lp = c.createBiquadFilter(), g = c.createGain();
-      lp.type = 'lowpass';
-      lp.frequency.setValueAtTime((1600 + size * 700) * r, t);
-      lp.frequency.exponentialRampToValueAtTime(160 * r, t + 1.3);
+      lp.type = 'lowpass'; lp.Q.value = T.q;
+      lp.frequency.setValueAtTime((1600 + size * 700) * r * T.bright * rand(0.85, 1.2), t);
+      lp.frequency.exponentialRampToValueAtTime(160 * r * T.bright, t + 1.3 * len);
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(vol, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(vol, t + T.attack);
       g.gain.exponentialRampToValueAtTime(0.001, end);
       n.connect(lp); lp.connect(g); g.connect(out);
       n.start(t, Math.random() * 1.5); n.stop(end + 0.05); // ends with its fade, freeing the voice
       const o = c.createOscillator(), og = c.createGain();
-      o.frequency.setValueAtTime(100 * r, t);
-      o.frequency.exponentialRampToValueAtTime(36 * r, t + 0.4);
+      o.frequency.setValueAtTime(T.sub * r, t);
+      o.frequency.exponentialRampToValueAtTime(T.sub * 0.36 * r, t + 0.4 * len);
       og.gain.setValueAtTime(0.0001, t);
-      og.gain.exponentialRampToValueAtTime(vol * 0.9, t + 0.01);
-      og.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+      og.gain.exponentialRampToValueAtTime(vol * T.thud, t + 0.01);
+      og.gain.exponentialRampToValueAtTime(0.001, t + 0.6 * len);
       o.connect(og); og.connect(out);
-      o.start(t); o.stop(t + 0.7);
+      o.start(t); o.stop(t + 0.7 * len);
+      if (T.snap) { // a hard, high crack on top of the boom (salutes, multi-breaks)
+        const s = this.noiseSrc(), hp = c.createBiquadFilter(), sg = c.createGain();
+        hp.type = 'highpass'; hp.frequency.value = rand(2200, 3400);
+        sg.gain.setValueAtTime(0.0001, t);
+        sg.gain.exponentialRampToValueAtTime(vol * T.snap, t + 0.002);
+        sg.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+        s.connect(hp); hp.connect(sg); sg.connect(out); s.start(t, Math.random()); s.stop(t + 0.12);
+      }
+      if (T.tail) { // crackling stars: a sizzle that follows the break
+        const d = t - c.currentTime + rand(0.35, 0.6);
+        setTimeout(() => { this.lastCrackle = 0; this.crackle(p); }, d * 1000);
+      }
+    },
+    // bright: lowpass scale; len: length scale; sub: the thud's pitch; thud: its weight; snap: a high crack; tail: crackle after.
+    TONES: {
+      boom: { bright: 1, len: 1, sub: 100, thud: 0.9, vol: 1, attack: 0.008, q: 0.7 },
+      crack: { bright: 1.9, len: 0.7, sub: 140, thud: 0.55, vol: 0.9, attack: 0.003, q: 0.7, snap: 0.5, tail: true },
+      soft: { bright: 0.55, len: 1.5, sub: 70, thud: 0.6, vol: 0.75, attack: 0.04, q: 0.5 },
+      whump: { bright: 0.8, len: 0.85, sub: 75, thud: 1.25, vol: 1, attack: 0.006, q: 3 },
+      sharp: { bright: 2.3, len: 0.55, sub: 160, thud: 1, vol: 1.1, attack: 0.002, q: 0.7, snap: 0.9 },
     },
     lift(p, dur, whistle) {
       if (!this.ready(2)) return;
@@ -1829,8 +2624,9 @@
       const out = this.dest(p);
       const n = this.noiseSrc(), bp = c.createBiquadFilter(), g = c.createGain();
       bp.type = 'bandpass'; bp.Q.value = 1.2;
-      bp.frequency.setValueAtTime(300, t);
-      bp.frequency.exponentialRampToValueAtTime(1400, t + dur);
+      const f0 = rand(240, 380);
+      bp.frequency.setValueAtTime(f0, t);
+      bp.frequency.exponentialRampToValueAtTime(f0 * rand(3.6, 5.2), t + dur);
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.09, t + 0.12);
       g.gain.exponentialRampToValueAtTime(0.001, t + dur);
@@ -1872,8 +2668,14 @@
     hiss(dur, freq, vol, p, o = {}) {
       if (!this.ready(2)) return;
       const c = this.ctx, t = c.currentTime, out = this.dest(p);
+      freq *= rand(0.88, 1.14); vol *= rand(0.85, 1.15); // no two fountains alike
       const n = this.noiseSrc(), bp = c.createBiquadFilter(), g = c.createGain();
       bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = o.q || 0.8;
+      if (dur > 1.5 && !o.wobble) { // a fountain roars up and settles, rather than one flat hiss
+        bp.frequency.setValueAtTime(freq * 0.7, t);
+        bp.frequency.exponentialRampToValueAtTime(freq * 1.15, t + 0.6);
+        bp.frequency.exponentialRampToValueAtTime(freq, t + Math.min(dur, 2));
+      }
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(vol, t + 0.3);
       g.gain.setValueAtTime(vol, t + Math.max(0.31, dur - 1));
@@ -2160,13 +2962,23 @@
     el.combo.classList.add('pop');
   }
 
-  let toastTimer = 0;
-  function toast(msg, ms = 2400) {
-    delete el.toast.dataset.badge; // only achievement toasts are tappable (achieve sets it again)
+  let toastTimer = 0, toastHeld = null; // (a film playing: toasts wait in toastHeld till it ends, holdToasts)
+  function toast(msg, ms = 2400, badge) {
+    if (toastHeld) { toastHeld.push([msg, ms, badge]); return; }
+    delete el.toast.dataset.badge; // only achievement and upsell toasts are tappable (achieve passes its id, upsell 'premium')
+    if (badge) el.toast.dataset.badge = badge;
     el.toast.textContent = msg;
     el.toast.classList.add('show');
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.toast.classList.remove('show'), ms);
+  }
+  // A cinematic (Fireworks Street's story finale) holds toasts and achievement pops off the film; after it they play in
+  // turn, none lost.
+  function holdToasts(on) {
+    if (on) { if (!toastHeld) toastHeld = []; el.toast.classList.remove('show'); return; }
+    const q = toastHeld || []; toastHeld = null;
+    let at = 0;
+    q.forEach(([m, ms, b]) => { setTimeout(() => { if (!toastHeld) toast(m, ms, b); else toastHeld.push([m, ms, b]); }, at); at += Math.min(ms || 2400, 3000) + 200; });
   }
 
   // ---------- Update & render ----------
@@ -2174,7 +2986,10 @@
   // On the home screen a single shell goes up now and then behind the title.
 
   function update(dt) {
+    if (drones) drones.tick(dt);
+    if (lasers) lasers.tick(dt);
     gameTime += dt;
+    if (sparklerSig) stepSparklerSig();
     for (let i = timers.length - 1; i >= 0; i--) {
       if (timers[i].t <= gameTime) { const f = timers[i].fn; timers.splice(i, 1); f(); }
     }
@@ -2263,6 +3078,9 @@
   }
 
   let fadeA = 0;
+  // Light drawn fresh each frame onto the fading #fx: the share of it one frame adds, so after the fade it shows at about
+  // the brightness it had on a layer of its own (a light fixed in place converges on its alpha, not five times it).
+  const litA = () => clamp(fadeA * 2.2, 0.2, 1);
   function fade(dt) {
     const base = w3dMoved ? 0.55 : settings.longExposure ? 0.045 : 0.2;
     const a = fadeA = 1 - Math.pow(1 - base, dt * 60);
@@ -2282,12 +3100,10 @@
   // Every full-screen layer costs the phone's compositor a whole-screen blend each frame, even when it is transparent,
   // so layers with nothing to show are hidden (about twice the frame rate during a launch on a low-end phone).
   let gfxBlank = true;
-  // glowUsed: something was drawn on #glow this frame (it shows, and the next frame clears it first).
-  let glowUsed = false;
   const layerShown = new Map();
   // A phone short of graphics memory (the low tier, or one Android calls low-RAM) drops the depth effect's embers: one
   // full-screen layer fewer, enough to keep the WebView under its tile budget (it flashed black blocks over the sky).
-  const lowMem = () => Q().maxStars < 300 || !!(window.LUTSNative && window.LUTSNative.lastAds && window.LUTSNative.lastAds.lowRam);
+  const lowMem = () => Q().maxStars < 300;
   function showLayer(c, on) { if (layerShown.get(c) !== on) { layerShown.set(c, on); c.style.visibility = on ? '' : 'hidden'; } }
   function syncLayers() {
     const s = launch.sequence;
@@ -2297,10 +3113,6 @@
     showLayer(moonC, moonDrawn);
     showLayer(cityC, cityDrawn);
     showLayer(gfxC, !gfxBlank);
-    // #glow rides with #fx: the 3D view, the launch camera, shake and reduced motion all move #fx only.
-    if (glowC.style.transform !== fxC.style.transform) glowC.style.transform = fxC.style.transform;
-    if (glowC.style.opacity !== fxC.style.opacity) glowC.style.opacity = fxC.style.opacity;
-    showLayer(glowC, glowUsed && fxC.style.visibility !== 'hidden');
   }
 
   // Trail buckets: every streak of a frame lands in a bucket of (layer, atlas colour slot, width class, alpha level, cap)
@@ -2349,7 +3161,8 @@
   }
 
   // Heads: queued during the star loop (layer, slot, kind, x, y, r, alpha) and drawn after the trails as atlas sprites in
-  // 'lighter', sky ones on #glow and ground ones on #items (both cleared every frame, so a head never smears). Capped at
+  // 'lighter', sky ones on the fading #fx (at litA(): a still head settles at its own brightness, a moving one leaves the
+  // faint comet its trail already has) and ground ones on #items (cleared every frame). Capped at
   // Q().heads per frame; not particles. hn stays at the last frame's count until the next star loop.
   const HQ = new Float32Array(7 * 3200);
   let hn = 0, hmax = 0;
@@ -2359,22 +3172,24 @@
   }
   function drawHeads() {
     if (!hn) return;
-    glx.globalCompositeOperation = ictx.globalCompositeOperation = 'lighter';
+    const fa = litA();
+    ctx.globalCompositeOperation = ictx.globalCompositeOperation = 'lighter';
     for (let i = 0, e = hn * 7; i < e; i += 7) {
-      const g = HQ[i] ? ictx : glx;
-      if (!HQ[i]) glowUsed = true;
-      g.globalAlpha = Math.min(1, HQ[i + 6]); SPR.draw(g, HQ[i + 1], HQ[i + 2], HQ[i + 3], HQ[i + 4], HQ[i + 5]);
+      const g = HQ[i] ? ictx : ctx;
+      g.globalAlpha = Math.min(1, HQ[i + 6]) * (HQ[i] ? 1 : fa); SPR.draw(g, HQ[i + 1], HQ[i + 2], HQ[i + 3], HQ[i + 4], HQ[i + 5]);
     }
-    glx.globalAlpha = ictx.globalAlpha = 1;
-    glx.globalCompositeOperation = ictx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = ictx.globalAlpha = 1;
+    ctx.globalCompositeOperation = ictx.globalCompositeOperation = 'source-over';
   }
 
   function draw() {
-    if (glowUsed) { glx.clearRect(0, 0, W, H); glowUsed = false; }
     SPR.refresh(); // colours added since the last frame reach the bitmap
     if (portrait) drawPortrait();
+    if (sparklerSig) drawSparklerSig();
     drawSmoke();
     drawGroundItems();
+    if (lasers) laserDraw(); // (behind a swarm: the Sky Story's searchlights)
+    if (drones) droneDraw();
     drawRush();
     ctx.globalCompositeOperation = gctx.globalCompositeOperation = 'lighter';
 
@@ -2387,6 +3202,7 @@
       g.beginPath(); g.moveTo(s.px, s.py); g.lineTo(s.x, s.y); g.stroke();
     }
 
+    if (drawingNets.length) drawNets();
     // Stars and sparks: velocity streaks batched into buckets, one path and one stroke() per bucket (see seg()).
     hn = 0; hmax = Q().heads;
     for (const p of stars) {
@@ -2444,34 +3260,63 @@
     ctx.globalAlpha = gctx.globalAlpha = 1;
   }
 
-  let last = performance.now();
+  let last = performance.now(), skyTapHintAt = 0;
+  const lowMemPhone = ANDROID_WEBVIEW && (navigator.deviceMemory || 4) <= 4;
+  let puzzleSkyUntil = 0; // a puzzle's win show (or Rocket Rush's finale) is on the sky behind it until then
+  // Open sheets / the chor picker, looked up at most every 200 ms instead of two querySelector calls a frame.
+  let domOpenAt = -1e9; const domOpenV = { chor: false, sheet: false };
+  let menuHeld = false;
+  function domOpen() {
+    const t = performance.now();
+    if (t - domOpenAt > 200) { domOpenAt = t; domOpenV.chor = !!document.querySelector('.chor-pick:not([hidden])'); domOpenV.sheet = !!document.querySelector('.sheet-modal:not([hidden])');
+      // Any menu over the sky (Premium, a dialog, Settings, Worlds, Share) holds the show like an Android app's
+      // dialog: no fireworks and no sound behind it, both carrying on as it closes.
+      domOpenV.menu = domOpenV.sheet || !!document.querySelector('.modal:not([hidden]), .premium-panel:not([hidden]), #worldPanel:not([hidden]), #shareApps:not([hidden]), #settings.open'); }
+    return domOpenV;
+  }
   function frame(now) {
     if (document.hidden) { frameRaf = 0; return; }
     frameRaf = requestAnimationFrame(frame);
+    // Home and the Street picker are still menus over the sky: on a phone the sky behind runs at about 20 fps (it
+    // measured 31 fps, 89% janky at full rate on a 4 GB phone), and those frames don't count toward the quality tier.
+    const menuLite = !rec && innerWidth <= 760 && (document.body.classList.contains('home') || domOpen().chor);
+    if (menuLite && now - last < 46) return;
     frameNo++;
     const dt = Math.min(0.05, (now - last) / 1000);
-    frameMean += ((now - last) - frameMean) * 0.025;
-    slowFor = frameMean > 38 ? slowFor + dt : 0;
-    fastFor = frameMean < 24 ? fastFor + dt : 0;
-    if (slowFor > 2 && measuredTier > 0) { failedTier = measuredTier; setTier(measuredTier - 1); }
-    else if (fastFor > 12 && measuredTier + 1 < failedTier) setTier(measuredTier + 1);
+    if (!menuLite) {
+      frameMean += ((now - last) - frameMean) * 0.025;
+      slowFor = frameMean > 38 ? slowFor + dt : 0;
+      fastFor = frameMean < 24 ? fastFor + dt : 0;
+      if (slowFor > (lowMemPhone ? 1 : 2) && measuredTier > 0) { // a 4 GB phone steps down after 1 s of slow frames (a multi-break show hit 25 fps, 233 ms frames)
+        failedTier = measuredTier; setTier(measuredTier - 1); }
+      else if (fastFor > 12 && measuredTier + 1 < failedTier) setTier(measuredTier + 1);
+    }
     // Weak phone, 3D, a show playing: smaller firework budget and a lower-resolution scene until it ends. Still under
     // about 7 frames a second for 4 seconds of a show, and 3D rests for the session so the show runs on in 2D.
     const lite = w3dShown() && launch.state !== 'READY' && lowEnd3d();
     if (lite !== lite3d) { lite3d = lite; sizeWorld3d(); }
-    crawlFor = lite && frameMean > 140 && !adBusy() ? crawlFor + (now - last) / 1000 : 0;
+    crawlFor = lite && frameMean > 140 ? crawlFor + (now - last) / 1000 : 0;
     if (crawlFor > 4) { crawlFor = 0; lite3d = false; give3dUp('3D paused: this device needs a rest. The 2D background stays for now.'); }
     // A low-end phone out of memory freezes for seconds at a time in 3D; twice in two minutes (not counting time the app
-    // was in the background or behind a video ad) and 3D rests for the session, as after GPU trouble
-    if (now - last > 3000 && w3dHiddenAt < last && !adBusy() && w3dShown() && lowEnd3d()) {
+    // was in the background) and 3D rests for the session, as after GPU trouble
+    if (now - last > 3000 && w3dHiddenAt < last && w3dShown() && lowEnd3d()) {
       w3dStalls = w3dStalls.filter((t) => now - t < 120000).concat(now);
       if (w3dStalls.length >= 2) { w3dStalls = []; give3dUp('3D paused: this device needs a rest. The 2D background stays for now.'); }
     }
     last = now;
     // On a phone a sheet (Light someone up, Birthdays, Gems, ...) covers the whole screen: the show behind it waits,
-    // so the sheet scrolls smoothly and the battery lasts. Recording keeps every frame.
-    const covered = !rec && innerWidth <= 760 && !!document.querySelector('.sheet-modal:not([hidden])');
-    if (!paused && !covered) {
+    // so the sheet scrolls smoothly and the battery lasts. Diya Path and Rocket Rush cover it on every screen: the
+    // fireworks and 3D world behind them don't run at all. Recording keeps every frame.
+    const covered = !rec && ((document.body.classList.contains('puzzling') && now > puzzleSkyUntil) || domOpen().menu);
+    const held = !rec && domOpen().menu && !document.body.classList.contains('puzzling'); // a puzzle keeps its own sounds
+    if (held !== menuHeld) { // a menu's sound hold, released as it closes
+      menuHeld = held;
+      holdMusic(held || paused);
+      if (Sound.ctx) safeSound(() => (held ? Sound.ctx.suspend() : !paused && Sound.ctx.resume()));
+    }
+    // Covered: no frames at all until it isn't (a look 4 times a second); the time away doesn't count as a slow frame.
+    if (covered) { cancelAnimationFrame(frameRaf); frameRaf = 0; setTimeout(() => { if (!frameRaf && !document.hidden) { last = performance.now(); frameRaf = requestAnimationFrame(frame); } }, 250); return; }
+    if (!paused) {
       fade(dt);
       try { syncWorld3d(); if (w3dShown()) stepWorld3d(dt); update(dt); draw(); drawLaunch(); renderGlow(dt); applyShake(dt); updateView(dt); if (w3dShown() && w3dRenderDue()) renderWorld3d(); syncLayers(); }
       catch (error) { abortLaunch(); console.error('Launch renderer failed', error); }
@@ -2505,6 +3350,9 @@
       return;
     }
     if (paused || pointer) return;
+    // A tap while a show winds down skips straight back (the camera glides home at once, Happy Diwali cut short). The
+    // Grand show's director is still firing through FADING, so a tap never cuts that short.
+    { const q = launch.sequence; if (q && gameTime >= directorUntil && (launch.state === 'FADING' || launch.state === 'RETURNING')) { q.skip = true; return; } }
     if (lighterDown(e)) return;
     if (w3dShown() && (playMode !== 'spark' || shapesClosed)) { look3dDown(e); return; } // the sparkler draws (bar open)
     if (launch.state !== 'READY') return;
@@ -2515,6 +3363,9 @@
     if (kind === 'sky' && tapSkyOn()) { tapFire((e.clientX - arPan.x), (e.clientY - arPan.y)); return; }
     if (kind !== 'spark' && !rush.on) {
       if (nativeRecording === 'recording') userLaunch((e.clientX - arPan.x), (e.clientY - arPan.y));
+      // A sky tap that fires nothing isn't dead: it says how to fire (at most every 10 s)
+      else if (kind === 'sky' && mode === 'play' && !live.on && Date.now() - skyTapHintAt > 10000) { // (not in Live Sky: a show is watched, not fired)
+        skyTapHintAt = Date.now(); toast('✨ Drag the sparkler to a fuse to fire'); }
       return;
     }
     el.hint.classList.add('gone');
@@ -2642,12 +3493,14 @@
     // opens on release.
     const key = sky ? shellKey(it.shellId || settings.shell) : it.type;
     if (onTry(key) && !useTry(key)) { if (!lighter.needTry) lighter.needTry = key; return; }
+    const shotId = sky ? it.shellId || settings.shell : it.type;
+    if (!useShot(sky ? 'sky' : 'ground', shotId)) return; // out of shots: it stays unlit until the tile refills
     spendGems(cost);
     festLaunched([sky ? it.shellId || settings.shell : it.type]);
     const [fx, fy] = tipPos(it);
     if (sky) {
       it.skyFuse = 0; atDepth(it, () => Sound.hiss(SKY_FUSE + 0.1, 6000, 0.05, pan(it.x), { q: 0.4 }));
-      it.paid = { cost, key: onTry(key) ? key : '', video: onTry(key) && triedVideo }; // given back if it never flies (unpay)
+      it.paid = { cost, key: onTry(key) ? key : '', video: onTry(key) && triedVideo, shot: shotId }; // given back if it never flies (unpay)
     } else lightItem(it);
     it.swept = true;
     lighter.lit++;
@@ -2663,7 +3516,7 @@
     else if (lighter.needTry) { const t = lighter.needTry; lighter.needTry = null; offerTry(t); }
     // Nothing lit: back to the dock (updateLighter glides it there). After a sweep it waits where it was let go, then
     // drifts home too, so it is ready for the next one.
-    lighter.back = performance.now() + (lighter.lit ? 1200 : 0); lighter.from = [lighter.x, lighter.y];
+    lighter.back = performance.now() + (lighter.lit ? 500 : 0); lighter.from = [lighter.x, lighter.y];
     if (lighter.lit) lighter.show = true; // a sweep is a show: its end is the break for a video and the rating ask
   }
   // Another mode chosen: what the sparkler lit in this one stops (a ground fountain must not go on spraying over the Sky
@@ -2681,6 +3534,7 @@
     it.paid = null;
     if (!p) return;
     if (p.cost) { wallet.b += p.cost; saveWallet(); syncGems(); }
+    if (p.shot) giveShot('sky', p.shot);
     if (p.key) { if (p.video) tries.vfor = p.key; else delete tries.used[p.key]; if (triedNow === p.key) triedNow = null; saveTries(); syncTries(); }
   }
   // A swept Sky tube: its fuse sputters, then its shell goes up. Lit on its own (nothing else burning or in the air), it
@@ -2700,7 +3554,7 @@
       const id = it.shellId || settings.shell;
       it.skyFuse = null;
       for (const o of groundItems) o.launcher = o === it; // the launch takes this very tube (prepareLaunch)
-      lighter.show = false; // the launch's own end is the show's end: its video break and rating ask
+      lighter.show = false; // the launch's own end is the show's end and rating ask
       const s = { id: shellKey(id), label: shellLabel(id), type: id };
       Promise.resolve(launch.request(s)).then((ok) => { if (ok === false) skyVolley(it); }, () => skyVolley(it));
       return;
@@ -2713,7 +3567,7 @@
     it.skyFuse = null; it.done = true;
   }
   // A sweep's show has ended once all it lit has burnt out and its shells have burst: the same natural break a Fire
-  // show's end is (an interstitial every 3rd show, 2 minutes apart, and the moment to ask for a rating). On a phone the
+  // show's end is, and the moment to ask for a rating. On a phone the
   // sparkler is how crackers are lit, so without this a phone would never reach that break.
   function sweepEnded(dt) {
     if (!lighter.show || lighter.held) { lighter.quiet = 0; return; }
@@ -2722,16 +3576,19 @@
     if (lighter.quiet < 0.8) return;
     lighter.show = false; lighter.quiet = 0;
     if (triedNow) { afterTry(); return; }
-    if (mode === 'play' && launch.state === 'READY') adBreak('launch');
     setTimeout(showEndedForRating, 1500);
-    setTimeout(showEndedForPremium, 4000);
+    afterShow(showEndedForPremium, 4000);
   }
-  // A show that used a free try ends on the Premium sheet naming that cracker, with no video ad or rating ask beside it.
+  // Where the player is: an offer timed after a show is dropped once they leave that show (home, the street, Live Sky,
+  // another mode), so it never opens over a screen they went to since.
+  const showSpot = () => [mode, chor.on, live.on, rush.on, playMode, document.body.classList.contains('home')].join();
+  function afterShow(fn, ms) { const at = showSpot(); setTimeout(() => { if (showSpot() === at) fn(); }, ms); }
+  // A show that used a free try ends on the Premium sheet naming that cracker, with no rating ask beside it.
   function afterTry() {
     const type = triedNow;
     triedNow = null;
-    setTimeout(() => {
-      if (mode === 'play' && launch.state === 'READY' && premiumPanel.hidden && sheets.every((x) => x.hidden) && !rewardBusy && !adShowing && !premium.active && !document.hidden) openPremium({ tried: type });
+    afterShow(() => {
+      if (mode === 'play' && launch.state === 'READY' && premiumPanel.hidden && sheets.every((x) => x.hidden) && !rewardBusy && !premium.active && !document.hidden) openPremium({ tried: type });
     }, 1200);
   }
   // Something the sparkler lit is still going: a cracker burning, a Sky tube's fuse, or its shells in the air. Fire waits
@@ -2804,14 +3661,15 @@
   document.addEventListener('keydown', (e) => {
     if (typingTarget(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.key === 'Escape' && !$('#arSafety').hidden) { $('#btnArSafeCancel').click(); return; }
+    if (e.key === 'Escape' && !$('#liveLock').hidden) { $('#btnLockClose').click(); return; }
     if (e.key === 'Escape') { $('#rewardsPanel').hidden = true; $('#crackerTrial').hidden = true; closeDrawer(); closeCardModal(); closeSheets(); return; }
     if (mode === 'intro' || mode === 'envelope' || mode === 'puzzle') return;
     const k = e.key.toLowerCase();
     if (k === ' ') { e.preventDefault(); togglePause(); }
     else if (k === 's') toggleSound();
     else if (k === 'h') toggleUi();
-    else if (/^[1-9]$/.test(k) && mode === 'play' && playMode === 'sky') setShell(DOCK_ORDER[+k - 1]);
-    else if (k === '0' && mode === 'play') setShell(DOCK_ORDER[9]);
+    else if (/^[1-9]$/.test(k) && mode === 'play' && playMode === 'sky' && barShells()[+k - 1]) setShell(barShells()[+k - 1]);
+    else if (k === '0' && mode === 'play' && barShells()[9]) setShell(barShells()[9]);
   });
 
   // ---------- Controls ----------
@@ -2939,28 +3797,32 @@
       flagindia() { for (const [y, c] of [[12, '#ff9933'], [20, '#fff4e6'], [28, '#2fd25a']]) for (let x = 6; x <= 34; x += 3.5) drawSpark(x, y, 1.3, c, 0.9); for (let i = 0; i < 12; i++) { const a = i / 12 * TAU; drawSpark(20 + Math.cos(a) * 3.4, 20 + Math.sin(a) * 3.4, 0.9, '#5b7bff'); } },
       tiger() { for (let i = 0; i < 22; i++) { const a = i / 22 * TAU; drawSpark(20 + Math.cos(a) * 14, 21 + Math.sin(a) * 12, 1.1, '#ff8a2b', 0.9); } drawSpark(14, 18, 1.6, '#c6ff4d'); drawSpark(26, 18, 1.6, '#c6ff4d'); drawSpark(20, 24, 1.6, '#ff5f7a'); for (const x of [16, 20, 24]) streak(x, 9, x, 13, '#ffd36b', 1.2); },
       india() { this.flagindia(); for (let i = 0; i < 10; i++) { const a = i / 10 * TAU; drawSpark(31 + Math.cos(a) * 5, 9 + Math.sin(a) * 4.5, 0.9, '#ff8a2b'); } },
-      ...Object.fromEntries(['bangladesh', 'usa', 'uk', 'china', 'brazil'].map((id) => [id, () => { // a small waving flag
+      ...Object.fromEntries(['bangladesh', 'usa', 'uk', 'china', 'brazil', 'japan'].map((id) => [id, () => { // a small waving flag
         const F = FLAGS[id];
         for (let r = 0; r < 6; r++) for (let c = 0; c < 9; c++) { const u = (c + 0.5) / 9, v = (r + 0.5) / 6; drawSpark(5 + u * 30, 20 - 16 * F.ar + v * 32 * F.ar, 1.25, F.at(u, v), 0.9); }
       }])),
       grandshow() { burst(11, 14, 7, 9, ['#ff3355']); burst(29, 14, 7, 9, ['#4a7dff']); burst(20, 25, 9, 12, ['#ffcf6b', '#fff4e0']); for (let i = 0; i < 5; i++) drawSpark(6 + i * 7, 36, 1.4, '#fff4e0', 0.8); },
       whistle() { burst(20, 22, 11, 10, ['#ff5fa2', '#ffd36b']); for (let i = 0; i < 3; i++) streak(8 + i * 3, 6 + i * 2, 12 + i * 3, 4 + i * 2, '#fff4e0', 1, 0.7); },
     };
+    if (TYPES[type] && TYPES[type].livePiece) { // a Live Sky cracker: its emoji over a soft glow
+      burst(20, 20, 15, 14, ['#ffd36b', '#ff5fa2', '#5ff0ff'], { w: 0.6 });
+      g.font = '20px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(TYPES[type].icon, 20, 21);
+      return c.toDataURL();
+    }
     (map[type] || map.random).call(map);
     return c.toDataURL();
   }
 
-  // Dock icon: the cracker's artwork when it has one (WebP, then JPEG), otherwise its drawn icon.
+  // Dock icon: the cracker's artwork when it has one, otherwise its drawn icon.
   function setChipArt(chip, id, drawn) {
     const img = chip.querySelector('img'), art = CRACKER_ART[id];
     img.draggable = false; // the chip drags itself (onto the street); the picture must not start the browser's image drag
     if (!art) { img.src = drawn(); return; }
     chip.classList.add('art');
     img.decoding = 'async';
-    img.addEventListener('error', () => {
-      if (img.src.endsWith('.webp')) img.src = `assets/crackers/${art}.jpg`;
-      else { chip.classList.remove('art'); img.src = drawn(); }
-    });
+    img.loading = 'lazy'; // a chip that isn't loaded in the bar never fetches or decodes its picture
+    img.addEventListener('error', () => { chip.classList.remove('art'); img.src = drawn(); });
     img.src = `assets/crackers/${art}.webp`;
   }
   // The lists show the real crackers. A sky shell is fired from a tube, so its chip is its tube, wrapped in its own
@@ -2978,10 +3840,12 @@
     img.draggable = false;
     chip.classList.add('real');
     if (!GROUND_ART.includes(id)) { img.src = drawn(); return; }
+    img.loading = 'lazy';
     img.addEventListener('error', () => { img.src = img.src.endsWith('.webp') ? `assets/ground/${id}.png` : drawn(); });
     img.src = `assets/ground/${id}.webp`;
   }
   const shellList = $('#shellList');
+  let rack = null; // the crackers loaded in the bar (Cracker loader, below; the Ground list is built further down)
   for (const id of DOCK_ORDER) {
     const b = document.createElement('button');
     b.className = 'shell-chip';
@@ -3002,6 +3866,7 @@
   function setShell(id) {
     if (launch.state !== 'READY') return;
     if (itemLocked(shellKey(id))) { offerTry(shellKey(id)); return; } // a Premium shell with no free light left
+    if (shotEmpty('sky', id)) { shotsOut(); return; }
     settings.shell = id;
     saveSettings();
     syncSettingsUi();
@@ -3053,6 +3918,7 @@
       saveSettings(); syncSettingsUi();
     });
     shellList.querySelectorAll('.shell-chip').forEach((c) => c.classList.toggle('active', c.dataset.shell === settings.shell));
+    syncBar();
   }
   const bind = (id, ev, fn) => $(id).addEventListener(ev, (e) => { fn(e.target); saveSettings(); syncSettingsUi(); });
   bind('#setShell', 'change', (t) => setShell(t.value)); // its tube too; a locked Premium shell offers its try and stays unpicked
@@ -3081,8 +3947,8 @@
     toast('Settings reset');
   });
 
-  function openDrawer() { updateHomeTiles(); drawer.classList.add('open'); drawer.setAttribute('aria-hidden', 'false'); }
-  function closeDrawer() { drawer.classList.remove('open'); drawer.setAttribute('aria-hidden', 'true'); }
+  function openDrawer() { track.screen('settings'); updateHomeTiles(); drawer.classList.add('open'); drawer.setAttribute('aria-hidden', 'false'); }
+  function closeDrawer() { if (drawer.classList.contains('open')) track.back(); drawer.classList.remove('open'); drawer.setAttribute('aria-hidden', 'true'); }
   $('#btnIntroSettings').addEventListener('click', openDrawer); // the home screen's own way in
   document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => {
     const which = b.dataset.close;
@@ -3097,10 +3963,9 @@
       if (arOn) drawCamera(g, w, h);
       else if (w3dShown()) drawWorld3d(g, w, h, inFrame);
       else { g.fillStyle = '#020309'; g.fillRect(0, 0, w, h); }
-      for (const c of [skyC, flightC, moonC, fxC, glowC, cityC, floorC, itemsC, paintC, gfxC]) {
+      for (const c of [skyC, flightC, moonC, fxC, cityC, floorC, itemsC, paintC, gfxC]) {
         if (c === fxC) drawGlow(g, w / W, h / H); // #skyGlow sits just under #fx
         if ((c === skyC || c === moonC) && arOn) continue;
-        if (c === glowC && !layerShown.get(glowC)) continue; // hidden while empty
         if ((c === skyC || c === moonC || c === flightC || c === cityC || c === floorC) && w3dShown()) continue;
         const matrix = new DOMMatrix(c.style.transform || undefined);
         g.save(); g.scale(w / W, h / H);
@@ -3120,7 +3985,6 @@
     else { layer(skyC, VIEW_DEPTH.sky, layerScale(VIEW_DEPTH.sky)); layer(moonC, VIEW_DEPTH.sky, layerScale(VIEW_DEPTH.sky)); }
     drawGlow(g, w / W, h / H);
     layer(fxC, VIEW_DEPTH.fx);
-    if (layerShown.get(glowC)) layer(glowC, VIEW_DEPTH.fx);
     if (!w3dShown()) { layer(cityC, VIEW_DEPTH.city, layerScale(VIEW_DEPTH.city)); g.drawImage(floorC, 0, 0, w, h); }
     g.drawImage(itemsC, 0, 0, w, h);
     g.drawImage(paintC, 0, 0, w, h);
@@ -3215,18 +4079,24 @@
   }
   // The same mark as on recorded videos (#recMark): the app's icon, name and where to get it, bottom-left.
   function drawBrandMark(g, k) {
-    const icon = $('#recMark img'), pad = 14 * k, h = 40 * k, x = pad, y = g.canvas.height - pad - h;
+    if (premium.active) return; // Premium photos and videos carry no mark
+    // Three lines: the name in gold, the maker (Gem Creators) between two small sparkles, and where to get it.
+    const icon = $('#recMark img'), pad = 14 * k, h = 52 * k, x = pad, y = g.canvas.height - pad - h;
     g.save();
+    const name = 'Light Up the Skies', by = '✦ by Gem Creators ✦', get = inLang('Get it on Google Play');
     g.font = `700 ${13 * k}px Cinzel, Georgia, serif`;
-    const name = 'Light Up the Skies', get = inLang('Get it on Google Play');
-    const tw = Math.max(g.measureText(name).width, (g.font = `500 ${10.5 * k}px Outfit, sans-serif`, g.measureText(get).width));
-    const w = 6 * k + 28 * k + 8 * k + tw + 12 * k;
+    let tw = g.measureText(name).width;
+    g.font = `600 ${9.5 * k}px Outfit, sans-serif`; tw = Math.max(tw, g.measureText(by).width);
+    g.font = `500 ${10.5 * k}px Outfit, sans-serif`; tw = Math.max(tw, g.measureText(get).width);
+    const w = 6 * k + 34 * k + 8 * k + tw + 12 * k;
     g.fillStyle = 'rgba(8,6,20,.55)'; g.strokeStyle = 'rgba(255,210,122,.35)'; g.lineWidth = k;
     roundRect(g, x, y, w, h, 14 * k); g.fill(); g.stroke();
-    if (icon && icon.complete && icon.naturalWidth) g.drawImage(icon, x + 6 * k, y + 6 * k, 28 * k, 28 * k);
+    if (icon && icon.complete && icon.naturalWidth) g.drawImage(icon, x + 6 * k, y + 9 * k, 34 * k, 34 * k);
     g.textBaseline = 'alphabetic';
-    g.fillStyle = '#ffd77e'; g.font = `700 ${13 * k}px Cinzel, Georgia, serif`; g.fillText(name, x + 42 * k, y + 18 * k);
-    g.fillStyle = 'rgba(255,255,255,.85)'; g.font = `500 ${10.5 * k}px Outfit, sans-serif`; g.fillText(get, x + 42 * k, y + 32 * k);
+    const tx = x + 48 * k;
+    g.fillStyle = '#ffd77e'; g.font = `700 ${13 * k}px Cinzel, Georgia, serif`; g.fillText(name, tx, y + 18 * k);
+    g.fillStyle = '#ffb6d9'; g.font = `600 ${9.5 * k}px Outfit, sans-serif`; g.fillText(by, tx, y + 31 * k);
+    g.fillStyle = 'rgba(255,255,255,.85)'; g.font = `500 ${10.5 * k}px Outfit, sans-serif`; g.fillText(get, tx, y + 44 * k);
     g.restore();
   }
   // The Happy Diwali sign is HTML; copy it into a photo as it looks right now (mid-animation included).
@@ -3261,7 +4131,6 @@
     nativeRecording = event.detail;
     const active = nativeRecording === 'recording';
     if (was === 'recording' && nativeRecording === 'idle') {
-      setTimeout(() => adBreak('break'), 800); // a video saved: a natural break
       // A card's video is saved, however it was recorded (Save video, or the top Record/Share): its button says so
       if (mode === 'card' && currentCard) { currentCard.saved = true; markSaved(); }
     }
@@ -3276,9 +4145,49 @@
     if (active && ready) ready();
     if (nativeRecording === 'idle' && shotShare && shotShare.native && launch.state === 'READY') shotShare = null;
   });
+  // The recording is saved: offer the installed social apps, one tap each (ShareTargets), and the share sheet as More.
+  const SHARE_APPS = {
+    whatsapp: ['WhatsApp', '#25d366', 'W'], instagram: ['Instagram', 'linear-gradient(135deg,#feda75,#d62976,#4f5bd5)', 'IG'],
+    facebook: ['Facebook', '#1877f2', 'f'], fbpage: ['Facebook Page', '#0866ff', '⚑'], threads: ['Threads', '#111', '@'], youtube: ['YouTube Shorts', '#ff0000', '▶'],
+    snapchat: ['Snapchat', '#fffc00', '👻'], x: ['X', '#000', 'X'], telegram: ['Telegram', '#229ed9', '✈'],
+    moj: ['Moj', '#ff3d6e', 'M'], sharechat: ['ShareChat', '#ff6b00', 'S'], josh: ['Josh', '#7b2ff7', 'J'],
+  };
+  // A ready-made post for each network: a title, the player's own message, keywords and hashtags (YouTube shows the
+  // first three hashtags above the title and searches the description; tags can't be set from outside, so they go in
+  // as hashtags), and the Play link. The app also copies it, for apps that ignore shared text (Facebook, Instagram).
+  const SHARE_WORDS = 'Diwali fireworks game · sparkler name · Diwali wishes video · online patakhe · Deepavali greetings';
+  const SHARE_TAGS = ['#Diwali', '#HappyDiwali', '#Diwali2026', '#Fireworks', '#DiwaliFireworks', '#Patakhe', '#Deepavali', '#DiwaliWishes', '#FestivalOfLights', '#LightUpTheSkies'];
+  function shareTemplate(key) {
+    const short = key === 'youtube' || key === 'moj' || key === 'josh' || key === 'instagram';
+    const title = 'Diwali fireworks in the sky 🎆 Happy Diwali wishes' + (short ? ' #Shorts' : '');
+    const tags = (key === 'youtube' ? ['#Shorts', ...SHARE_TAGS] : key === 'x' || key === 'threads' ? SHARE_TAGS.slice(0, 4) : SHARE_TAGS).join(' ');
+    const words = SHARE_WORDS;
+    const own = (shareCaption || '').trim();
+    const link = playLink(key);
+    const text = [own || 'I lit up the sky for Diwali with Light Up the Skies ✨', own.includes('play.google.com') ? '' : `Make yours free: ${link}`, words, tags].filter(Boolean).join('\n\n');
+    return { title, text };
+  }
+  const closeShareApps = () => { $('#shareApps').hidden = true; };
+  window.addEventListener('luts:videoready', (event) => {
+    const keys = (Array.isArray(event.detail) ? event.detail : []).filter((k) => SHARE_APPS[k]);
+    const row = $('#shareAppsRow');
+    row.textContent = '';
+    for (const key of [...keys, 'more']) {
+      const [name, bg, mark] = SHARE_APPS[key] || [window.LUTSLang ? LUTSLang.t('More') : 'More', 'var(--glass-2)', '⋯'];
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'share-app'; b.dataset.app = key;
+      const i = document.createElement('i'); i.style.background = bg; i.textContent = mark; if (key === 'snapchat') i.style.color = '#000';
+      const l = document.createElement('span'); l.textContent = name;
+      b.append(i, l);
+      b.addEventListener('click', () => { const tpl = shareTemplate(key); window.LUTSAndroid.shareVideo(key, tpl.title, tpl.text); track('share', { kind: 'video', app: key }); if (key !== 'more') setTimeout(() => toast(window.LUTSLang ? LUTSLang.t('Title, hashtags and link copied: paste them in your post') : 'Title, hashtags and link copied: paste them in your post', 4000), 600); funnel(`share_${key}`); closeShareApps(); countLight(); });
+      row.append(b);
+    }
+    $('#shareApps').hidden = false;
+  });
+  $('#btnShareAppsX').addEventListener('click', closeShareApps);
   function toggleRecording() {
-    if (nativeRecorder) {
-      if (nativeRecording === 'idle' && mode === 'card' && currentCard) { setShareCaption(cardCaption(currentCard)); recordShow(currentCard); return; }
+    if (nativeRecorder && !rec) { // (a countdown's clip records the canvas, the app's too: it stops as on the web, below)
+      if (nativeRecording === 'idle' && mode === 'card' && currentCard) { if (!cdBusy()) { setShareCaption(cardCaption(currentCard)); recordShow(currentCard); } return; }
       // Record on the street: the chosen cracker fires as soon as recording starts (the buttons hide while the screen records),
       // and the video stops and goes to the share sheet when the sky clears, with the greeting and the Play link.
       if (nativeRecording === 'idle' && mode === 'play' && !rush.on && launch.state === 'READY' && !shotShare) { shareShow(); return; }
@@ -3290,20 +4199,24 @@
     if (!rec) { startRecording(); return; }
     // REC tapped to stop: the closing card plays for a moment first (a tap during it stops once it has shown).
     const r = rec;
-    if (!settings.signVideos) { stopRecording(); return; }
+    if (!settings.signVideos || r.clean) { stopRecording(); return; } // (a clean video has no closing card to show)
     if (!r.outro) r.outro = performance.now();
     setTimeout(() => { if (rec === r) stopRecording(); }, Math.max(0, 1600 - (performance.now() - r.outro)));
   }
   const canRecord = () => !!(window.MediaRecorder && HTMLCanvasElement.prototype.captureStream);
   // quiet: no REC badge or toast, and the finished file goes to onDone(blob, name, type) instead of being saved.
-  function startRecording(msg, { quiet = false, onDone = null } = {}) {
-    if (nativeRecorder) { if (!quiet) window.LUTSAndroid.recording('start'); return; }
+  // web: the canvas recorder even in the Android app (its WebView makes MP4 too), for a video the screen recorder can't
+  // shape. aspect: the video's own width / height (9 / 16: a phone-shaped clip), the screen cover-cropped into it.
+  // clean: no mark, corner text or closing card (Premium). layer(g, sx, sy): more drawn over each frame (recordFrame).
+  function startRecording(msg, { quiet = false, onDone = null, web = false, aspect = 0, clean = false, layer = null } = {}) {
+    if (nativeRecorder && !web) { if (!quiet) window.LUTSAndroid.recording('start'); return; }
     if (!canRecord()) { if (!quiet) toast('Video recording is not supported in this browser'); return; }
     // Phones get upscaled to ~720×1280; add ?hq to the URL for full-HD capture (used for promo footage).
     const recMax = /[?&]hq\b/.test(location.search) ? 1920 : 1280;
     const s = Math.min(2, recMax / Math.max(W, H));
     const rc = document.createElement('canvas');
-    rc.width = Math.round(W * s) & ~1; rc.height = Math.round(H * s) & ~1;
+    if (aspect) { rc.width = Math.round(aspect < 1 ? recMax * aspect : recMax) & ~1; rc.height = Math.round(aspect < 1 ? recMax : recMax / aspect) & ~1; } // (9:16: 720×1280, 1080×1920 with ?hq)
+    else { rc.width = Math.round(W * s) & ~1; rc.height = Math.round(H * s) & ~1; }
     const stream = rc.captureStream(30);
     Sound.resume();
     if (Sound.ctx) {
@@ -3319,7 +4232,7 @@
     const mime = types.find((t) => MediaRecorder.isTypeSupported(t)) || '';
     let mr;
     try { mr = new MediaRecorder(stream, mime ? { mimeType: mime, videoBitsPerSecond: recMax > 1280 ? 16e6 : 6e6 } : undefined); } catch (e) { if (!quiet) toast('Could not start recording'); return; }
-    const chunks = [], r = { mr, rc, g: rc.getContext('2d'), start: performance.now(), quiet, discard: false };
+    const chunks = [], r = { mr, rc, g: rc.getContext('2d'), start: performance.now(), quiet, discard: false, aspect, clean, layer };
     mr.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
     mr.onstop = () => {
       // Stop audio as well as video. Leaving the MediaStream audio track alive on Android
@@ -3358,7 +4271,6 @@
     $('#videoPreview').src = previewVideoUrl;
     $('#btnShareVideo').hidden = !(file && navigator.canShare && navigator.canShare({ files: [file] }));
     $('#shareBar').hidden = false;
-    adBreak('break'); // a video saved: a natural break (the preview waits under it)
   }
   const closeShare = () => {
     $('#videoPreview').pause(); $('#videoPreview').removeAttribute('src'); $('#videoPreview').load();
@@ -3392,7 +4304,7 @@
   };
   let shotShare = null; // set while a single shot is being recorded for sharing
   function shareShow() {
-    if (mode === 'card' && currentCard) { setShareCaption(cardCaption(currentCard)); recordShow(currentCard); return; }
+    if (mode === 'card' && currentCard) { if (!cdBusy()) { setShareCaption(cardCaption(currentCard)); recordShow(currentCard); } return; } // (a countdown waiting or playing goes on)
     if (mode !== 'play' || rush.on || launch.state !== 'READY' || shotShare) { toast('Wait for the sky to clear, then tap Share'); return; }
     if (!nativeRecorder && !canRecord()) { toast('Video recording is not supported in this browser'); return; }
     setShareCaption(shotCaption());
@@ -3437,10 +4349,18 @@
   function recordFrame(now) {
     const active = rec;
     try {
-      composite(active.g, active.rc.width, active.rc.height, true);
-      drawDiwaliReveal(active.g, active.rc.width / W, active.rc.height / H);
-      if (active.layer) active.layer(active.g, active.rc.width / W, active.rc.height / H);
-      if (settings.signVideos) signVideo(active.g, active.rc.width, active.rc.height, active.outro ? (now - active.outro) / 1000 : -1);
+      const g = active.g, w = active.rc.width, h = active.rc.height, outro = active.outro ? (now - active.outro) / 1000 : -1;
+      if (active.aspect) { // the screen cover-cropped into the video's own shape: scaled to fill it, centred, never stretched
+        const k = Math.max(w / W, h / H), ox = (w - W * k) / 2, oy = (h - H * k) / 2;
+        g.save(); g.translate(ox, oy); g.scale(k, k); composite(g, W, H, true); g.restore();
+        g.save(); g.translate(ox, oy); drawDiwaliReveal(g, k, k); if (active.layer) active.layer(g, k, k); g.restore();
+        if (!active.clean) { drawBrandMark(g, k); if (settings.signVideos) signVideo(g, w, h, outro); } // (Premium: none of them)
+      } else {
+        composite(g, w, h, true);
+        drawDiwaliReveal(g, w / W, h / H);
+        if (active.layer) active.layer(g, w / W, h / H);
+        if (settings.signVideos && !active.clean) signVideo(g, w, h, outro);
+      }
       const sec = (now - active.start) / 1000;
       $('#recTime').textContent = `0:${String(sec | 0).padStart(2, '0')}`;
       if (!active.outro && sec >= 28.2) active.outro = now; // the cap ends on the closing card too
@@ -5037,7 +5957,28 @@
   // rel: who they are to you (a RELATIONS id, '' for Anyone); links made before relationships have none.
   // pg: the reason pages (PAGE_LEN each; while you write, an empty one is a page not yet filled in).
   // rm: your own reminder for the day ({ m, d, y once only, f follows a moving festival }; see rmOf), never in the link.
+  // d: a New Year countdown's year (one character, see nyYear; '' or none: an ordinary card). The show waits for that
+  // midnight on each recipient's own clock. dr: 1 adds the sender's Premium drone finale with both names (only with d).
   const card = { id: '', o: 'birthday', t: '', f: '', rel: '', h: OCCASIONS[0].head, m: OCCASIONS[0].msg, p: OCCASIONS[0].theme, w: '', img: '', imgFull: '', pg: [], rm: null };
+  // ----- New Year countdown: the year as one character, base 36 from 2020 ('7' is 1 Jan 2027) -----
+  // Anything else (an uppercase letter, two characters) is kept for later versions; this one plays an ordinary card.
+  const NY_BASE = 2020;
+  const nyYear = (d) => (typeof d === 'string' && /^[0-9a-z]$/.test(d) ? NY_BASE + parseInt(d, 36) : 0);
+  const nyCode = (year) => (Number.isInteger(year) && year >= NY_BASE && year < NY_BASE + 36 ? (year - NY_BASE).toString(36) : '');
+  // The coming New Year while it is at most 45 days away, else 0. The creator offers the countdown only then, so a Ugadi
+  // or Tamil New Year card (also 'newyear', from the festival calendar in March or April) never has one.
+  function countdownYear(now = new Date()) {
+    const y = now.getFullYear() + 1;
+    return new Date(y, 0, 1) - now <= 45 * 864e5 ? y : 0;
+  }
+  // A card's midnight on this device's own clock (each recipient's local 00:00, wherever they are), or null.
+  const cdOf = (c) => (c && c.o === 'newyear' && nyYear(c.d) ? new Date(nyYear(c.d), 0, 1, 0, 0, 0, 0) : null);
+  // A free player's countdown plays on the night sky or one of these 3 landmarks; Premium has every one.
+  const COUNTDOWN_FREE = new Set(['default', 'gateway-of-india', 'india-gate', 'mysore-palace']);
+  // The creator's landmark tiles a free player's countdown card can't use: crowned, and a tap opens Premium.
+  const cdLocked = (id) => !!card.d && !premium.active && !COUNTDOWN_FREE.has(id);
+  // For tests and the WebView inspector (the countdown screen adds state()).
+  window.LUTSCountdown = { year: nyYear, code: nyCode, countdownYear };
   // A reminder as a saved card may keep it: a real day (29 February only in a leap year when once only), else none.
   function rmOf(v) {
     if (!v || typeof v !== 'object') return null;
@@ -5110,6 +6051,8 @@
     if (REL_BY_ID.has(raw.rel) && raw.rel !== 'anyone') c.rel = raw.rel; // who they are to the sender (older links: none)
     const pg = pagesOf(raw);
     if (pg.length) c.pg = pg; // reason pages (older links: none)
+    // A New Year countdown, with the sender's drone finale (older links: none; older apps play a New Year card at once)
+    if (c.o === 'newyear' && nyYear(raw.d)) { c.d = raw.d; if (raw.dr) c.dr = 1; }
     if (!c.t) throw new Error('empty card');
     return c;
   }
@@ -5149,18 +6092,58 @@
     if (!card.h || TEMPLATE_HEADS.has(card.h)) card.h = inLang(o.head);
     if (untouchedMsg()) card.m = inLang(firstIdea(card));
     card.p = o.theme;
+    setCountdown(o.id === 'newyear'); // New Year, while the countdown is offered, starts as one; any other occasion has none
     fillForm();
     if (card.rm) setRemind(); // whether it follows a festival's day depends on the occasion
   }
+  // The countdown on (the coming New Year, when the creator offers it) or off. Premium's drone finale starts on; a free
+  // player's sky moves to a landmark the free countdown has, so the card plays where its preview shows.
+  function setCountdown(on) {
+    const y = on ? countdownYear() : 0;
+    card.d = y ? nyCode(y) : '';
+    card.dr = y && premium.active ? 1 : 0;
+    if (y && !premium.active && !COUNTDOWN_FREE.has(world.pending || world.id)) selectWorld('gateway-of-india', { silent: true });
+  }
+  // The countdown's switch (New Year while it is offered), the free tier's note, the Scene step's drone row and the
+  // landmark crowns, as the draft has them.
+  function syncCountdown() {
+    const on = !!card.d, free = !premium.active;
+    $('#cdField').hidden = card.o !== 'newyear' || !countdownYear();
+    $('#cCountdown').checked = on;
+    $('#cdHint').hidden = !free;
+    $('#cdDrones').hidden = !on;
+    $('#cDronesRow').classList.toggle('locked', free);
+    $('#cDrones').checked = !free && !!card.dr;
+    $('#cDrones').setAttribute('aria-label', free ? 'Drone finale with both names · Premium' : 'Drone finale with both names');
+    cardWorldList.querySelectorAll('.world-mini').forEach((b) => b.classList.toggle('locked', worldLocked(WORLD_BY_ID[b.dataset.world]) || cdLocked(b.dataset.world)));
+  }
+  $('#cCountdown').addEventListener('change', (e) => { setCountdown(e.target.checked); syncCountdown(); });
+  $('#cDrones').addEventListener('change', (e) => { card.dr = e.target.checked ? 1 : 0; });
+  // A free player's drone row wears the crown: a tap opens Premium and the switch stays off.
+  $('#cDronesRow').addEventListener('click', (e) => {
+    if (premium.active) return;
+    e.preventDefault();
+    openPremium({ countdown: true });
+  });
+  // Premium bought with the countdown on: every landmark, and the drone finale switched on; lapsed: neither.
+  window.addEventListener('luts:premium-changed', () => {
+    if (card.d) card.dr = premium.active ? 1 : 0;
+    syncCountdown();
+  });
   function occChip(o, when) {
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'chip'; b.dataset.occ = o.id;
     // Painted icon (assets/menu/glyphs, made in Google Flow), or the label's emoji if its file is missing; Thank you
-    // shares the folded hands.
-    const art = new Image();
-    art.className = 'chip-art'; art.alt = ''; art.width = art.height = 22; art.decoding = 'async';
-    art.addEventListener('error', () => { const s = document.createElement('span'); s.className = 'chip-art occ-emoji'; s.textContent = o.label.split(' ')[0]; art.replaceWith(s); }, { once: true });
-    art.src = `assets/menu/glyphs/${o.id === 'thanks' ? 'grateful' : o.id}.webp`;
+    // shares the folded hands. New Year always shows its emoji: its painting is two glasses of drink.
+    const emoji = () => { const s = document.createElement('span'); s.className = 'chip-art occ-emoji'; s.textContent = o.label.split(' ')[0]; return s; };
+    let art;
+    if (o.id === 'newyear') art = emoji();
+    else {
+      art = new Image();
+      art.className = 'chip-art'; art.alt = ''; art.width = art.height = 22; art.decoding = 'async';
+      art.addEventListener('error', () => art.replaceWith(emoji()), { once: true });
+      art.src = `assets/menu/glyphs/${o.id === 'thanks' ? 'grateful' : o.id}.webp`;
+    }
     const name = document.createElement('span');
     name.textContent = occName(o);
     b.append(art, name);
@@ -5342,7 +6325,7 @@
       // the first tap says the price, a second within six seconds buys it (no gems spent by surprise)
       if (!finaleAsk || finaleAsk.id !== id || Date.now() - finaleAsk.at > 6000) { finaleAsk = { id, at: Date.now() }; toast(`Make ${TYPES[id].label} your card finale for 💎${n}? Tap again`, 3600); return; }
       finaleAsk = null;
-      if (!spendGems(n)) { openGems(n); return; }
+      if (!spendGems(n, 'card_finale')) { openGems(n); return; }
       let own = {}; try { own = JSON.parse(localStorage.getItem(FINALE_KEY) || '{}'); } catch (e) { own = {}; }
       own[id] = 1; try { localStorage.setItem(FINALE_KEY, JSON.stringify(own)); } catch (e) { /* ignore */ }
     }
@@ -5358,6 +6341,7 @@
     renderFinales();
     renderPages();
     renderRemind();
+    syncCountdown();
     updatePreview();
   }
   function readForm() {
@@ -5366,6 +6350,9 @@
     card.h = clean(f.head.value, 24);
     card.m = cleanMsg(f.msg.value, 160);
     card.w = world.pending || world.id; // the background picker drives the live scene; the card takes whatever it shows
+    if (card.d && countdownYear()) card.d = nyCode(countdownYear()); // a saved countdown sent again next December: the coming midnight
+    // Made sure of: a free player's countdown keeps to its 3 landmarks and has no drone finale.
+    if (card.d && !premium.active) { if (!COUNTDOWN_FREE.has(card.w)) card.w = 'gateway-of-india'; card.dr = 0; }
   }
   function updatePreview() {
     readForm();
@@ -5384,7 +6371,7 @@
     $('#cPhotoLabel').textContent = card.img ? 'Change photo' : 'Add photo';
     const sky = document.querySelector('.preview-sky'), wcfg = WORLD_BY_ID[card.w];
     sky.style.setProperty('--pv-grad', `linear-gradient(90deg, ${cols.join(', ')})`);
-    sky.style.setProperty('--pv-world', wcfg && wcfg.image ? `url("${thumbSrc(wcfg, 'jpg')}")` : 'none');
+    sky.style.setProperty('--pv-world', wcfg && wcfg.image ? `url("${thumbSrc(wcfg, 'webp')}")` : 'none');
     toAvatar($('#cToAv'), card);
     const mine = initials(card.f);
     setAvatar($('#cFromAv'), `i${mine}`, () => mine || '👤');
@@ -5445,6 +6432,7 @@
   function setRemind() {
     const m = +$('#cRmMonth').value, first = !card.rm, o = OCC_BY_ID[card.o] || OCC_BY_ID.custom, today = midnight();
     if (!m) { card.rm = null; renderRemind(); if (card.id) keepMade(); return; }
+    if (first) track('reminder_on', { kind: 'card' });
     const od = occasionDate(o, today), inMonth = od && od.getMonth() + 1 === m;
     let d = first ? (inMonth ? od.getDate() : today.getMonth() + 1 === m ? today.getDate() : 1) : +$('#cRmDay').value;
     d = Math.min(d || 1, new Date(2024, m, 0).getDate());
@@ -5680,11 +6668,27 @@
   // The app is served from a private origin, so links point at the public web copy of the game instead.
   const linkBase = () => (window.LUTSNative && window.LUTSNative.shareBase ? window.LUTSNative.shareBase
     : location.origin === 'null' ? location.href.split('#')[0] : location.origin + location.pathname);
-  function cardUrl(c = card) {
-    const { img, imgFull, friend, id, rel, pg, rm, ...data } = c; // the link carries the card, not this device's own bookkeeping (nor your reminder)
+  // medium: how the link goes out (share, copy, calendar), for its utm tags (tagLink).
+  function cardUrl(c = card, medium = 'share') {
+    const { img, imgFull, friend, id, rel, pg, rm, d, dr, ...data } = c; // the link carries the card, not this device's own bookkeeping (nor your reminder)
     if (rel) data.rel = rel; // Anyone adds nothing to the link
     if (pagesOf(c).length) data.pg = pagesOf(c); // nor does a card without reasons
-    return `${linkBase()}#card=${encodeCard(data)}${img ? `&photo=${toB64url(img)}` : ''}${watchCode(id)}`;
+    if (d) { data.d = d; if (dr) data.dr = 1; } // nor does any card but a countdown, so the others' links stay as they were
+    return tagLink(`${linkBase()}#card=${encodeCard(data)}${img ? `&photo=${toB64url(img)}` : ''}${watchCode(id)}`, d ? 'countdown' : 'card', { medium, content: OCC_IDS.has(c.o) ? c.o : '' });
+  }
+  // Where a link someone opens came from, as utm tags in the query before the #: no route reader looks there (nor the
+  // app, whose App Links read only the part after #), so every link opens as before. Only fixed words: the platform it
+  // was made on, how it went out, the kind of link and a card's occasion id; never a name, a code or anything typed.
+  function tagLink(url, kind, { medium = 'share', content = '' } = {}) {
+    const at = url.indexOf('#'), hash = at < 0 ? '' : url.slice(at);
+    try {
+      const u = new URL(at < 0 ? url : url.slice(0, at)); // (a file:// address may already have a query)
+      u.searchParams.set('utm_source', window.LUTSNative ? (window.LUTSNative.platform === 'ios' ? 'ios' : 'android') : 'web');
+      u.searchParams.set('utm_medium', medium);
+      u.searchParams.set('utm_campaign', kind);
+      if (content) u.searchParams.set('utm_content', content); else u.searchParams.delete('utm_content');
+      return u.href + hash;
+    } catch (e) { return url; } // an address URL can't read: the link untagged
   }
   // "Your sky was watched": a card you send carries a random code (&w=); opening it marks seen/<code> on Firebase with
   // only the time (no names, no message), and the sender's phone checks its recent cards' codes now and then.
@@ -5776,7 +6780,7 @@
   function openCardModal(prefill, step = 0, fromList = false) {
     if (launch.state !== 'READY') abortLaunch();
     closeDrawer();
-    if (prefill) { card.o = prefill.o || card.o; card.p = prefill.p || card.p; card.h = prefill.h || card.h; card.m = prefill.m || card.m; card.t = ''; card.f = ''; card.rel = ''; card.img = card.imgFull = ''; card.friend = ''; card.id = ''; card.pg = []; card.rm = null; }
+    if (prefill) { card.o = prefill.o || card.o; card.p = prefill.p || card.p; card.h = prefill.h || card.h; card.m = prefill.m || card.m; card.t = ''; card.f = ''; card.rel = ''; card.img = card.imgFull = ''; card.friend = ''; card.id = ''; card.pg = []; card.rm = null; card.d = ''; card.dr = 0; }
     fromCards = fromList;
     $('#btnCardHome').lastChild.textContent = fromList ? 'My Cards' : 'Home';
     $('#btnCardHome').setAttribute('aria-label', fromList ? 'Back to My Cards' : 'Back to home');
@@ -5784,6 +6788,7 @@
     fillForm();
     syncMusicUi();
     modal.hidden = false;
+    track.screen('love_card');
     showStep(step);
     if (location.protocol === 'file:') $('#linkNote').textContent = 'The link contains the whole card, so nothing is uploaded. Host the game online (for example GitHub Pages or Netlify) so friends can open the link.';
     // Desktop: start typing straight away. Phones keep the keyboard closed until a field is tapped, so the step stays in view.
@@ -5791,6 +6796,7 @@
   }
   function closeCardModal() {
     if (card.rm && card.t) keepMade(); // the phone reminds you from My Cards, so a card with a reminder is kept
+    if (!modal.hidden) track.back();
     modal.hidden = true;
     if (music.preview) stopMusic(0.3);
   }
@@ -5825,6 +6831,7 @@
     $('#cardModal .modal-body').scrollTop = 0;
     if (n === 0) { showActiveChip($('#cRels')); showActiveChip($('#occasions')); spyCats(); }
     if (music.preview && n !== LAST_STEP) stopMusic(0.3);
+    if (n === LAST_STEP && typeof syncPubWish === 'function') syncPubWish(); // (its button says if today's wish is out)
   }
   const goStep = (n) => { if (n === cardStep || (n > 0 && !validCard())) return; showStep(clamp(n, 0, LAST_STEP)); };
   stepTabs.forEach((t, i) => t.addEventListener('click', () => goStep(i)));
@@ -5848,15 +6855,30 @@
   // Android's Back button asks the page first (NativeBridge.BACK_PRESS_SCRIPT): inside the card creator it goes back a
   // step, like any step-by-step screen. Anything else (closing a panel, leaving the app) stays with the app shell.
   window.LUTSBack = () => {
+    if (!$('#liveLock').hidden && $('#premiumPanel').hidden) { $('#btnLockClose').click(); return true; }
+    if (live.on && !$('#premiumPanel').hidden) { closePremium(); return true; }
+    if (live.on && !$('#liveEnd').hidden) { $('#btnLiveMore').click(); return true; } // the paywall over the gate closes first
+    if (live.on) { $('#btnLiveExit').click(); return true; }
+    if (cdShow.on && !$('#countdown').hidden && $('#premiumPanel').hidden) { exitCardMode(); return true; } // a countdown's screen: as its Close
+    if (window.HomeMenu && window.HomeMenu.back()) return true; // the home menu (home-menu.js)
+    if (window.LUTSTimeline && window.LUTSTimeline.back()) return true; // My sky (timeline.js)
+    // Over a puzzle screen, the paywall and the gem sheet close before the screen underneath goes back
+    if (document.body.classList.contains('puzzling')) {
+      if (!$('#premiumPanel').hidden) { closePremium(); return true; }
+      if (!$('#gemModal').hidden) { closeSheet($('#gemModal')); return true; }
+    }
     if (window.PatakaChor && window.PatakaChor.back()) return true; // a throw being aimed, or a card open
     if (window.DiyaPath && window.DiyaPath.back()) return true;
     if (window.RocketRush && window.RocketRush.back()) return true;
+    if (window.SkyGears && window.SkyGears.back()) return true;
     if (!$('#rewardsPanel').hidden) { closeRewards(); return true; }
     if (!$('#crackerTrial').hidden) { $('#crackerTrial').hidden = true; return true; }
     if (launch.state !== 'READY') { abortLaunch(); return true; }
     if (closeSheets()) return true;
     if (reader.i >= 0 && !$('#greeting').hidden && $('#premiumPanel').hidden) { showPage(-1); return true; } // a reason page: back to the card
     if (!modal.hidden && cardStep === 0 && fromCards && $('#premiumPanel').hidden && $('#worldPanel').hidden) { $('#btnCardHome').click(); return true; } // back to My Cards
+    // Nothing open in a show (the sky, Fireworks Street, a race): Back goes to the home screen, not out of the app
+    if (modal.hidden && $('#premiumPanel').hidden && $('#worldPanel').hidden && !document.querySelector('#settings.open') && $('#shareBar').hidden && $('#shareApps').hidden && mode !== 'intro') { $('#btnHome').click(); return true; }
     if (modal.hidden || cardStep === 0 || !$('#premiumPanel').hidden || !$('#worldPanel').hidden) return false;
     goStep(cardStep - 1);
     return true;
@@ -5889,25 +6911,94 @@
   $('#btnCopyLink').addEventListener('click', async () => {
     if (!validCard()) return;
     keepMade();
-    const ok = await copyText(`${cardUrl()}${getApp('card_copy')}`);
+    const cd = !!cdOf(card); // a countdown goes with its own words and search line, as Share sends it
+    const ok = await copyText(cd ? `${cdShareText(card)}\n${cardUrl(card, 'copy')}${getApp('card_copy', CD_PLAY)}` : `${cardUrl(card, 'copy')}${getApp('card_copy')}`);
     toast(ok ? 'Card link copied. Paste it anywhere to share.' : 'Could not copy the link');
-    if (ok) countLight();
+    if (ok) { countLight(); if (cd) cdSent(); }
   });
   $('#btnShare').addEventListener('click', () => {
     if (!validCard()) return;
     keepMade();
     shareMade(card);
   });
+  // Public Wishes (wishes.js): this card's two first names and its occasion's own wish, for everyone's Live Sky; once a day.
+  const PUB_SAY = { ok: 'Published! Your wish can light up Live Sky for everyone.', today: 'You’ve published all of today’s wishes. Come back tomorrow.',
+    todayFree: 'You’ve published 2 wishes today. Premium publishes up to 10 a day.',
+    empty: 'Add your name in From and theirs in To to publish', letters: 'First names only, in letters', rude: 'That name can’t be published. Try another.',
+    offline: 'Couldn’t publish. Check your connection and try again.' };
+  // Right after a wish goes out, a happy moment: the Premium button in place (no sheet), once a day, free players only.
+  function wishOffer(btn) {
+    if (premium.active) return;
+    try { if (localStorage.getItem('luts:wishoffer') === dayKey()) return; localStorage.setItem('luts:wishoffer', dayKey()); } catch (e) { return; }
+    btn.hidden = false; funnelOnce('wish_offer_seen');
+  }
+  function syncPubWish(say, ok) {
+    const b = $('#btnPublishWish'), st = $('#pubStatus'); if (!b || !window.LUTSWishes) return;
+    const done = LUTSWishes.publishedToday(premium.active), some = LUTSWishes.todays().length > 0;
+    b.classList.toggle('done', done);
+    b.innerHTML = `<span aria-hidden="true">${done ? '✓' : '🎆'}</span> ${inLang(done ? 'Published today' : some ? 'Publish another wish' : 'Publish wish')}`;
+    $('#btnTakeBackWish').hidden = !some;
+    $('#btnWishPremium').hidden = !(done && !premium.active);
+    st.textContent = say ? inLang(say) : ''; st.classList.toggle('ok', ok === true); st.classList.toggle('bad', ok === false);
+  }
+  $('#btnTakeBackWish').addEventListener('click', async () => {
+    const b = $('#btnTakeBackWish'); if (b.disabled) return;
+    b.disabled = true; const ok = await LUTSWishes.takeBack(); b.disabled = false;
+    track('wish_take_back', { ok: ok ? 1 : 0 });
+    syncPubWish(ok ? 'Your wish is taken back.' : PUB_SAY.offline, ok);
+  });
+  $('#btnPublishWish').addEventListener('click', async () => {
+    if (!window.LUTSWishes || $('#btnPublishWish').disabled) return;
+    if (!validCard()) return;
+    const b = $('#btnPublishWish'); b.disabled = true;
+    $('#pubStatus').textContent = inLang('Publishing…'); $('#pubStatus').classList.remove('ok', 'bad');
+    const r = await LUTSWishes.publish({ f: card.f, t: card.t, o: card.o, premium: premium.active });
+    b.disabled = false;
+    track('wish_publish', { result: r, occasion: card.o });
+    if (r === 'ok') { keepMade(); buzz && buzz(20); }
+    syncPubWish(r === 'today' && !premium.active ? PUB_SAY.todayFree : PUB_SAY[r] || PUB_SAY.offline, r === 'ok' || r === 'today' ? true : false);
+    if (r === 'ok' && !premium.active && LUTSWishes.publishedToday(false)) $('#pubStatus').textContent += ' ' + inLang(PUB_SAY.todayFree);
+    else if (r === 'ok') wishOffer($('#btnWishPremium'));
+  });
+  $('#btnWishPremium').addEventListener('click', () => openPremium({ wishes: true }));
   function shareMade(c) {
     const birthday = c.o === 'birthday';
-    const blob = shareCard({ art: birthday ? 'assets/menu/birthdays.jpg' : worldArt(c.w, 'assets/menu/welcome.jpg'), kicker: birthday ? 'A birthday in fireworks' : 'A fireworks greeting', title: `For ${c.t}`, line: c.f ? `from ${c.f} · tap the link to watch it` : 'Tap the link to watch it light up the sky' });
+    if (c.d && countdownYear()) c = { ...c, d: nyCode(countdownYear()) }; // a saved countdown sent again next December: the coming midnight
+    if (cdOf(c)) { // a New Year countdown: its own picture and words, the search line, and counted
+      cdSent();
+      const pic = shareCard({ art: worldArt(c.w, 'assets/menu/welcome.webp'), kicker: 'A New Year countdown', title: `For ${c.t}`, line: c.f ? `from ${c.f} · plays at your midnight` : 'Plays at your midnight' });
+      return shareThing({ title: `A New Year countdown for ${c.t}`, text: cdShareText(c), url: cardUrl(c), blob: pic, name: 'new-year-countdown.png', src: 'card', play: CD_PLAY });
+    }
+    const blob = shareCard({ art: birthday ? 'assets/menu/birthdays.webp' : worldArt(c.w, 'assets/menu/welcome.webp'), kicker: birthday ? 'A birthday in fireworks' : 'A fireworks greeting', title: `For ${c.t}`, line: c.f ? `from ${c.f} · tap the link to watch it` : 'Tap the link to watch it light up the sky' });
     return shareThing({ title: `A fireworks card for ${c.t}`, text: `${c.f || 'Someone'} sent you a fireworks greeting ✨`, url: cardUrl(c), blob, name: 'fireworks-card.png', src: 'card' });
+  }
+  // A countdown's share text (English, as every share's): its words, then the search words and hashtags people look for
+  // at New Year, before the link and the Play line. Its Play link counts installs under the countdown.
+  const CD_PLAY = { campaign: 'countdown', content: 'newyear' };
+  function cdShareText(c) {
+    return `⏳ ${c.f || 'Someone'} sent you a New Year countdown. It plays at your midnight 🎆\n${cdWords(nyYear(c.d))}`;
+  }
+  // A countdown sent from the app (the website makes none), and again when it goes out on New Year's Eve before 11 pm.
+  function cdSent() {
+    if (!window.LUTSNative) return;
+    const now = new Date();
+    funnel('cd_sent');
+    if (now.getMonth() === 11 && now.getDate() === 31 && now.getHours() < 23) funnel('cd_sent_nye');
+    track('countdown', { step: 'sent' });
+  }
+  // A countdown step (the countdown screen, its climax, the calendar, Make one): web_cd_<step> on the website; in the
+  // app (whose links never reach the website) cd_<step> and a countdown event. Safe while the page is still loading.
+  function cdStep(step) {
+    if (!window.LUTSNative) { webFunnel(`cd_${step}`); return; }
+    funnelSoon(`cd_${step}`);
+    track('countdown', { step });
   }
 
   // Card show
   let currentCard = null, cardShells = []; // cardShells: the shell types this show has launched so far (for tests)
   function playCard(c) {
     abortLaunch();
+    clearWriting(); // A greeting owns a clean paint layer, independent of the previous sparkler session.
     currentCard = c;
     mode = 'card';
     freeShowResources(false);
@@ -5958,17 +7049,21 @@
     setImg($('#gPhoto'), showPhoto(c));
     $('#gCard').classList.toggle('has-photo', !!c.img);
     // Your card: Save video leads. A card you received: Send one back leads, Save video moves to the tools.
-    const received = !c.own && !joy, sender = clean(c.f, 20);
+    // A New Year countdown you received: Make one for someone leads instead (a thank-you card wouldn't be one), and its
+    // Save video (the midnight clip) is in the tools in the app too; yours offers Make one for someone among them.
+    const received = !c.own && !joy, sender = clean(c.f, 20), countdown = !!cdOf(c);
     // Save video leads on Android too: it replays the card under the screen recorder (recordShow), then the share sheet.
     $('#btnRecordCard').hidden = received;
     // Already recorded: the big gold button is done; a small "Record again" stays for a second take.
     markSaved();
-    $('#btnSendBack').hidden = !received;
+    $('#btnSendBack').hidden = !received || countdown;
+    $('#btnMakeCountdown').hidden = !received || !countdown;
     $('#btnSendBack').lastChild.textContent = c.lit ? (sender ? `Light ${sender} back` : 'Light someone up too')
       : sender ? `Send one back to ${sender}` : 'Make one of your own';
-    $('#btnSaveTool').hidden = !received || nativeRecorder;
+    $('#btnSaveTool').hidden = !received || (nativeRecorder && !countdown);
     $('#btnEditCard').hidden = !c.own || joy;
-    $('#btnMakeOwn').hidden = true;
+    $('#btnMakeOwn').hidden = !countdown || !c.own;
+    $('#btnMakeOwn').lastChild.textContent = countdown ? 'Make one for someone' : 'Make your own';
     $('#btnShareJoy').hidden = !joy;
     $('#btnGreetCards').hidden = joy || !myCards.length; // dedications live in Light someone up, not My Cards
     reader.pg = joy ? [] : pagesOf(c);
@@ -6050,6 +7145,10 @@
     g.restore();
   }
   function exitCardMode() {
+    // A New Year countdown's clock, screen, keep-awake and drones. In the app its link comes off the page, so the same link
+    // opened again (its calendar alert at 11:58) is a new hash and opens it again, where the unchanged hash would not.
+    if (cdShow.on && !cdShow.live && window.LUTSNative && /card=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
+    cdStop();
     if (rec && rec.quiet) discardRecording();
     readyVideo = null;
     clearTimers('card');
@@ -6062,13 +7161,15 @@
     mode = 'play';
   }
   $('#btnReplay').addEventListener('click', () => currentCard && playAndKeep(currentCard));
-  $('#btnMakeOwn').addEventListener('click', () => openCardModal(currentCard && { o: currentCard.o, p: currentCard.p, h: currentCard.h, m: currentCard.m }));
+  $('#btnMakeOwn').addEventListener('click', () => (cdOf(currentCard) ? makeCountdown() // (after your countdown: Make one for someone)
+    : openCardModal(currentCard && { o: currentCard.o, p: currentCard.p, h: currentCard.h, m: currentCard.m })));
   $('#btnCloseGreeting').addEventListener('click', exitCardMode);
   $('#btnGreetCards').addEventListener('click', () => { exitCardMode(); openCards(); });
   $('#btnEditCard').addEventListener('click', () => openCardModal(null, 2));
   // Replays the whole card show from the start while recording, then saves the video.
   // Plays a show and records the whole of it: the song fades out with the video and the closing card comes last.
   function recordShow(c, opts) {
+    if (cdOf(c)) { recordCountdownClip(c); return; } // a countdown's video is its midnight clip, never the show from the start
     if (nativeRecorder) {
       const play = () => {
         Sound.resume();
@@ -6104,6 +7205,7 @@
   }
   function playAndKeep(c) {
     readyVideo = null;
+    if (cdOf(c)) { playCountdown(c); return; } // a New Year countdown: its own screen, climax or preview (no background video)
     if (nativeRecorder || !canRecord() || settings.quality === 'low') { playCard(c); return; }
     const keep = { card: c, blob: null, want: false };
     readyVideo = keep;
@@ -6141,6 +7243,354 @@
     showStep(to ? 1 : 0);
   });
 
+  // ----- New Year countdown (a card with d): its receiver's screen until their own midnight, the climax, the clip -----
+  // The screen counts on the wall clock (Date.now(), four times a second): game time (after) stops while the page is
+  // hidden or a sheet covers the sky, so it times only what follows the climax's own start. A midnight missed while the
+  // page was hidden replays once it is back. Live Sky's countdown (COUNTDOWN_SHOW) has the same screen and climax.
+  // on: up (a card's, or live: Live Sky's); target: its midnight (ms); waiting: before it; fired: its climax has begun;
+  // pending: midnight came while the page was hidden; how: live | replay | preview | clip; over: the climax has ended;
+  // swarm: a card's drone finale, built ahead of it.
+  const CD_IDLE = { on: false, live: false, c: null, year: 0, target: 0, waiting: false, fired: false, pending: false, how: '', over: false, tick: 0, secs: -1, swarm: null };
+  const cdShow = { ...CD_IDLE, lock: null }; // (lock: the screen's wake lock)
+  window.LUTSCountdown.state = () => { const s = cdShow; return { on: s.on, year: s.year, target: s.target, fired: s.fired, pending: s.pending, how: s.how, waiting: s.waiting }; };
+  const CD_TRIGGER = 2; // seconds before midnight the climax is set going (its first pair, timed by its own climb, bursts on the stroke)
+  const CD_GENTLE = ['peony', 'willow', 'chrysanthemum', 'kamuro', 'palm', 'ring']; // nothing that strobes, crackles or breaks again
+  const CD_ENDS = ['kamuro', 'heart', 'kingwillow', 'willow', 'peony', 'chrysanthemum']; // the sender's finale shells the climax keeps
+  const cdFigs = ['#cdDays', '#cdHours', '#cdMins', '#cdSecs'].map((id) => $(`${id} b`));
+  const cdBusy = () => cdShow.on && !cdShow.over; // waiting, or its climax playing: Share and Record don't restart it
+  const cdNames = (c) => [c.t + (c.f ? ` & ${c.f}` : ''), String(nyYear(c.d))]; // the drone finale's two lines, as typed
+  const pad2 = (n) => String(n).padStart(2, '0');
+  // How long a shell takes to climb to y (launchShell's lift); a plain one then hangs 0.12-0.26 s, words and drawings don't.
+  const riseTo = (y, fast = 1) => Math.sqrt((2 * Math.max(60 * U, H + 8 - y)) / (900 * U * fast));
+  // Over a landmark a name goes into the open sky above its roofline (as in playCard).
+  const nameY = () => (world.img && world.rect ? clamp(world.rect.roof - H * 0.1, H * 0.2, H * 0.42) : H * 0.42);
+  // A countdown's own shells: a card's are counted for the tests; Live Sky's are its show's (tap), exactly where aimed.
+  function cdShell(o) {
+    if (!cdShow.live) cardShells.push(o.type);
+    launchShell(cdShow.live ? { tap: true, exact: true, ...o } : o);
+  }
+  // The last seconds' one small burst (each second down to 3; then the climax's pair has the sky).
+  const cdSpark = () => cdShell({ x: W * rand(0.2, 0.8), y: H * rand(0.18, 0.3), type: pick(['peony', 'chrysanthemum', 'ring']), size: 0.5 });
+
+  // The climax, for a card or Live Sky, timed from Z (lead seconds after the call, when its first pair bursts: 00:00 for
+  // a live midnight; a preview or the clip first counts 5-4-3-2-1 on the countdown's screen): the year, the headline and
+  // the name in fireworks, a finale, then a card's drone finale with both names (dr). Flash-safe: fewer than three bursts
+  // in any second (each one flares the whole sky; a pair bursting together counts once): the pair goes up as one with no
+  // hang, the words come seconds apart, and the finale is one shell every 0.7 s (0.9 s with reduced motion) from one
+  // height, so equal climbs keep its bursts at least 0.56 s apart. Gentle shell types only, whatever the card asks for.
+  // Returns when it has ended, in seconds from now.
+  function cdClimax({ tag, tap = false, year, head, name = '', end = 'kamuro', dr = false, lead = 0 }) {
+    const gap = reduceMotion() ? 0.9 : 0.7, X = [0.2, 0.8, 0.5];
+    const go = (o) => { if (tag === 'card') cardShells.push(o.type); launchShell({ tap, exact: true, ...o }); };
+    const words = (text, y, hFrac, hold) => go({ x: W / 2, y, type: 'text', text, textH: Math.min(H * hFrac, W * 0.22), hold, straight: true, size: 1, exact: false }); // (kept clear of the top bar)
+    // One height for a set of shells (equal climbs), clear of a sacred landmark's roofline as launchShell lifts each.
+    const level = (y, xs) => (world.rect && world.cfg.sacred ? Math.min(...xs.map((f) => worldSkyY(W * f, y))) : y);
+    const py = level(H * 0.28, [0.25, 0.75]), fy = level(H * 0.22, X), Z = Math.max(lead, riseTo(py));
+    if (lead >= 5) for (let k = 5; k >= 1; k--) after(Z - k, () => { cdFinal(k); if (k >= 3) cdSpark(); }, tag); // a preview's or the clip's 5-4-3-2-1, as midnight's
+    after(Z, () => cdFinal(0), tag); // midnight: the countdown's screen leaves the sky to the show
+    after(Z - riseTo(py), () => { for (const x of [0.25, 0.75]) go({ x: W * x, y: py, type: 'peony', size: 1.3, c1: '#ffcf6b', c2: '#fff1c9', fast: 1 }); }, tag); // (fast 1: no hang)
+    after(Z + 0.2, () => words(String(year), H * 0.16, 0.16, 2.6), tag);
+    after(Z + 3, () => words(head, H * 0.26, 0.12, 2.6), tag);
+    if (name) after(Z + 5.6, () => words(name, nameY(), 0.2, 4), tag);
+    const types = ['peony', 'chrysanthemum', 'willow', 'kamuro', 'palm', 'ring', 'heart', CD_ENDS.includes(end) ? end : 'kamuro'];
+    types.forEach((type, i) => after(Z + 7.4 + i * gap, () => go({ x: W * X[i % 3], y: fy, type, size: 1 }), tag));
+    const last = Z + 7.4 + (types.length - 1) * gap + riseTo(fy) + 0.26; // the finale's last burst, at the latest
+    if (!dr) return last + 0.2;
+    // The drones' shell bursts 1.2 s after that (no third burst in a second), its lights spelling both names and the year.
+    after(last + 1.2 - riseTo(droneBox().y, 1.15), () => {
+      if (!cdShow.swarm) return; // (not built: no finale of lights)
+      drones = cdShow.swarm;
+      go({ x: W / 2, y: droneBox().y, type: 'drawing', drone: 'greet', size: 1, c1: '#ffcf6b', lift: 'comet', fast: 1.15, straight: true });
+    }, tag);
+    return last + 8.2;
+  }
+  // The countdown's last seconds: one big digit each (k) with a soft tick, the clock put away; 0: midnight, it goes.
+  function cdFinal(k) {
+    const box = $('#countdown'), el = $('#cdFinal');
+    if (!k) { box.hidden = true; box.classList.remove('final'); el.hidden = true; return; }
+    box.classList.add('final');
+    el.hidden = false;
+    el.textContent = String(k);
+    el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); // (its pop restarts for each)
+    safeSound(() => Sound.tick(0));
+  }
+  // The clock: days (none shown at 0), hours, minutes and seconds left, each figure written only when it changes.
+  function cdClock(secs) {
+    const box = $('#countdown'), v = [Math.floor(secs / 86400), pad2(Math.floor(secs / 3600) % 24), pad2(Math.floor(secs / 60) % 60), pad2(secs % 60)];
+    if (box.classList.contains('final')) { box.classList.remove('final'); $('#cdFinal').hidden = true; } // (a clock set back)
+    cdFigs.forEach((b, i) => { const t = String(v[i]); if (b.textContent !== t) b.textContent = t; });
+    const days = cdFigs[0].parentNode;
+    if (days.hidden !== !v[0]) days.hidden = !v[0];
+  }
+  // The countdown's screen: whom it is from, Countdown to <year>, then the clock, or (final) the big digit; Live Sky's
+  // has nothing to press.
+  function cdScreen({ year, from = '', live = false, final = false }) {
+    const box = $('#countdown');
+    $('#cdFor').textContent = from ? inLang('A New Year countdown from {0}').replace('{0}', from) : '';
+    $('#cdFor').hidden = !from;
+    $('#cdTitle').textContent = inLang('Countdown to {0}').replace('{0}', year);
+    $('#cdFinal').hidden = !final; $('#cdFinal').textContent = '';
+    box.classList.toggle('live', live); box.classList.toggle('tv-skip', live); box.classList.toggle('final', final);
+    cdShow.secs = -1;
+    box.hidden = false;
+  }
+  function cdTick() {
+    const s = cdShow;
+    if (!s.on || s.over) return;
+    const left = s.target - Date.now();
+    if (s.waiting && left <= CD_TRIGGER * 1e3) {
+      // Midnight on a page in view: the climax goes up now, its first pair timed to burst on the stroke. A page hidden
+      // then waits for its return (cdBack), and replays it then.
+      if (!document.hidden) cdMidnight(left > -5e3 ? 'live' : 'replay', Math.max(0, left / 1e3));
+      else if (left <= 0) s.pending = true;
+    }
+    const secs = Math.max(0, Math.ceil(left / 1e3));
+    if (secs === s.secs) return;
+    s.secs = secs;
+    if (secs > 10) { cdClock(secs); return; }
+    if (!secs) return;
+    cdFinal(secs);
+    // Its small burst, only while it is seen: shells sent up behind a hidden page or a sheet would all climb together
+    // once it's back.
+    if (s.waiting && secs >= 3 && !document.hidden && !domOpen().menu) cdSpark();
+  }
+  // Midnight (or the return after it): the waiting ends and the climax plays, from the countdown's own screen.
+  function cdMidnight(how, lead = 0) {
+    const s = cdShow;
+    Object.assign(s, { waiting: false, pending: false, fired: true, how });
+    if (s.live) cdLiveClimax(lead); else cdCardClimax(s.c, how, lead);
+    if (how === 'replay') toast('Replaying your midnight show', 3200); // (after a first card show's achievement line)
+  }
+  // A card's climax over the sky as it is (only the waiting's own shells stop, so nothing blanks at 00:00), then its card.
+  function cdCardClimax(c, how, lead = 0) {
+    const s = cdShow;
+    clearTimers('card');
+    document.body.classList.add('countdown-on');
+    if (window.LUTSGoals) LUTSGoals.tick('card'); achieve('card');
+    // Counted (cd_live, cd_replay): a live midnight's after a random wait, so every screen in a time zone doesn't write
+    // to the database in the same second.
+    if (how === 'live') setTimeout(() => cdStep('live'), rand(2e3, 60e3)); else if (how === 'replay') cdStep('replay');
+    if (c.dr) cdSwarm(cdNames(c));
+    const t = cdClimax({ tag: 'card', year: nyYear(c.d), head: c.h || inLang('Happy New Year'), name: c.t, end: c.s, dr: !!c.dr, lead: how === 'preview' || how === 'clip' ? 5 : lead });
+    after(t, () => { s.over = true; clearInterval(s.tick); document.body.classList.remove('countdown-on'); cdAwake(false); showGreeting(c); }, 'card');
+    return t;
+  }
+  // A card's countdown or climax takes the sky as playCard does (playCard itself unchanged): the sender's landmark and
+  // colours, no song (none travels with a card), and any Live Sky show or countdown before it ended.
+  function cdCardSetup(c) {
+    if (live.on) stopLive();
+    cdStop();
+    abortLaunch();
+    clearWriting();
+    currentCard = c;
+    mode = 'card';
+    freeShowResources(false);
+    document.body.classList.add('card-mode', 'countdown-on');
+    $('#greeting').hidden = true;
+    clearTimers('card');
+    palette = PALETTES[c.p] || PALETTES.rainbow;
+    showCardWorld(c);
+    stopMusic(0.4);
+    cardShells = [];
+  }
+  // A countdown received before its midnight: the sender's sky, two gentle shells and the name in fireworks, then the
+  // clock in the sky and a gentle shell every few seconds until the climax.
+  function startCountdown(c) {
+    cdCardSetup(c);
+    const s = cdShow, year = nyYear(c.d);
+    Object.assign(s, CD_IDLE, { on: true, c, year, target: +cdOf(c), waiting: true });
+    cdScreen({ year, from: c.f });
+    cdAwake(true);
+    cdStep('wait');
+    s.tick = setInterval(cdTick, 250);
+    cdTick();
+    if (!s.waiting) return; // opened in its last two seconds: straight into the climax
+    if (c.dr) cdSwarm(cdNames(c)); // built while the sky is quiet, not at midnight
+    if (s.target - Date.now() > 20e3) { // (in its last seconds the screen's own count leads)
+      after(0.2, () => cdShell({ x: W * 0.3, y: H * 0.3, type: 'peony', size: 0.8 }), 'card');
+      after(0.9, () => cdShell({ x: W * 0.7, y: H * 0.3, type: 'chrysanthemum', size: 0.8 }), 'card');
+      after(2.4, () => launchText(c.t, cdNameY(), 0.2, 4), 'card');
+    }
+    after(rand(7, 9), cdAmbient, 'card');
+  }
+  // A countdown's climax from its start: yours as a preview (5-4-3-2-1 first), one you received once its midnight has
+  // passed, or the clip being recorded. Returns when its card comes up, in seconds.
+  function playCountdownClimax(c, how) {
+    cdCardSetup(c);
+    Object.assign(cdShow, CD_IDLE, { on: true, c, year: nyYear(c.d), target: +cdOf(c), fired: true, how });
+    if (how === 'preview' || how === 'clip') cdScreen({ year: nyYear(c.d), from: c.f, final: true });
+    cdAwake(true);
+    return cdCardClimax(c, how);
+  }
+  // Wherever a card show starts (the envelope, My Cards, Replay), a New Year countdown goes its own way, never the normal
+  // show nor a background recording: yours previews its midnight; one you received waits for its midnight, or, once that
+  // has passed, replays its show.
+  function playCountdown(c) {
+    if (c.own) { playCountdownClimax(c, 'preview'); toast('Preview: this is what they see at midnight', 3200); }
+    else if (Date.now() < +cdOf(c)) startCountdown(c);
+    else { playCountdownClimax(c, 'replay'); toast('Replaying your midnight show', 3200); }
+  }
+  // The opener's name: playCard's place, or lower when the countdown's screen reaches below it, never down to the ground.
+  function cdNameY() {
+    const r = $('#countdown').getBoundingClientRect(), th = Math.min(H * 0.2, W * 0.22);
+    return clamp(Math.max(nameY(), r.bottom + th / 2 + 8), H * 0.2, H * 0.55);
+  }
+  // While it waits, a gentle shell now and then (game time: none pile up behind a hidden page), none in its last 12 s,
+  // where the screen's own seconds take over. A card's every 4-7 s; Live Sky's, the whole show, every 2-4 s.
+  function cdAmbient() {
+    const s = cdShow;
+    if (!s.on || !s.waiting) return;
+    if (s.target - Date.now() > 12e3) cdShell({ x: W * rand(0.15, 0.85), y: H * rand(0.12, 0.3), type: pick(CD_GENTLE), size: rand(0.65, 0.9) });
+    after(s.live ? rand(2, 4) : rand(4, 7), cdAmbient, s.live ? 'director' : 'card');
+  }
+  // The sender's drone finale (Premium, dr): both names and the year in a thousand lights, built ahead of its moment (a
+  // build takes a moment, as Live Sky's do), with Cinzel loaded first or its lights would spell another font. The names
+  // as typed, never through inLang, which would turn a name that is also a word (Rose) into its translation.
+  function cdSwarm(lines) {
+    const s = cdShow, c = s.c;
+    if (!window.LUTSDroneShow || s.swarm) return;
+    const build = () => {
+      if (!s.on || s.c !== c || s.swarm) return;
+      s.swarm = LUTSDroneShow.player({ count: droneWeak() ? 900 : 1300, dpr: Math.min(DPR, 2), greeting: lines });
+      s.swarm.prepare(droneBox().unit); // every sprite sheet now, none in a frame
+      last = performance.now(); frameMean = 16.7; slowFor = fastFor = 0; // the build is no slow frame
+    };
+    if (document.fonts && document.fonts.load) document.fonts.load('800 64px Cinzel').then(build, build);
+    else build();
+  }
+  // The screen stays on while a countdown is up: the browser's wake lock (Live Sky holds its own) and, in the Android
+  // app, whose WebView has none, the window's keep-screen-on (an older app has no keepAwake: it sleeps as before).
+  async function cdAwake(on) {
+    const s = cdShow;
+    try { if (window.LUTSAndroid && typeof window.LUTSAndroid.keepAwake === 'function') window.LUTSAndroid.keepAwake(on); } catch (e) { /* older app */ }
+    try {
+      if (on && !s.live && !s.lock && navigator.wakeLock) { const l = await navigator.wakeLock.request('screen'); if (s.on && !s.lock) s.lock = l; else l.release(); }
+      else if (!on && s.lock) { const l = s.lock; s.lock = null; await l.release(); }
+    } catch (e) { /* not allowed here: the screen sleeps as usual */ }
+  }
+  // A countdown ends wherever it is (Close, Done, Back, Home, a new card link, leaving Live Sky): its clock, its screen,
+  // the screen kept on, its drones.
+  function cdStop() {
+    const s = cdShow;
+    if (!s.on) return;
+    clearInterval(s.tick);
+    if (s.swarm && drones === s.swarm) droneStop();
+    Object.assign(s, CD_IDLE);
+    cdFinal(0);
+    document.body.classList.remove('countdown-on');
+    cdAwake(false);
+  }
+  // The page back in view: a midnight it missed replays now (no shells went up meanwhile: game time stood still) and the
+  // screen is kept on again. A page back from the back/forward cache lost its timers (pagehide clears the sky): a waiting
+  // card's gentle shells start again, and a climax cut short plays again.
+  function cdBack() {
+    const s = cdShow;
+    if (!s.on || document.hidden) return;
+    if (s.waiting && Date.now() >= s.target) { cdMidnight('replay'); return; }
+    if (!s.over) { if (s.lock && s.lock.released) s.lock = null; cdAwake(true); } // (the system lets go of it while hidden)
+    if (s.live || timers.some((x) => x.tag === 'card')) return;
+    if (s.waiting) after(rand(1, 3), cdAmbient, 'card');
+    else if (s.fired && !s.over) cdMidnight('replay');
+  }
+  $('#btnCdClose').addEventListener('click', exitCardMode);
+  $('#btnCdCal').addEventListener('click', () => { if (cdShow.c) addCountdownToCalendar(cdShow.c); });
+
+  // ----- Add to calendar · 11:58 pm: an event two minutes before a countdown's midnight, with its link -----
+  // Floating local times (no Z, no time zone): every phone fires it at its own 23:58, as the card plays at its own 00:00.
+  // RFC 5545: text escapes \ ; , and line breaks; lines over 75 octets fold onto lines that start with a space.
+  const icsText = (t) => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  function icsFold(line) {
+    let out = '', n = 0;
+    for (const ch of line) {
+      const cp = ch.codePointAt(0), b = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4; // its UTF-8 octets
+      if (n + b > 75) { out += '\r\n '; n = 1; }
+      out += ch; n += b;
+    }
+    return out;
+  }
+  const icsUtc = (d) => `${d.getUTCFullYear()}${pad2(d.getUTCMonth() + 1)}${pad2(d.getUTCDate())}T${pad2(d.getUTCHours())}${pad2(d.getUTCMinutes())}${pad2(d.getUTCSeconds())}Z`;
+  const icsLocal = (d) => `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}T${pad2(d.getHours())}${pad2(d.getMinutes())}00`;
+  function addCountdownToCalendar(c) {
+    const year = nyYear(c.d);
+    if (!year) return;
+    const begin = new Date(year - 1, 11, 31, 23, 58), end = new Date(year, 0, 1, 0, 5);
+    const title = c.f ? inLang('A New Year countdown from {0}').replace('{0}', c.f) : inLang('A New Year countdown');
+    // The same card (as its link has it, photo too), tagged as coming from a calendar.
+    const url = cardUrl({ ...normaliseCard(c), img: c.img || '' }, 'calendar'), text = `${inLang('Open your fireworks countdown before midnight')}\n${url}`;
+    const uid = Array.from(crypto.getRandomValues(new Uint8Array(8)), (n) => n.toString(16).padStart(2, '0')).join('');
+    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Light Up the Skies//Countdown//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH', 'BEGIN:VEVENT',
+      `UID:cd-${uid}@lightuptheskies`, `DTSTAMP:${icsUtc(new Date())}`, `DTSTART:${icsLocal(begin)}`, `DTEND:${icsLocal(end)}`,
+      `SUMMARY:${icsText(title)}`, `DESCRIPTION:${icsText(text)}`, `URL:${url}`,
+      'BEGIN:VALARM', 'ACTION:DISPLAY', 'TRIGGER:PT0M', `DESCRIPTION:${icsText(inLang('Your New Year countdown starts in 2 minutes'))}`, 'END:VALARM',
+      'END:VEVENT', 'END:VCALENDAR'].map(icsFold).join('\r\n') + '\r\n';
+    cdStep('ics');
+    const save = () => download(new Blob([ics], { type: 'text/calendar' }), 'new-year-countdown.ics');
+    if (!window.LUTSNative) { save(); toast('Open the file to add it to your calendar', 3200); return; }
+    // The app: the phone's own calendar opens on the event (Android); else (iOS, an older app, no calendar app) the share
+    // sheet takes the file. Never saveFile on Android: it files anything that isn't a video in the photo gallery.
+    const ask = typeof window.LUTSNative.service === 'function' ? window.LUTSNative.service('calendar', JSON.stringify({ begin: +begin, end: +end, title, description: text })) : Promise.reject(new Error('no service'));
+    ask.then((ok) => { if (ok !== true) throw new Error('no calendar'); toast('Opening your calendar…'); }).catch(() => {
+      const file = new File([ics], 'new-year-countdown.ics', { type: 'text/calendar' });
+      if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) navigator.share({ files: [file], title, text }).catch(() => { /* closed */ });
+      else if (!ANDROID_WEBVIEW) save(); // (iOS: the app's own share sheet)
+    });
+  }
+
+  // ----- The midnight clip: Save video on a countdown, its 5-4-3-2-1, the climax and the card, shaped 9:16 -----
+  // From the canvas wherever the browser makes MP4 (the Android app's WebView too), cover-cropped from the screen; else the
+  // app's screen recorder, the phone's own shape. A free player's carries the mark and the closing card; Premium's, none.
+  const cdWords = (y) => `Happy New Year ${y} wishes with name · New Year countdown card · fireworks greeting · नया साल मुबारक · புத்தாண்டு வாழ்த்துகள் #HappyNewYear${y} #NewYearCountdown`;
+  function recordCountdownClip(c) {
+    const year = nyYear(c.d), clean = premium.active;
+    setShareCaption(`🎆 Happy New Year ${year}! My midnight countdown, made with Light Up the Skies\nMake one for someone: ${appLink()}\n${cdWords(year)}${getApp('countdown', CD_PLAY)}`);
+    if (!nativeRecorder || (canRecord() && MediaRecorder.isTypeSupported('video/mp4;codecs=avc1'))) {
+      if (rec) { if (rec.quiet) discardRecording(); else stopRecording(); }
+      const end = playCountdownClimax(c, 'clip');
+      startRecording(inLang('Recording your midnight clip…'), { aspect: 9 / 16, clean, layer: drawCountdown, web: true });
+      if (!rec) return;
+      const r = rec;
+      after(end, () => { if (rec === r) { r.outro = performance.now(); setTimeout(() => { if (rec === r) stopRecording(); }, 2000); } }, 'card'); // the card, then 2 s
+      return;
+    }
+    const play = () => {
+      Sound.resume(); closeCardModal(); hideOverlay($('#intro'));
+      const end = playCountdownClimax(c, 'clip');
+      if (clean) after(end + 2, () => { if (nativeRecording === 'recording') window.LUTSAndroid.recording('stop'); }, 'card'); // no closing card
+      else after(end + 0.2, () => nativeOutro(), 'card');
+    };
+    if (nativeRecording === 'recording') play();
+    else if (nativeRecording === 'idle') { nativeRecordingReady = play; window.LUTSAndroid.recording('start'); }
+  }
+  // The countdown's screen is HTML: a clip copies its lines and its big digit into each frame (as drawGreeting does the
+  // card), centred where they show, a shadow keeping them clear of the bursts behind.
+  function drawCountdown(g, sx, sy) {
+    const box = $('#countdown');
+    if (box.hidden) return;
+    g.save(); g.scale(sx, sy);
+    g.textAlign = 'center'; g.textBaseline = 'middle'; g.shadowColor = 'rgba(0,0,0,0.8)'; g.shadowBlur = 10;
+    for (const n of box.querySelectorAll('.cd-for, .cd-title, .cd-final')) {
+      if (n.hidden || !n.getClientRects().length || !n.textContent.trim()) continue;
+      const cs = getComputedStyle(n), r = n.getBoundingClientRect(), lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+      g.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`; g.fillStyle = cs.color;
+      const lines = wrapLines(g, n.textContent, r.width + 1);
+      lines.forEach((line, i) => g.fillText(line, r.left + r.width / 2, r.top + r.height / 2 + (i - (lines.length - 1) / 2) * lh));
+    }
+    g.restore();
+  }
+
+  // Make one for someone, after a countdown: a new countdown card for the coming New Year (out of its weeks, this one's
+  // year), its first wish written, To empty and signed with your name.
+  function makeCountdown() {
+    const o = OCC_BY_ID.newyear, year = countdownYear() || nyYear(currentCard && currentCard.d);
+    cdStep('make');
+    openCardModal({ o: o.id, p: o.theme, h: inLang(o.head), m: inLang(firstIdea({ o: o.id, rel: '' })) });
+    try { card.f = localStorage.getItem('luts:from') || ''; } catch (e) { /* storage unavailable */ }
+    setCountdown(true);
+    if (!card.d && year) { card.d = nyCode(year); card.dr = premium.active ? 1 : 0; }
+    fillForm();
+  }
+  $('#btnMakeCountdown').addEventListener('click', makeCountdown);
+
   // ---------- Intro / envelope ----------
   function hideOverlay(o) {
     if (o === $('#intro')) document.body.classList.remove('home');
@@ -6154,7 +7604,6 @@
     hideOverlay($('#intro'));
     mode = 'play';
     clearScene(); syncLaunchUi();
-    maybeWelcome();
     maybeNudge();
   });
 
@@ -6172,13 +7621,28 @@
     Sound.resume();
     hideOverlay($('#envelope'));
     markWatched();
+    webFunnel(cdOf(incoming) ? 'play_countdown' : 'play_card');
     playAndKeep(incoming);
   });
   window.addEventListener('hashchange', () => {
     const c = readHash();
     if (c) { incoming = c; keepReceived(c); closeCardModal(); $('#intro').hidden = true; document.body.classList.remove('home'); showEnvelope(c); }
   });
+  // A shared link opening, at start or into a running page (the app's App Links set the hash): its kind only, never
+  // what it carries. The website counts web_open_<kind>; the app sends link_open. A countdown opened in the minutes
+  // around its midnight (the calendar's 11:58 alert, or just in time) counts as one at midnight too.
+  function linkOpened() {
+    const h = location.hash, c = /card=/.test(h) ? readHash() : null, key = h.match(/^#(vs|duel|rrvs|dpvs|heist|room)=/);
+    const kind = c ? (c.lit ? 'dedication' : cdOf(c) ? 'countdown' : 'card') : /^#daily\b/.test(h) ? 'daily' : key ? LINK_KINDS[key[1]] : '';
+    if (!kind) return;
+    if (window.LUTSNative) track('link_open', { kind }); else webFunnel(`open_${kind}`);
+    const at = +cdOf(c), now = Date.now();
+    if (at && now >= at - 5 * 60e3 && now < at + 10 * 60e3) cdStep('midnight');
+  }
+  window.addEventListener('hashchange', linkOpened); // (ahead of the routes that clear their hash once read: they load later)
   function showEnvelope(c) {
+    if (cdShow.live) stopLive(); // a new card link ends a countdown on screen (it doesn't pass through exitCardMode)
+    cdStop();
     abortLaunch();
     mode = 'envelope';
     freeShowResources(false);
@@ -6190,9 +7654,12 @@
     showCardWorld(c); // the sender's background is already behind the envelope
     $('#envTo').textContent = c.t;
     $('#envFrom').textContent = c.f ? `from ${c.f}` : '';
-    $('#envelope .env-label').textContent = c.lit ? 'Lit up in fireworks for' : 'A fireworks card for';
+    const at = cdOf(c), ahead = !!at && Date.now() < +at; // a countdown still before its midnight says when it plays
+    $('#envelope .env-label').textContent = c.lit ? 'Lit up in fireworks for' : at ? 'A New Year countdown for' : 'A fireworks card for';
+    $('#envNote').hidden = !ahead;
     setImg($('#envPhoto'), c.img);
     $('#btnOpenCard').classList.toggle('has-photo', !!c.img);
+    $('#btnOpenCard').classList.toggle('has-note', ahead);
     $('#envelope').hidden = false;
   }
 
@@ -6210,25 +7677,39 @@
   const saveList = (key, v) => { try { localStorage.setItem(key, JSON.stringify(v)); return true; } catch (e) { toast('Couldn’t save on this device. It may be full.'); return false; } };
   const dayKey = (dt = new Date()) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
   const niceDate = (key) => { const [y, m, d] = String(key).split('-').map(Number); return y ? `${d} ${MONTHS[m - 1].slice(0, 3)} ${y}` : ''; };
-  // The Play page tagged with where the link was shared from, so installs from shared cards can be counted.
-  // Only a source tag, never a name.
-  const playLink = (src) => `https://play.google.com/store/apps/details?id=com.stalinpusparaj.lightuptheskies&referrer=utm_source%3D${src}%26utm_campaign%3Ddiwali2026`;
+  // The Play page tagged for the install referrer, so installs from shared cards can be counted: src, where it was
+  // shared from ([a-z0-9_]); medium, share from the app or web from the website; campaign, the kind of link (the
+  // website's own Play links follow the link it was opened from, so an install from a shared card counts under it);
+  // content, an occasion id. Only fixed words from this code, never a name. o: { medium, campaign, content }.
+  const incomingTag = (() => { try { const q = new URLSearchParams(location.search); return { campaign: q.get('utm_campaign') || '', content: q.get('utm_content') || '' }; } catch (e) { return { campaign: '', content: '' }; } })();
+  const LINK_CAMPAIGNS = new Set(['card', 'countdown', 'dedication', 'daily', 'challenge', 'duel', 'rocket', 'diya', 'heist', 'room']);
+  const playLink = (src, o = {}) => {
+    const web = !window.LUTSNative, medium = o.medium || (web ? 'web' : 'share');
+    const campaign = o.campaign || (web && LINK_CAMPAIGNS.has(incomingTag.campaign) ? incomingTag.campaign : src);
+    const content = o.content || (web && OCC_IDS.has(incomingTag.content) ? incomingTag.content : '');
+    return `https://play.google.com/store/apps/details?id=com.stalinpusparaj.lightuptheskies&referrer=${encodeURIComponent(`utm_source=${src}&utm_medium=${medium}&utm_campaign=${campaign}${content ? `&utm_content=${content}` : ''}`)}`;
+  };
   // Every share ends with the hashtag the Facebook Page searches for and reposts with credit (after the Play link, never
   // a second link). Captions stay in English, like the hashtag itself.
   const TAG = '#LightUpTheSkies', TAG_LINE = `${TAG} · tag us and we’ll feature the best`;
   // The website's home screen offers the app (a friend who opened a shared card can install it); the apps hide it.
-  if (!window.LUTSNative) { const g = $('#btnGetApp'); if (g) { g.href = playLink('web'); g.hidden = false; } }
+  if (!window.LUTSNative) { const g = $('#btnGetApp'); if (g) { g.href = playLink('web'); g.hidden = false; g.addEventListener('click', () => webFunnel('get_app')); } }
   // The website is a card viewer, not a free copy of the game (Premium lives in the app): shared cards, dedications and
   // challenges still play there, but its home is only "Get it on Google Play", and anything that would start your own
   // show or card opens the Play page instead. On the user site (github.io) or with ?viewer; never in the apps.
   const webViewer = !window.LUTSNative && (/(^|\.)github\.io$/.test(location.hostname) || /[?&]viewer\b/.test(location.search));
   if (webViewer) {
     document.body.classList.add('web-viewer');
-    const toApp = ['#btnStart', '#btnIntroCard', '#btnMakeOwn', '#btnSendBack', '#btnEditCard', '#btnRecordCard', '#btnSaveTool', '#btnGreetCards', '.home-tile', '#btnIntroSettings'].join(',');
+    const make = '#btnIntroCard, #btnMakeOwn, #btnSendBack', toApp = ['#btnStart', make, '#btnMakeCountdown', '#btnEditCard', '#btnRecordCard', '#btnSaveTool', '#btnGreetCards', '.home-tile', '#btnIntroSettings'].join(',');
     document.addEventListener('click', (e) => {
-      if (!e.target.closest || !e.target.closest(toApp)) return;
+      const b = e.target.closest && e.target.closest(toApp);
+      if (!b) return;
       e.preventDefault(); e.stopImmediatePropagation();
-      window.open(playLink('viewer'), '_blank', 'noopener');
+      // Making a countdown of your own (its own button, or Make your own and Send one back after one) is counted as one
+      // and its install under the countdown; making any other card, or the rest, as Make one or Get the app.
+      const cd = b.id === 'btnMakeCountdown' || (b.matches('#btnMakeOwn, #btnSendBack') && !!cdOf(currentCard));
+      webFunnel(cd ? 'cd_make' : b.matches(make) ? 'make_one' : 'get_app');
+      window.open(cd ? playLink('countdown', CD_PLAY) : playLink('viewer'), '_blank', 'noopener');
     }, true);
   }
   // On an Android phone's browser, a challenge or room link opens the app itself (lightuptheskies://open?h=<the #…>,
@@ -6244,6 +7725,7 @@
       box.id = 'openApp'; box.className = 'open-app';
       box.innerHTML = '<div class="open-app-box"><b>You’re invited!</b><p>Open it in Light Up the Skies to play.</p><a class="btn primary" id="openAppGo">Open in the app</a><a class="btn ghost" id="openAppPlay">Get it on Google Play</a></div>';
       document.body.append(box);
+      box.querySelectorAll('a').forEach((a) => a.addEventListener('click', () => webFunnel('get_app'))); // (this box is the website's)
     }
     box.querySelector('#openAppGo').href = url;
     box.querySelector('#openAppPlay').href = playLink(src);
@@ -6258,9 +7740,13 @@
   const initials = (name) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 
   // ----- Sheets (the two screens) -----
-  const sheets = [$('#bdayModal'), $('#joyModal'), $('#welcomeModal'), $('#achModal'), $('#gemModal'), $('#giftModal'), $('#boardModal'), $('#cardsModal'), $('#festModal'), $('#tryModal')];
+  const sheets = [$('#loadModal'), $('#bdayModal'), $('#joyModal'), $('#feedbackModal'), $('#welcomeModal'), $('#achModal'), $('#gemModal'), $('#giftModal'), $('#boardModal'), $('#cardsModal'), $('#festModal'), $('#tryModal'), $('#wallModal'), $('#liveModal'), $('#timeModal'), $('#wishModal')].filter(Boolean);
+  const SHEET_SCREENS = { loadModal: 'cracker_loader', bdayModal: 'birthdays', joyModal: 'light_someone_up', feedbackModal: 'feedback', welcomeModal: 'welcome', achModal: 'achievements', gemModal: 'gems', giftModal: 'gift', boardModal: 'leaderboard', cardsModal: 'my_cards', festModal: 'festival', tryModal: 'free_try', wallModal: 'wallpapers', liveModal: 'live_sky_shows', timeModal: 'my_sky', wishModal: 'public_wishes' };
+  // My sky (timeline.js): a moment of the player's day, kept where it happens; nothing breaks without the timeline.
+  function moment(o) { if (window.LUTSTimeline) window.LUTSTimeline.add(o); } // (hoisted: achieve() can run before this line)
   function openSheet(el) {
     closeDrawer();
+    track.screen(SHEET_SCREENS[el.id] || el.id);
     sheets.forEach((s) => { s.hidden = s !== el; });
     el.hidden = false;
     const body = el.querySelector('.modal-body');
@@ -6268,7 +7754,12 @@
     const first = el.querySelector('.nav-back, .btn.primary'); // screen readers start inside the new screen
     if (first) first.focus({ preventScroll: true });
   }
-  function closeSheet(el) { if (el) el.hidden = true; updateHomeTiles(); }
+  function closeSheet(el) { if (el) el.hidden = true; updateHomeTiles(); if (!sheets.some((x) => !x.hidden)) track.back(); if (el) loaderSheetClosed(el); }
+  // Which home tiles and challenge cards players open (feature_open), by the button's id: btnDailySky -> daily_sky.
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('.home-tile, .ch-card');
+    if (b && b.id) track('feature_open', { feature: b.id.replace(/^btn/, '').replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase() });
+  }, true);
   function closeSheets() { const open = sheets.filter((s) => !s.hidden); open.forEach((s) => closeSheet(s)); return open.length > 0; }
   sheets.forEach((el) => el.addEventListener('pointerdown', (e) => { if (e.target === el) closeSheet(el); }));
 
@@ -6353,9 +7844,15 @@
     const c = cardFields(card), now = Date.now();
     if (!c) return;
     const have = card.id && myCards.find((e) => e.id === card.id && e.kind === 'made');
-    if (have) { have.c = c; have.updated = now; saveCards(); return; }
+    // My sky: the card's moment follows its edits (a new name, a birthday now), keeping when it was made
+    const cardMoment = (update) => moment({ kind: 'card', icon: c.d ? '⏳' : c.o === 'birthday' ? '🎂' : '💌', line: c.d ? 'New Year countdown for {0}' : c.o === 'birthday' ? 'Birthday card for {0}' : 'Love card for {0}', args: [c.t],
+      thumb: c.img || worldThumb(c.w, 'assets/menu/thumb-card.webp'), ref: card.id, key: `card:${card.id}`, update });
+    if (have) { have.c = c; have.updated = now; saveCards(); cardMoment(true); return; }
     card.id = newCardId();
     addCard({ id: card.id, kind: 'made', created: now, updated: now, c });
+    track('card_create', { occasion: card.o || 'custom' });
+    cardMoment(false);
+    celebrateFirst('card', 'Your first card is ready. Someone is going to smile 💌');
     festCheck(); // Bhai Dooj's challenge
   }
   // The same words, colours and photo are the same card, however often its link is opened.
@@ -6377,13 +7874,13 @@
     saveCards();
   }
   // A saved card into the creator's draft (no sharper photo: the small one plays the show).
-  const loadDraft = (e) => Object.assign(card, { rel: '', rm: null, s: '' }, e.c, { id: e.id, imgFull: '', friend: '', pg: [...(e.c.pg || [])], rm: e.c.rm ? { ...e.c.rm } : null }); // a card saved as Anyone has no rel; its own copy of the pages and reminder
+  const loadDraft = (e) => Object.assign(card, { rel: '', rm: null, s: '', d: '', dr: 0 }, e.c, { id: e.id, imgFull: '', friend: '', pg: [...(e.c.pg || [])], rm: e.c.rm ? { ...e.c.rm } : null }); // a card saved as Anyone has no rel (nor an ordinary one a countdown); its own copy of the pages and reminder
   // A new card: the same occasion written fresh, still signed with your name.
   function freshCard() {
     const o = OCC_BY_ID[card.o] || OCCASIONS[0];
     let from = card.f;
     try { from = from || localStorage.getItem('luts:from') || ''; } catch (e) { /* ignore */ }
-    Object.assign(card, { id: '', o: o.id, t: '', f: from, rel: '', h: inLang(o.head), m: inLang(o.msg), p: o.theme, img: '', imgFull: '', friend: '', pg: [], rm: null, s: '' });
+    Object.assign(card, { id: '', o: o.id, t: '', f: from, rel: '', h: inLang(o.head), m: inLang(o.msg), p: o.theme, img: '', imgFull: '', friend: '', pg: [], rm: null, s: '', d: '', dr: 0 });
   }
   function startCard() { if (myCards.length) openCards(); else openCardModal(); }
 
@@ -6468,7 +7965,7 @@
     const thumb = document.createElement('span'), rel = REL_BY_ID.get(c.rel);
     thumb.className = 'card-thumb';
     thumb.style.setProperty('--th-grad', `linear-gradient(135deg, ${(PALETTES[c.p] || PALETTES.rainbow).join(', ')})`);
-    thumb.style.setProperty('--th-world', `url("${thumbSrc(WORLD_BY_ID[c.w] || WORLD_BY_ID.default, 'jpg')}")`);
+    thumb.style.setProperty('--th-world', `url("${thumbSrc(WORLD_BY_ID[c.w] || WORLD_BY_ID.default, 'webp')}")`);
     const av = c.img || !rel ? document.createElement(c.img ? 'img' : 'span') : relFace(rel, 'row-avatar');
     av.classList.add('row-avatar');
     if (c.img) { av.src = photoSrc(c.img); av.alt = ''; } else if (!rel) av.textContent = initials(c.t) || '✨';
@@ -6533,6 +8030,7 @@
   }
   function deleteCard(id) {
     myCards = myCards.filter((e) => e.id !== id);
+    if (window.LUTSTimeline) LUTSTimeline.removeWhere((m) => m.k === 'card' && m.r === id); // its moment in My sky goes too
     if (card.id === id) card.id = ''; // the draft, if played again, is a new card
     saveCards();
     renderCards();
@@ -6540,7 +8038,7 @@
   $('#btnCardsNew').addEventListener('click', () => { closeSheets(); freshCard(); openCardModal(null, 0, true); });
 
   // ----- Gems: the bigger crackers cost gems; everyday ones stay free -----
-  // Gems come free every day (a growing daily gift, lighting someone up, reward videos) and in packs
+  // Gems come from daily gifts, gameplay rewards, and optional packs.
   // from the Android app (Google Play one-time products, see mobile/.../Gems.kt). The wallet lives on this device; every
   // pack bought is credited once by its store transaction id, so packs come back after a reinstall.
   const GEM_KEY = 'luts:gems';
@@ -6553,14 +8051,116 @@
   // The Diwali box tops the sheet from 6 to 25 Nov; the mini pack shows once the starter is bought or has run out (the app only).
   const DIWALI_BOX = { id: 'gems_diwali', name: 'Diwali box', gems: 720, from: '11-06', to: '11-25' };
   const MINI = { id: 'gems_mini', name: 'Mini pack', gems: 40 };
-  const GEM_WELCOME = 50, GEM_VIDEO = 20, GEM_VIDEOS_A_DAY = 3, GEM_JOY = 15, GEM_CHEST = 50;
+  // Diwali sale (India, until the end of 15 Nov): the Play prices were lowered; the old ones show struck through.
+  const SALE = { until: new Date(2026, 10, 16).getTime(), was: { gems_pouch: 29, gems_box: 79, gems_chest: 199, gems_vault: 499, gems_diwali: 79, lifetime: 999 } };
+  // While the sale is on, the pre-sale rupee price struck through before the store's (already in el). True when shown.
+  function salePrice(el, key, price) {
+    const was = SALE.was[key], now = parseFloat(String(price).replace(/[^\d.]/g, ''));
+    if (!was || Date.now() >= SALE.until || !/₹/.test(price) || !(now < was)) return false;
+    const s = document.createElement('s'); s.className = 'sale-was'; s.textContent = `₹${was}`;
+    el.prepend(s, ' ');
+    return true;
+  }
+  // Buy 1 Get 1 Free (the app only, 5 to 15 Nov, on the sale's end date): each of the four packs doubles once per player,
+  // so every step up the ladder still pays double. Not on top of the first pack's 2×: a pack is doubled once at most.
+  // The bundles need no Play product either: each is one pack with extras added when it is credited, once per pack per
+  // player. Those with the Pass stop with it (14 Nov is its last day on sale), the rest with the offer. Everything is
+  // judged by when Google Play took the order, so a late payment gets what was on show and a reinstall comes to the same.
+  const DOUBLE = { from: new Date(2026, 10, 5).getTime(), until: SALE.until, packs: ['gems_pouch', 'gems_box', 'gems_chest', 'gems_vault'] };
+  const GEM_COMBOS = {
+    gems_chest: { name: 'Festival combo', tag: 'Our pick', pass: true, slots: true, hints: 20, spins: 5 },
+    gems_vault: { name: 'Grand combo', tag: 'best value', pass: true, slots: true, shows: true, hints: 50, spins: 10 }, // (the most gems per rupee, and the most besides)
+    gems_diwali: { name: 'Diwali combo', pass: true, spins: 5 },
+    gems_box: { name: 'Rocket bundle', hints: 10, spins: 3 },
+    gems_pouch: { name: 'Diya bundle', hints: 5 },
+    gems_mini: { name: 'Mini bundle' },
+  };
+  const bundleEnd = (combo) => (combo.pass ? PASS.sellUntil : DOUBLE.until);
+  const PAY_HOLD = 4 * 864e5; // how long a payment Google Play calls pending can stay open
+  const passDaysLeft = () => Math.max(1, Math.ceil((PASS.sellUntil - Date.now()) / 864e5));
+  // The Pass as Google Play sells it here (its live price), while it is on sale to this player; else nothing. One test for
+  // every place that offers it, so all of them stop together after the sale.
+  const passOnSale = () => (nativeGems() && !document.documentElement.classList.contains('tv') && !premium.active && !passActive() && Date.now() < PASS.sellUntil && gemStore.packs.find((x) => x.id === PASS.id)) || null;
+  function buyPass() {
+    if (!nativeGems()) { window.open(playLink('pass'), '_blank', 'noopener'); return; }
+    funnel('pass_buy_tap'); track('purchase_start', { sku: PASS.id });
+    gemBuying = PASS.id; gemStore.status = 'purchasing'; renderGemSheet();
+    window.LUTSNative.premium('gems-buy', PASS.id);
+  }
+  function startPass(note) {
+    try { localStorage.setItem('luts:pass', '1'); } catch (e) { /* storage unavailable */ }
+    funnel('pass_purchased');
+    const was = premium.active;
+    premium.active = true;
+    if (!was) premiumChanged(was);
+    syncGems();
+    closeSheet($('#gemModal')); closePremium();
+    renderPaywall(); syncWorldUi(); syncPremiumRow(); syncLaunchUi(); syncPassOffer();
+    toast(note || 'Happy Diwali ✨ Your Diwali Pass is on: every cracker free until 15 Nov', 4200);
+    celebrate();
+  }
+  // The home screen's Diwali Pass card: while it's on sale, for players without Premium.
+  function syncPassOffer() {
+    const card = $('#homePass');
+    if (!card) return;
+    const live = passOnSale(), show = !!live; // only once Google Play sells it here (its price known)
+    card.hidden = !show;
+    if (show) { card.querySelector('small').textContent = `Every cracker free · ${passDaysLeft()} days left`; $('#homePassPrice').textContent = live.price; funnelOnce('pass_offer_seen'); }
+    // Home's card leads with Buy 1 Get 1 Free while it's on (from the smallest pack); the Pass stays in the gem sheet.
+    const offer = !premium.active && nativeGems() && !document.documentElement.classList.contains('tv') && gemStore.packs.filter((x) => doubleOpen(x.id))[0];
+    card.classList.toggle('offer', !!offer);
+    card.querySelector('b').textContent = offer ? 'Buy 1 Get 1 Free' : 'Diwali Pass';
+    if (offer) { card.hidden = false; card.querySelector('small').textContent = offerLeft(); $('#homePassPrice').textContent = inLang('From {0}').replace('{0}', offer.price); funnelOnce('gems_home_offer_seen'); }
+  }
+  // Where buyers drop off: one mark per player per step per day (paywall seen, plan tapped, purchase started,
+  // purchase done; the same for gems and the pass), counted in the Realtime Database (funnel/day/step/player).
+  // (Tests point LUTS_RTDB at a fake; an automated browser counts nothing, as in rooms.js. keepalive: a tap that leaves
+  // the page, Get the app on the website, still gets counted.)
+  const FUNNEL_DB = 'https://light-up-the-skies-default-rtdb.asia-southeast1.firebasedatabase.app';
+  const funnelSent = new Set();
+  async function funnel(step) {
+    const fb = window.LUTSBoards && window.LUTSBoards.fb;
+    const key = `${dayKey()}/${step}`;
+    if (!fb || !fb.on || funnelSent.has(key) || (navigator.webdriver && !window.LUTS_BEATS)) return;
+    funnelSent.add(key);
+    try { const tok = await fb.token(); await fetch(`${window.LUTS_RTDB || FUNNEL_DB}/funnel/${key}/${fb.uid()}.json?auth=${encodeURIComponent(tok)}`, { method: 'PUT', body: '1', keepalive: true }); } catch (e) { /* offline: not counted */ }
+  }
+  const funnelOnce = (step) => funnel(step);
+  // duel.js, whose sign-in funnel uses, loads after this file: a step taken while the page is still loading (a link
+  // opening at start) waits for it instead of being dropped.
+  function funnelSoon(step) {
+    if (window.LUTSBoards || document.readyState !== 'loading') funnel(step);
+    else document.addEventListener('DOMContentLoaded', () => funnel(step), { once: true });
+  }
+  // The website's own steps (web_<step>): who opens a shared link there, plays it, and goes on to get the app. The apps
+  // count theirs with track() and funnel(), since their link opens never reach the website.
+  function webFunnel(step) { if (!window.LUTSNative) funnelSoon(`web_${step}`); }
+  // Where this install came from: the Play install referrer, read once by the Android shell, which hands over its utm
+  // words only, already cleaned (LUTSNative.lastReferrer at start, a luts:referrer event when it comes later; it comes
+  // again on each start). Counted once per install by campaign (our own links' fixed words; anything else is other),
+  // and given to RevenueCat with this phone's other attributes.
+  let installRef = null, attrsSent = false;
+  const refAttrs = () => (installRef ? ['utm_source', 'utm_medium', 'utm_campaign'].filter((k) => typeof installRef[k] === 'string' && installRef[k]).map((k) => `${k}\t${installRef[k]}`) : []);
+  function gotReferrer(r) {
+    if (installRef || !r || typeof r !== 'object' || !window.LUTSNative) return; // (once a run is enough)
+    installRef = r;
+    if (attrsSent && nativeGems() && refAttrs().length) window.LUTSNative.premium('attrs', refAttrs().join('\n')); // after the start-up ones
+    try { if (localStorage.getItem('luts:ref')) return; localStorage.setItem('luts:ref', '1'); } catch (e) { return; } // (storage unavailable: not counted)
+    funnelSoon(`install_${/^[a-z_]{1,16}$/.test(r.utm_campaign || '') ? r.utm_campaign : 'other'}`);
+  }
+  window.addEventListener('luts:referrer', (e) => gotReferrer(e.detail));
+  gotReferrer(window.LUTSNative && window.LUTSNative.lastReferrer);
+  const GEM_WELCOME = Date.now() < new Date(2026, 10, 16).getTime() ? 50 : 20, /* after Diwali, new players start with 20 */ GEM_JOY = 15, GEM_CHEST = 50;
   function loadWallet() {
     let w = null;
     try { w = JSON.parse(localStorage.getItem(GEM_KEY) || 'null'); } catch (e) { w = null; }
-    if (!w || typeof w !== 'object' || !Number.isFinite(w.b)) w = { b: GEM_WELCOME, tx: [], day: '', streak: 0, joy: '', sky: {}, vid: {}, pm: '' };
+    if (!w || typeof w !== 'object' || !Number.isFinite(w.b)) w = { b: GEM_WELCOME, tx: [], day: '', streak: 0, joy: '', sky: {}, pm: '' };
     w.tx = Array.isArray(w.tx) ? w.tx.slice(-500) : [];
     w.sky = w.sky && typeof w.sky === 'object' ? w.sky : {};
-    w.vid = w.vid && typeof w.vid === 'object' ? w.vid : {};
+    w.x2 = w.x2 && typeof w.x2 === 'object' ? w.x2 : {}; // Buy 1 Get 1 Free: pack → the transaction that took it
+    w.waiting = w.waiting && typeof w.waiting === 'object' ? w.waiting : {}; // pack → when a payment still processing was placed
+    w.got = w.got && typeof w.got === 'object' ? w.got : {}; // a bundle's once-only extras: pack → the transaction that took them
+    w.spins = Number.isFinite(w.spins) ? w.spins : 0; // Lucky Draw spins from bundles; they keep until spun
     // Diwali week: launches counted toward each day's challenge, and the days whose challenge is done.
     w.fest = w.fest && typeof w.fest === 'object' ? w.fest : {};
     w.fest.c = w.fest.c && typeof w.fest.c === 'object' ? w.fest.c : {};
@@ -6573,18 +8173,23 @@
   function syncGems(gain = 0) {
     for (const el of document.querySelectorAll('[data-gems]')) el.textContent = fmtGems(wallet.b);
     $('#btnGems').dataset.cap = `💎 ${fmtGems(wallet.b)}`;
+    const homePremium = $('#homePremium');
+    if (homePremium) homePremium.hidden = premium.active;
     if (gain > 0) { const pill = $('#btnGems'); pill.classList.remove('gain'); void pill.offsetWidth; pill.classList.add('gain'); }
   }
   const fmtGems = (n) => Math.max(0, Math.floor(n)).toLocaleString('en-IN');
+  const GEM_SOURCES = [['watching', 'video'], ['gift', 'daily_gift'], ['sharing', 'share'], ['added', 'purchase'], ['festival', 'festival'], ['chest', 'chest']];
   function addGems(n, why) {
     if (!Number.isFinite(n) || !(n > 0)) return;
+    track('gems_earn', { source: (GEM_SOURCES.find(([w]) => String(why || '').includes(w)) || [0, why ? 'other' : 'game'])[1], amount: Math.round(n) });
     wallet.b += n; saveWallet(); syncGems(n);
     if (why) toast(`💎 +${fmtGems(n)} ${why}`, 3000);
   }
-  function spendGems(n) {
+  function spendGems(n, item = 'cracker') {
     if (!(n > 0)) return true;
     if (wallet.b < n) return false;
     wallet.b -= n; saveWallet(); syncGems();
+    track('gems_spend', { item, amount: Math.round(n) });
     return true;
   }
   // What a launch costs: one cracker, or every cracker waiting on the street for Burst all. Sparkler writing is free.
@@ -6609,7 +8214,6 @@
     wallet.day = today;
     const gift = giftFor(wallet.streak) * (festToday() ? 2 : 1) + chestFor(wallet.streak); // doubled in Diwali week
     for (const k of Object.keys(wallet.sky)) if (k < dayKey(new Date(Date.now() - 7 * 864e5))) delete wallet.sky[k];
-    for (const k of Object.keys(wallet.vid)) if (k !== today) delete wallet.vid[k];
     wallet.b += gift; wallet.gift = gift; saveWallet(); syncGems(gift);
     festCheck(); // a new festival day on the Home tile
     // The gift screen when nothing else is up; mid-show or in a sheet, a toast instead.
@@ -6635,38 +8239,18 @@
       row.append(li);
     }
     $('#giftNext').textContent = `Come back tomorrow for 💎${giftFor(day + 1) + chestFor(day + 1)}`;
-    renderGift();
     openSheet($('#giftModal'));
-  }
-  function renderGift() {
-    const provider = rewardsProvider(), b = $('#btnGiftDouble');
-    b.hidden = !videoOk(provider) || wallet.doubled === dayKey();
-    b.disabled = rewardBusy;
-    b.lastChild.textContent = `Double it · watch a video · +${fmtGems(wallet.gift || 10)}`;
   }
   // The evening reminder, so tomorrow's gift isn't missed. Where the phone must ask for notifications (Android 13+), the
   // gift sheet asks in the game's own words first, and only "Yes, remind me" leads to the system dialog. Never on TV.
+  // The phone's own notification dialog (Android 13+), only after the player said yes in the game's words.
+  const askNotifyNative = () => { track('reminder_on', { kind: 'notify' }); try { if (window.LUTSAndroid && window.LUTSAndroid.askNotify) window.LUTSAndroid.askNotify(); } catch (e) { /* older app */ } };
   const askNotify = () => !wallet.remind && !wallet.remindNo && CFG.notifyAsk && !!(window.LUTSNative && window.LUTSNative.needsNotifyPermission)
     && !document.documentElement.classList.contains('tv');
   function collectGift(answer) {
     if (askNotify() && answer !== 'yes') { if (answer === 'no') { wallet.remindNo = true; saveWallet(); } }
-    else if (!wallet.remind && !document.documentElement.classList.contains('tv')) { wallet.remind = true; saveWallet(); syncReminders(); }
+    else if (!wallet.remind && !document.documentElement.classList.contains('tv')) { wallet.remind = true; saveWallet(); syncReminders(); askNotifyNative(); }
     closeSheet($('#giftModal'));
-  }
-  async function doubleGift() {
-    const provider = rewardsProvider(), today = dayKey();
-    if (rewardBusy || !provider || wallet.doubled === today || wallet.day !== today) return;
-    rewardBusy = true; renderGift();
-    try {
-      const receipt = await rewardTimeout(() => provider.watchAd({ gems: wallet.gift }));
-      if (receipt && receipt.kind === 'ad' && await provider.verifyReceipt(receipt) === true && !wallet.tx.includes(`ad:${receipt.id}`)) {
-        wallet.tx.push(`ad:${receipt.id}`); wallet.doubled = today;
-        if (provider.acknowledgeReceipt) { try { await provider.acknowledgeReceipt(receipt); } catch (_) { /* deduplicated by id */ } }
-        addGems(wallet.gift, 'daily gift doubled');
-        $('#giftAmount').textContent = `+${fmtGems(wallet.gift * 2)}`;
-      }
-    } catch (error) { toast(videoMiss(error)); }
-    finally { rewardBusy = false; renderGift(); }
   }
   function joyGems() {
     if (wallet.joy === dayKey()) return;
@@ -6674,25 +8258,85 @@
     addGems(GEM_JOY, 'for sharing your light');
     festCheck(); // Choti Diwali's challenge
   }
-  // Packs bought in the app: credit each store transaction once.
+  // When an order was placed: Google Play's time, or the moment the player paid if the payment sat processing until later.
+  function placedAt(c) {
+    const at = c.at || Date.now(), held = wallet.waiting[c.pack];
+    return held && held < at && at - held < PAY_HOLD ? held : at;
+  }
+  // A combo's extras that last: safe to give again, so they come back from the purchase itself on a new phone.
+  function grantCombo(combo) {
+    let got = false;
+    if (combo.slots && SIDES.some((side) => rack.bought[side] < SLOT_GEMS.length)) {
+      for (const side of SIDES) rack.bought[side] = SLOT_GEMS.length;
+      saveRack(); syncBar(); got = true;
+    }
+    if (combo.shows && LIVE_SHOWS.some((x) => !LIVE_FREE_SHOWS.has(x.id) && !liveOwned(x.id))) { liveOwn(LIVE_SHOWS.map((x) => x.id)); syncLiveLocks(); got = true; }
+    return got;
+  }
+  // Packs bought in the app: credit each store transaction once, oldest first, so a phone starting over reaches the same
+  // total (the transaction list is the whole history; only what was bought when decides what doubled).
   function creditPurchases(credits) {
     if (!Array.isArray(credits)) return;
-    let total = 0;
-    for (const c of credits) {
-      if (!c || typeof c.tx !== 'string' || !(c.gems > 0) || wallet.tx.includes(c.tx)) continue;
-      wallet.tx.push(c.tx); total += Math.min(100000, Math.floor(c.gems));
+    let total = 0, free = 0, pass = false, late = false, comboName = '', granted = false;
+    for (const c of credits.filter(Boolean).sort((a, b) => (a.at || 0) - (b.at || 0))) {
+      if (typeof c.tx !== 'string' || !(c.gems > 0)) continue;
+      const at = placedAt(c), bundle = GEM_COMBOS[c.pack], combo = bundle && at >= DOUBLE.from && at < bundleEnd(bundle) ? bundle : null, gave = !!combo && grantCombo(combo);
+      if (gave) granted = true;
+      if (wallet.tx.includes(c.tx)) continue;
+      wallet.tx.push(c.tx);
+      delete wallet.waiting[c.pack];
+      track('purchase_done', { sku: c.pack || 'gems' });
+      if (c.pack === PASS.id) { pass = true; late = Date.now() - at < PAY_HOLD; continue; } // the Diwali Pass is Premium for the festival, not gems
+      if (combo && combo.pass && !premium.active) { pass = true; late = Date.now() - at < PAY_HOLD; comboName = combo.name; }
+      else if (gave) comboName = combo.name; // (nothing new, as for a Premium player: just the pack)
+      if (combo && !wallet.got[c.pack]) { // the extras that get used up, once per pack
+        wallet.got[c.pack] = c.tx;
+        if (combo.spins) wallet.spins += combo.spins;
+        if (combo.hints && window.LUTSDiyaHints) window.LUTSDiyaHints(combo.hints);
+        if (combo.hints && window.LUTSRocketHints) window.LUTSRocketHints(combo.hints);
+        comboName = combo.name;
+      }
+      // Doubled once at most: the first pack anyone buys, and each of the four packs once while Buy 1 Get 1 Free is on.
+      let g = Math.min(100000, Math.floor(c.gems));
+      const x2 = DOUBLE.packs.includes(c.pack) && at >= DOUBLE.from && at < DOUBLE.until && !wallet.x2[c.pack];
+      if (x2) { wallet.x2[c.pack] = c.tx; funnel('gems_double_done'); }
+      if (x2 || !wallet.paid) { free += g; g *= 2; }
+      wallet.paid = true;
+      total += g;
       if (c.pack === STARTER.id) wallet.starter = true; // once only
     }
-    if (total) { saveWallet(); addGems(total, 'added. Enjoy the show!'); renderGemSheet(); }
+    if (comboName) funnel('gems_combo_done');
+    if (total) { funnel('gems_purchased'); saveWallet(); addGems(total, free ? `added (${fmtGems(free)} free). Enjoy the show!` : 'added. Enjoy the show!'); renderGemSheet(); }
+    const note = comboName && inLang('{0} is yours ✨ 💎{1} added. Enjoy the show!').replace('{0}', inLang(comboName)).replace('{1}', fmtGems(total));
+    if (pass) { // (saved now: a Pass alone adds no gems, and only the wallet remembers it was credited)
+      saveWallet();
+      if (Date.now() < PASS.until) startPass(note);
+      else if (late) toast(inLang('Your Diwali Pass payment came through after it ended. Please write to us for a refund.'), 6000); // (else a reinstall, long after)
+    } else if (note) toast(note, 4200);
+    if (granted) { saveWallet(); renderGemSheet(); }
   }
   const nativeGems = () => !!(window.LUTSNative && typeof window.LUTSNative.premium === 'function' && window.LUTSNative.platform === 'android');
-  let gemStore = { status: nativeGems() ? 'loading' : 'web', packs: [], message: '' }, gemNeed = null;
+  let gemStore = { status: nativeGems() ? 'loading' : 'web', packs: [], message: '' }, gemNeed = null, gemBuying = '';
+  const waitingOn = (id) => Date.now() - (wallet.waiting[id] || 0) < PAY_HOLD; // a payment still processing, so don't offer it again
+  const doubleOpen = (id) => DOUBLE.packs.includes(id) && Date.now() >= DOUBLE.from && Date.now() < DOUBLE.until && !wallet.x2[id] && !waitingOn(id);
+  const offerOn = () => gemStore.packs.some((x) => doubleOpen(x.id));
+  // What's real and still left: 2 days and more in days, then in hours. Ends at the end of 15 Nov.
+  const offerLeft = () => {
+    const ms = DOUBLE.until - Date.now(), hours = Math.ceil(ms / 36e5);
+    return (hours > 48 ? inLang('Ends 15 Nov · {0} days left').replace('{0}', Math.ceil(hours / 24)) : inLang('Ends 15 Nov · {0} h left').replace('{0}', hours));
+  };
+  const offerLine = () => (offerOn() ? `${inLang('Buy 1 Get 1 Free')} · ${offerLeft()}` : '');
   window.addEventListener('luts:gems', (e) => {
     const st = e.detail || {};
     gemStore = { status: st.status || 'ready', packs: Array.isArray(st.packs) ? st.packs : [], message: st.message || '' };
     creditPurchases(st.credits);
+    syncPassOffer(); renderPaywall();
+    $('#btnGems').classList.toggle('offer', offerOn());
     if (st.event === 'cancelled') toast('Purchase cancelled');
-    if (st.event === 'pending') toast('Payment processing: your gems arrive automatically', 5000); // UPI can take minutes; don't buy again
+    if (st.event === 'pending') { // UPI can take minutes; don't buy again
+      if (gemBuying) { wallet.waiting[gemBuying] = Date.now(); saveWallet(); }
+      toast('Payment processing: your gems arrive automatically', 5000);
+    }
     if (st.status === 'error' && st.message) toast(st.message, 3600);
     renderGemSheet();
     // Back to the launch the player was short for, now that they can afford it.
@@ -6700,9 +8344,34 @@
   });
   function openGems(need) {
     gemNeed = need || null;
+    funnel(need ? 'gems_short' : 'gems_open');
+    track('paywall_view', { from: need ? 'gems_short' : 'gems', kind: 'gems' });
     if (nativeGems() && gemStore.status !== 'purchasing') window.LUTSNative.premium('gems');
     renderGemSheet(true);
     openSheet($('#gemModal'));
+  }
+  function buyPack(id, combo) {
+    funnel('gems_buy_tap'); if (combo) funnel('gems_combo_tap');
+    track('purchase_start', { sku: id });
+    gemBuying = id; gemStore.status = 'purchasing'; renderGemSheet();
+    window.LUTSNative.premium('gems-buy', id);
+  }
+  // A number with what it would have been struck through before it, as text nodes the page's translation can find.
+  const struck = (was, ...rest) => { const s = document.createElement('s'); s.className = 'sale-was'; s.textContent = was; return [s, ' ', ...rest]; };
+  // What a combo still adds for this player (nothing they already have); empty means it's a plain pack to them.
+  function comboPerks(id) {
+    const combo = GEM_COMBOS[id], lines = [];
+    const subscribed = premium.active && !passActive();
+    if (!combo || Date.now() >= bundleEnd(combo) || Date.now() < DOUBLE.from || subscribed || document.documentElement.classList.contains('tv')) return lines;
+    if (wallet.got[id] || (DOUBLE.packs.includes(id) && !doubleOpen(id))) return lines;
+    const pass = gemStore.packs.find((x) => x.id === PASS.id);
+    if (combo.pass && !passActive()) lines.push(['👑', 'Diwali Pass ', ...(pass ? struck(pass.price) : []), 'free · every cracker to 15 Nov']);
+    const slots = SIDES.reduce((sum, side) => sum + SLOT_GEMS.slice(rack.bought[side]).reduce((a, b) => a + b, 0), 0);
+    if (combo.slots && slots && !rack.classic) lines.push(['🧨', 'Every cracker slot, kept for good ', ...struck(`💎${fmtGems(slots)}`), 'free']);
+    if (combo.shows && LIVE_SHOWS.some((x) => !LIVE_FREE_SHOWS.has(x.id) && !liveOwned(x.id))) lines.push(['📺', inLang('All {0} light shows, kept for good').replace('{0}', LIVE_SHOWS.length), ' ', ...struck(`💎${LIVE_ALL_GEMS}`), 'free']);
+    if (combo.hints) lines.push(['💡', inLang('{0} hints in each puzzle game').replace('{0}', combo.hints), ' ', ...struck(`💎${fmtGems(combo.hints * PUZZLE_HINT_GEMS)}`), 'free']);
+    if (combo.spins) lines.push(['🎡', inLang('{0} extra Lucky Draw spins').replace('{0}', combo.spins)]);
+    return lines;
   }
   // `opening`: the player is about to see the sheet, so the starter's 3 days may start (never while the sheet is closed).
   function renderGemSheet(opening) {
@@ -6728,43 +8397,110 @@
       b.querySelector('small').textContent = note;
       b.querySelector('.gem-price').textContent = live.price;
       b.disabled = gemStore.status === 'purchasing';
-      b.addEventListener('click', () => { gemStore.status = 'purchasing'; renderGemSheet(); window.LUTSNative.premium('gems-buy', pack.id); });
+      b.addEventListener('click', () => buyPack(pack.id));
       list.append(b);
     };
+    // A combo: one Play product, its gems and what comes with it, line by line, each with its real price struck through.
+    const comboRow = (id, gemCount, perks, live, icon) => {
+      const combo = GEM_COMBOS[id], twice = doubleOpen(id), b = document.createElement('button');
+      b.type = 'button'; b.className = `gem-pack gem-combo${combo.tag ? ' tagged' : ''}${id === DIWALI_BOX.id ? ' diwali' : ''}`; b.dataset.pack = id;
+      b.innerHTML = `<span class="combo-head"><img class="gem-ico" src="assets/menu/glyphs/${icon}.webp" alt="" width="44" height="44"><span class="gem-text"><b></b></span><span class="gem-price"></span></span><span class="combo-lines"></span>`;
+      if (combo.tag) { const t = document.createElement('i'); t.className = 'combo-tag'; t.textContent = combo.tag; b.prepend(t); }
+      b.querySelector('b').textContent = combo.name;
+      b.querySelector('.gem-price').textContent = live.price;
+      salePrice(b.querySelector('.gem-price'), id, live.price);
+      const shown = twice ? gemCount * 2 : gemCount, finales = Math.floor(shown / GEM_COST.finale);
+      for (const parts of [['💎', ...(twice ? struck(fmtGems(gemCount)) : []), `${fmtGems(shown)} gems`, ...(finales > 1 ? [' · ', inLang('about {0} grand finales').replace('{0}', fmtGems(finales))] : [])], ...perks]) {
+        const line = document.createElement('span'); line.className = 'combo-line';
+        const [ico, ...rest] = parts, i = document.createElement('i'); i.setAttribute('aria-hidden', 'true'); i.textContent = ico;
+        line.append(i, ...rest);
+        b.querySelector('.combo-lines').append(line);
+      }
+      b.disabled = gemStore.status === 'purchasing';
+      b.addEventListener('click', () => buyPack(id, true));
+      list.append(b);
+    };
+    // Buy 1 Get 1 Free first: what it is, and the real end date.
+    if (store && offerOn()) {
+      const o = document.createElement('div');
+      o.className = 'gem-offer'; o.innerHTML = '<b></b><span></span><small></small>';
+      o.querySelector('b').textContent = 'Buy 1 Get 1 Free';
+      o.querySelector('span').textContent = 'Each pack doubles once, until 15 Nov';
+      o.querySelector('small').textContent = offerLeft();
+      list.append(o);
+      if (opening === true || !$('#gemModal').hidden) funnel('gems_offer_seen');
+    }
+    const perksOf = {};
+    const comboLive = (id) => { const live = store && store.find((x) => x.id === id); if (!live) return null; perksOf[id] = comboPerks(id); return perksOf[id].length ? live : null; };
+    for (const id of ['gems_chest', 'gems_vault']) { // (the pouch and box bundles follow the Diwali combo, below)
+      const live = comboLive(id);
+      if (live) comboRow(id, GEM_PACKS.find((p) => p.id === id).gems, perksOf[id], live, id);
+    }
     const md = dayKey().slice(5), diwali = store && md >= DIWALI_BOX.from && md <= DIWALI_BOX.to && store.find((x) => x.id === DIWALI_BOX.id);
+    const diwaliCombo = diwali && comboLive(DIWALI_BOX.id);
+    if (diwaliCombo) comboRow(DIWALI_BOX.id, DIWALI_BOX.gems, perksOf[DIWALI_BOX.id], diwali, 'gems_vault');
+    for (const id of ['gems_box', 'gems_pouch']) {
+      const live = comboLive(id);
+      if (live) comboRow(id, GEM_PACKS.find((p) => p.id === id).gems, perksOf[id], live, id);
+    }
+    // The Diwali Pass first, while it's on sale: Premium until 15 Nov for one small price.
+    const passLive = store && !passActive() && !premium.active && Date.now() < PASS.sellUntil && store.find((x) => x.id === PASS.id);
+    if (passLive) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'gem-pack pass'; b.dataset.pack = PASS.id;
+      b.innerHTML = '<span class="gem-ico pass-ico" aria-hidden="true">🪔</span><span class="gem-text"><b></b><small></small></span><span class="gem-price"></span>';
+      b.querySelector('b').textContent = 'Diwali Pass';
+      b.querySelector('small').textContent = `Every cracker free, everything Premium · until 15 Nov · ${passDaysLeft()} days left`;
+      b.querySelector('.gem-price').textContent = passLive.price;
+      b.disabled = gemStore.status === 'purchasing';
+      b.addEventListener('click', () => buyPass());
+      list.append(b);
+    }
     // The starter first: it's once only and its clock is running.
-    if (starter && hours > 0) special(STARTER, starter, 'starter', `${STARTER.name} · about 20 grand finales · once only · ends in ${hours} h`, 'gems_chest');
-    if (diwali) special(DIWALI_BOX, diwali, 'diwali', `${DIWALI_BOX.name} · double gems until 25 Nov`, 'gems_vault');
+    if (starter && hours > 0) special(STARTER, starter, 'starter', inLang('Starter offer · every light show + about 12 grand finales · once only · ends in {0} h').replace('{0}', hours), 'gems_chest');
+    if (diwali && !diwaliCombo) special(DIWALI_BOX, diwali, 'diwali', `${DIWALI_BOX.name} · double gems until 25 Nov`, 'gems_vault');
     const mini = store && (wallet.starter || (wallet.starterAt && hours <= 0)) && store.find((x) => x.id === MINI.id);
-    if (mini) special(MINI, mini, 'mini', MINI.name, 'gems_pouch');
+    if (mini && comboLive(MINI.id)) comboRow(MINI.id, MINI.gems, perksOf[MINI.id], mini, 'gems_pouch');
+    else if (mini) special(MINI, mini, 'mini', MINI.name, 'gems_pouch');
     for (const p of GEM_PACKS) {
       const live = store ? store.find((x) => x.id === p.id) : null;
-      if (store && !live) continue;
-      const b = document.createElement('button');
-      b.type = 'button'; b.className = `gem-pack${p.best ? ' best' : ''}`; b.dataset.pack = p.id;
+      if ((store && !live) || (perksOf[p.id] && perksOf[p.id].length)) continue; // (a combo is this pack, further up)
+      const b = document.createElement('button'), twice = store && doubleOpen(p.id);
+      b.type = 'button'; b.className = `gem-pack${p.best ? ' best' : ''}${twice ? ' twice' : ''}`; b.dataset.pack = p.id;
       b.innerHTML = `<img class="gem-ico" src="assets/menu/glyphs/${p.id}.webp" alt="" width="44" height="44"><span class="gem-text"><b></b><small></small></span><span class="gem-price"></span>`;
-      b.querySelector('b').textContent = `${fmtGems(p.gems)} gems`;
-      b.querySelector('small').textContent = [p.name, p.bonus && `${p.bonus} bonus`, p.best && 'best value'].filter(Boolean).join(' · ');
+      b.querySelector('b').textContent = `${fmtGems(twice ? p.gems * 2 : p.gems)} gems`;
+      if (twice) b.querySelector('b').prepend(...struck(fmtGems(p.gems)));
       b.querySelector('.gem-price').textContent = live ? live.price : 'In the app';
+      const onSale = live && salePrice(b.querySelector('.gem-price'), p.id, live.price);
+      b.querySelector('small').textContent = [onSale && '🪔 Diwali sale', p.name, twice ? 'Buy 1 Get 1 Free' : p.bonus && inLang('{0} bonus').replace('{0}', p.bonus), p.best && 'best value', !wallet.paid && store && !twice && '2× on your first pack'].filter(Boolean).map((x) => x.includes('bonus') ? x : inLang(x)).join(' · '); // (each part in the player's language)
       b.disabled = gemStore.status === 'purchasing' || gemStore.status === 'loading' && !live;
       b.addEventListener('click', () => {
-        if (live) { gemStore.status = 'purchasing'; renderGemSheet(); window.LUTSNative.premium('gems-buy', p.id); }
+        if (live) buyPack(p.id);
         else window.open(playLink('web'), '_blank', 'noopener');
       });
       list.append(b);
+    }
+    // Short of gems: the cheapest pack that covers it goes first, one tap from what they wanted to light.
+    if (short > 0 && store) {
+      const size = (x) => (doubleOpen(x.id) ? x.gems * 2 : x.gems);
+      const fit = store.filter((x) => x.id !== PASS.id && size(x) >= short && list.querySelector(`[data-pack="${x.id}"]`)).sort((a, b) => size(a) - size(b))[0];
+      const row = fit && list.querySelector(`[data-pack="${fit.id}"]`);
+      if (row) {
+        let t = row.querySelector('.combo-tag');
+        if (!t) { t = document.createElement('i'); t.className = 'combo-tag'; row.prepend(t); }
+        t.textContent = 'Covers this one';
+        row.classList.add('fit', 'tagged');
+        const o = list.querySelector('.gem-offer');
+        if (o) o.after(row); else list.prepend(row);
+      }
     }
     const status = $('#gemStatus');
     status.textContent = gemStore.status === 'loading' ? 'Loading prices…' : gemStore.status === 'purchasing' ? 'Waiting for Google Play…'
       : gemStore.status === 'unavailable' ? 'Gem packs aren’t available right now. Free gems still arrive every day.'
         : gemStore.status === 'web' ? 'Gem packs are sold in the Android app.' : '';
-    const provider = rewardsProvider(), left = GEM_VIDEOS_A_DAY - (wallet.vid[dayKey()] || 0);
-    const vid = $('#btnGemVideo');
-    vid.hidden = !videoOk(provider);
-    vid.disabled = left <= 0 || rewardBusy;
     $('#btnGemPremium').hidden = premium.active;
-    const covers = short > 0 && short <= 25;
-    vid.lastChild.textContent = left <= 0 ? 'Videos are done for today. Come back tomorrow'
-      : covers ? `Watch a video · launch it free (${left} left today)` : `Watch a video · +${GEM_VIDEO} gems (${left} left today)`;
+    $('#gemVs').parentNode.hidden = premium.active;
+    renderVs($('#gemVs'), document.documentElement.classList.contains('tv'));
   }
   function gemBadge(chip, cost) {
     if (!cost) return;
@@ -6773,15 +8509,20 @@
     chip.append(e);
   }
   $('#btnGems').addEventListener('click', () => openGems());
+  $('#homeGems').addEventListener('click', () => openGems());
+  $('#homePremium').addEventListener('click', () => openPremium({ home: true }));
+  // The Diwali Pass from home or the Premium sheet: straight to Google Play when its price is known, else the gem sheet (which loads it).
+  const passTap = () => (gemStore.packs.find((x) => x.id === PASS.id) ? buyPass() : openGems());
+  $('#homePass').addEventListener('click', () => ($('#homePass').classList.contains('offer') ? openGems() : passTap()));
+  $('#premiumPass').addEventListener('click', passTap);
+  if (nativeGems()) window.LUTSNative.premium('gems'); // prices for the pass card
+  syncPassOffer();
   $('#gemBack').addEventListener('click', () => closeSheet($('#gemModal')));
-  $('#btnGemVideo').addEventListener('click', watchGemVideo);
-  $('#premiumNudge').addEventListener('click', () => { $('#premiumNudge').hidden = true; openPremium({ ads: true }); });
   $('#btnGemPremium').addEventListener('click', () => { closeSheet($('#gemModal')); openPremium({ gems: true }); });
   $('#btnGiftCollect').addEventListener('click', () => collectGift());
   $('#btnRemindYes').addEventListener('click', () => collectGift('yes'));
   $('#btnRemindNo').addEventListener('click', () => collectGift('no'));
   $('#giftBack').addEventListener('click', () => collectGift());
-  $('#btnGiftDouble').addEventListener('click', doubleGift);
   // Back in the app: the day's gift, and any purchase that finished meanwhile (a UPI payment that was still processing).
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { dailyGems(); if (nativeGems() && gemStore.status !== 'purchasing') window.LUTSNative.premium('gems'); } });
   syncGems();
@@ -6789,29 +8530,11 @@
     dailyGems();
     if (!nativeGems()) return;
     window.LUTSNative.premium('gems');
-    // RevenueCat attributes, to split buyers by language and phone tier (no personal data).
+    // RevenueCat attributes, to split buyers by language, phone tier and where the install came from (no personal data).
     const ram = navigator.deviceMemory ? String(navigator.deviceMemory) : '';
-    window.LUTSNative.premium('attrs', [`lang\t${document.documentElement.lang || 'en'}`, ram && `ram_gb\t${ram}`].filter(Boolean).join('\n'));
+    window.LUTSNative.premium('attrs', [`lang\t${document.documentElement.lang || 'en'}`, ram && `ram_gb\t${ram}`, ...refAttrs()].filter(Boolean).join('\n'));
+    attrsSent = true; // a referrer that comes later is sent on its own
   }, 1200);
-  async function watchGemVideo() {
-    const provider = rewardsProvider(), today = dayKey();
-    if (rewardBusy || !provider || (wallet.vid[today] || 0) >= GEM_VIDEOS_A_DAY) return;
-    rewardBusy = true; renderGemSheet();
-    try {
-      const need = gemNeed ? gemNeed.cost - gems() : 0, amount = Math.max(GEM_VIDEO, Math.min(25, need));
-      const receipt = await rewardTimeout(() => provider.watchAd({ gems: amount }));
-      if (receipt && receipt.kind === 'ad' && await provider.verifyReceipt(receipt) === true && !wallet.tx.includes(`ad:${receipt.id}`)) {
-        wallet.tx.push(`ad:${receipt.id}`);
-        wallet.vid[today] = (wallet.vid[today] || 0) + 1;
-        if (provider.acknowledgeReceipt) { try { await provider.acknowledgeReceipt(receipt); } catch (_) { /* deduplicated by id */ } }
-        addGems(amount, 'for watching');
-        // Short for a cracker: the video covers it, so straight back to the launch.
-        if (gemNeed && gems() >= gemNeed.cost) { const s = gemNeed.s; gemNeed = null; closeSheet($('#gemModal')); if (s) setTimeout(() => (s.multi ? $('#btnBurstAll').click() : requestFire()), 400); }
-      }
-    } catch (error) { toast(videoMiss(error)); }
-    finally { rewardBusy = false; renderGemSheet(); syncLaunchUi(); }
-  }
-
   // ----- Diwali week: a festival challenge each day from Dhanteras to Bhai Dooj, and the daily gift doubled -----
   // The days follow the Diwali and Bhai Dooj dates in OCCASIONS, so another year needs only those dates.
   const FEST_GOALS = {
@@ -6839,6 +8562,8 @@
   }
   // Crackers the player lit (by type), counted toward today's challenge when it is about launches.
   function festLaunched(types) {
+    for (const t of types) track.once('cracker_fire', { cracker: t, mode: playMode }, t); // once per cracker a session
+    if (!chor.on && !rush.on && !live.on) { coach.act(playMode); celebrateFirst('burst', 'Your first firework! Happy Diwali ✨'); }
     const d = festToday();
     if (!d || wallet.fest.done[d.key]) return;
     const hits = types.filter((t) => d.goal === 'lights' || (d.goal === 'rockets' && /^rocket/.test(t)) || (d.goal === 'finale' && t === 'finale')).length;
@@ -6906,6 +8631,11 @@
       lines.push(['#card', id, m, d, y, flat(title), flat(body)].join('\t'));
     };
     if (days.length) at('fest-start', addDays(days[0].key, -1), inLang('🪔 Diwali week starts tomorrow'), inLang(`${days.length} festival challenges and double daily gifts`));
+    // Monday morning: the week's new treasure is in Seth-ji's vault (the street heist)
+    if (window.PatakaChor && PatakaChor.nextChange) {
+      const ms = PatakaChor.nextChange() + 3600e3, tr = PatakaChor.treasureAt(ms);
+      at(`fest-heist-${dayKey(new Date(ms))}`, dayKey(new Date(ms)), inLang(`${tr[2]} The ${tr[1]} is in Seth-ji's vault`), inLang('Find the 9 key pieces and steal it this week'));
+    }
     for (const d of days) at(`fest-${d.key}`, d.key, `🪔 ${inLang(d.name)}: ${inLang('today’s festival challenge is ready')}`, `${inLang(FEST_GOALS[d.goal].text)} · 💎${d.gems}`);
     return lines;
   }
@@ -6914,7 +8644,9 @@
   $('#btnFestPremium').addEventListener('click', () => { closeSheet($('#festModal')); openPremium({ diwali: true }); });
 
   // ----- Birthdays -----
+  // Each: { id, name, m, d, img, y: birth year if known, src: 'contacts' | 'calendar' | 'file' when imported }.
   let friends = loadList(BDAY_KEY).filter((f) => f && typeof f.name === 'string' && f.m >= 1 && f.m <= 12 && f.d >= 1 && f.d <= 31);
+  const validYear = (y) => (Number.isInteger(+y) && +y >= 1900 && +y <= new Date().getFullYear() ? +y : undefined);
   const birthdayIn = (f, y) => {
     const leap = new Date(y, 1, 29).getMonth() === 1;
     return new Date(y, f.m - 1, f.m === 2 && f.d === 29 && !leap ? 28 : f.d); // 29 February: the 28th in other years
@@ -6936,7 +8668,7 @@
     // One "id<TAB>month<TAB>day<TAB>name" line each (names never hold tabs or line breaks; see clean()), and once the
     // player has lit someone up, "#evening<TAB>day of the last show" for the 7:30 pm Light someone up reminder.
     if (!nativeReminders()) return;
-    const lines = friends.map((f) => [f.id, f.m, f.d, f.name].join('\t')).concat(cardReminderLines(), wallet.remind ? festReminderLines() : []); // and "#card…" lines: your cards' days, Diwali week
+    const lines = friends.map((f) => [f.id, f.m, f.d, f.name].join('\t')).concat(cardReminderLines(), wallet.remind ? festReminderLines() : [], birthdayMorningLines()); // and "#card…" lines: your cards' days, Diwali week, birthday mornings
     let lit = '';
     try { lit = joys.length ? joys.reduce((a, j) => (j.d > a ? j.d : a), '') : ''; } catch (e) { /* not loaded yet at start-up */ }
     // The evening reminder's words in the player's language (the phone falls back to English without them).
@@ -6950,13 +8682,58 @@
       [inLang('🪔 Today’s Diya Path puzzle is waiting'), inLang('A new board for everyone. Can you solve it in fewer moves?')],
       [inLang('🎯 Four new goals today'), inLang('Two are about the people you love. Claim the gems before midnight')],
       [inLang('💌 Someone could use a love note tonight'), inLang('Pick a reason to love, light it in the sky, and send the video')],
-      [inLang('🛕 Fireworks with friends tonight?'), inLang('Up to four at a temple on Mela Night. Most hearts wins')]];
+      [inLang('🛕 Fireworks with friends tonight?'), inLang((() => {
+        // The alarm is 7:30 local. Name the sky of that evening, half an hour before the 8 o'clock hour.
+        const alarm = new Date(); alarm.setHours(19, 30, 0, 0);
+        if (alarm.getTime() <= Date.now()) alarm.setDate(alarm.getDate() + 1);
+        const nightApi = window.LUTSMelaNight;
+        const night = nightApi && nightApi.sky(alarm.getTime());
+        return night ? nightApi.say.again(night.name) : 'Up to four at a temple on Mela Night. Most hearts wins';
+      })())]];
     const t = new Date(Date.now() + 864e5), h = hooks[(t.getFullYear() * 400 + t.getMonth() * 31 + t.getDate()) % hooks.length];
     if (lit) lines.push(`#evening\t${lit}\t\t${h[0]}\t${h[1]}`);
     else if (wallet.remind && wallet.day) lines.push(`#evening\t${wallet.day}\tgift\t${h[0]}\t${h[1]}`);
+    // 7:45, only when reminders are already on. The 7:30 line above is unchanged.
+    if (wallet.remind && window.LUTSMelaNight) {
+      const nightApi = window.LUTSMelaNight;
+      const alarm = new Date(); alarm.setHours(19, 45, 0, 0);
+      if (alarm.getTime() <= Date.now()) alarm.setDate(alarm.getDate() + 1);
+      const sky = nightApi.sky(alarm.getTime());
+      const flat = (s) => String(s).replace(/[\t\r\n]+/g, ' ').trim();
+      let body = inLang(nightApi.say.sky(sky.name));
+      try {
+        const rec = JSON.parse(localStorage.getItem('luts:mela') || '{}');
+        const yday = nightApi.sky(alarm.getTime() - 864e5).key;
+        const person = rec.crew && rec.crew.day === yday && rec.crew.people && rec.crew.people[0];
+        if (person && person.got > 0) body = inLang(nightApi.say.hearts(person.n, person.got));
+        else if (person) body = inLang(nightApi.say.played(person.n));
+      } catch (e) { /* the sky line is enough */ }
+      lines.push(['#mela', sky.key, flat(inLang('The mela is at 8')), flat(body)].join('\t'));
+    }
     // Sent cards not yet watched (last 30 days): the app checks their codes every few hours and says when one is opened.
     for (const e of myCards) if (e.kind === 'made' && e.w && !e.seen && Date.now() - e.updated < 30 * 864e5) lines.push(`#watch\t${e.w}\t${inLang(`💖 ${clean(e.c.t, 20)} watched your sky`)}\t${inLang('Tap to see who lit your sky back')}`);
     window.LUTSNative.reminders(lines.join('\n'));
+  }
+
+  // The morning of each birthday too (9 am, beside the day-before one): a once-only "#card" line dated the day after,
+  // since the phone reminds the day before a card's day; sent again each time the list changes, so next year's follows.
+  function birthdayMorningLines() {
+    const flat = (s) => String(s).replace(/[\t\r\n]+/g, ' ').trim();
+    return friends.map((f) => {
+      const { date } = nextBirthday(f), after = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1);
+      return ['#card', `bday-${f.id}`, after.getMonth() + 1, after.getDate(), after.getFullYear(), flat(inLang(`🎉 ${f.name}’s birthday is today`)), flat(inLang('Tap to send them a fireworks wish'))].join('\t');
+    });
+  }
+  // "Turns 30" when the year is known, and where an imported birthday came from.
+  const ageOn = (f, y) => (f.y && y > f.y ? y - f.y : 0);
+  const SRC_TEXT = { contacts: 'From contacts', calendar: 'From your calendar', file: 'From a contacts file' };
+  const friendNote = (f, date) => { const age = ageOn(f, date.getFullYear()); return [age ? `Turns ${age}` : '', SRC_TEXT[f.src] || ''].filter(Boolean); };
+  // Parts joined by " · ", each in its own span so each is translated on its own.
+  function noteEl(parts, cls = '') {
+    const sm = document.createElement('small');
+    if (cls) sm.className = cls;
+    parts.forEach((t, i) => { if (i) sm.append(' · '); const sp = document.createElement('span'); sp.textContent = t; sm.append(sp); });
+    return sm;
   }
 
   function renderBirthdays() {
@@ -6976,6 +8753,8 @@
       const b = document.createElement('b'); b.textContent = f.name;
       const sm = document.createElement('small'); sm.textContent = whenText(days, date);
       text.append(b, sm);
+      const note = friendNote(f, date);
+      if (note.length) text.append(noteEl(note, 'row-note'));
       const make = document.createElement('button');
       make.type = 'button';
       make.className = `btn small ${days <= 1 ? 'primary' : 'ghost'}`;
@@ -6997,12 +8776,15 @@
         if (!del.classList.contains('confirm')) { del.classList.add('confirm'); del.textContent = 'Remove?'; return; }
         friends = friends.filter((x) => x.id !== f.id);
         saveList(BDAY_KEY, friends);
+        if (window.LUTSTimeline) LUTSTimeline.removeWhere((m) => m.key === `bday:${f.id}`); // and from My sky
         syncReminders();
         renderBirthdays();
       });
       li.append(del);
       list.append(li);
     }
+    renderCal();
+    syncNotifyAsk();
     updateHomeTiles();
   }
 
@@ -7016,8 +8798,10 @@
     $('#bDay').value = String(Math.min(keep, n));
   }
   MONTHS.forEach((m, i) => $('#bMonth').append(new Option(m, String(i + 1))));
+  $('#bYear').append(new Option('Year?', ''));
+  for (let y = new Date().getFullYear(); y >= 1920; y--) $('#bYear').append(new Option(String(y), String(y)));
   $('#bMonth').addEventListener('change', fillDays);
-  function showBdayForm(on) {
+  function showBdayForm(on, at) {
     bForm.hidden = !on;
     $('#btnBdayAdd').hidden = on;
     $('#bdayImport').hidden = on;
@@ -7026,8 +8810,8 @@
     const now = new Date();
     $('#bName').value = ''; bPhoto = ''; setImg($('#bPhotoPrev'), ''); $('#bPhotoLabel').textContent = 'Add photo';
     $('#bName').closest('.field').classList.remove('invalid');
-    $('#bMonth').value = String(now.getMonth() + 1); fillDays(); $('#bDay').value = String(now.getDate());
-    $('#bdayModal .modal-body').scrollTop = 0;
+    $('#bMonth').value = String((at ? at.m : now.getMonth() + 1)); fillDays(); $('#bDay').value = String(at ? at.d : now.getDate()); $('#bYear').value = '';
+    requestAnimationFrame(() => bForm.scrollIntoView({ block: 'start' })); // below the calendar
     setTimeout(() => $('#bName').focus(), 50);
   }
   $('#btnBdayAdd').addEventListener('click', () => showBdayForm(true));
@@ -7042,13 +8826,17 @@
     const name = clean($('#bName').value, 20), fld = $('#bName').closest('.field');
     if (!name) { fld.classList.remove('invalid'); void fld.offsetWidth; fld.classList.add('invalid'); $('#bName').focus(); return; }
     const f = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name, m: +$('#bMonth').value, d: +$('#bDay').value, img: bPhoto };
+    const y = validYear($('#bYear').value);
+    if (y) f.y = y;
     friends.push(f);
     if (!saveList(BDAY_KEY, friends)) { friends.pop(); return; }
+    track('birthday_add', { source: 'manual', count: 1 });
     syncReminders();
     showBdayForm(false);
     renderBirthdays();
     achieve('bday1');
     if (friends.length >= 5) achieve('bday5');
+    moment({ kind: 'bday', icon: '🎂', line: 'Saved {0}’s birthday', args: [name], key: `bday:${f.id}` });
     const { date } = nextBirthday(f), eve = new Date(date.getTime() - 864e5);
     toast(nativeReminders() ? `🎂 Saved. We’ll remind you on ${eve.getDate()} ${MONTHS[eve.getMonth()].slice(0, 3)}.` : `🎂 Saved ${name}’s birthday`, 3200);
   });
@@ -7064,6 +8852,8 @@
     $('#bdayImport').hidden = !!which;
     $('#btnBdayAdd').hidden = !!which || !bForm.hidden;
     if (which) { bForm.hidden = true; $('#bdayEmpty').hidden = true; }
+    // Below the calendar: brought into view, so the disclosure is read before anything is asked
+    if (which) requestAnimationFrame(() => $(which === 'consent' ? '#importConsent' : '#importPick').scrollIntoView({ block: 'start' }));
   }
   $('#btnImportContacts').addEventListener('click', () => importPanel('consent'));
   $('#consentNo').addEventListener('click', () => { importPanel(null); renderBirthdays(); });
@@ -7072,13 +8862,13 @@
   window.addEventListener('luts:contacts', (e) => {
     const list = e.detail;
     if (list == null) { toast('Contacts access is off. You can turn it on in your phone’s Settings.', 4200); return; }
-    showImport(list.map((c) => ({ name: clean(c.name, 20), m: +c.month, d: +c.day, img: typeof c.photo === 'string' ? c.photo : '' })));
+    showImport(list.map((c) => ({ name: clean(c.name, 20), m: +c.month, d: +c.day, y: validYear(c.year), img: typeof c.photo === 'string' ? c.photo : '', src: c.src === 'calendar' ? 'calendar' : 'contacts' })));
   });
   $('#bVcf').addEventListener('change', (e) => {
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
-    file.text().then((text) => showImport(parseVcards(text)), () => toast('Could not read that file'));
+    file.text().then((text) => showImport(parseVcards(text).map((c) => ({ ...c, src: 'file' }))), () => toast('Could not read that file'));
   });
   // vCards (what phones and Google Contacts export): FN or N for the name, BDAY for the date.
   function parseVcards(text) {
@@ -7094,17 +8884,17 @@
         const key = line.slice(0, i).split(';')[0].replace(/^item\d+\./i, '').toUpperCase(), val = line.slice(i + 1).trim();
         if (key === 'FN') cur.name = clean(unesc(val), 20);
         else if (key === 'N' && !cur.name) { const [fam = '', giv = ''] = unesc(val).split(';'); cur.name = clean(`${giv} ${fam}`, 20); }
-        else if (key === 'BDAY') { const md = parseBday(val); if (md) [cur.m, cur.d] = md; }
+        else if (key === 'BDAY') { const md = parseBday(val); if (md) [cur.m, cur.d, cur.y] = md; }
       }
     }
     return out.map((c) => ({ ...c, img: '' }));
   }
-  // 1990-10-14, 19901014, --1014, --10-14 (no year), with or without a time after it.
+  // 1990-10-14, 19901014, --1014, --10-14 (no year), with or without a time after it: [month, day, year or undefined].
   function parseBday(v) {
-    const m = String(v).trim().match(/^(?:\d{4}|--)-?(\d{2})-?(\d{2})/);
+    const m = String(v).trim().match(/^(\d{4}|--)-?(\d{2})-?(\d{2})/);
     if (!m) return null;
-    const mo = +m[1], d = +m[2];
-    return mo >= 1 && mo <= 12 && d >= 1 && d <= new Date(2024, mo, 0).getDate() ? [mo, d] : null;
+    const mo = +m[2], d = +m[3];
+    return mo >= 1 && mo <= 12 && d >= 1 && d <= new Date(2024, mo, 0).getDate() ? [mo, d, validYear(m[1])] : null;
   }
   function showImport(list) {
     const seen = new Set(), key = (x) => `${x.name.toLowerCase()}|${x.m}|${x.d}`;
@@ -7115,7 +8905,6 @@
     if (!importing.length) { toast('No birthdays found there', 3000); importPanel(null); renderBirthdays(); return; }
     renderImport();
     importPanel('pick');
-    $('#bdayModal .modal-body').scrollTop = 0;
   }
   function renderImport() {
     const list = $('#importList'), fresh = importing.filter((c) => !c.saved), on = fresh.filter((c) => c.on).length;
@@ -7135,8 +8924,7 @@
       if (c.img) { av.src = photoSrc(c.img); av.alt = ''; } else av.textContent = initials(c.name) || '🎂';
       const text = document.createElement('span'); text.className = 'row-text';
       const b = document.createElement('b'); b.textContent = c.name;
-      const sm = document.createElement('small'); const nb = nextBirthday(c);
-      sm.textContent = c.saved ? 'Already saved' : whenText(nb.days, nb.date);
+      const nb = nextBirthday(c), sm = noteEl(c.saved ? ['Already saved'] : [whenText(nb.days, nb.date), ...friendNote({ ...c, src: '' }, nb.date)]);
       text.append(b, sm);
       li.append(box, av, text);
       list.append(li);
@@ -7151,6 +8939,7 @@
   $('#importAdd').addEventListener('click', () => {
     const add = importing.filter((c) => c.on && !c.saved).map((c, i) => ({
       id: Date.now().toString(36) + i.toString(36) + Math.random().toString(36).slice(2, 5), name: c.name, m: c.m, d: c.d, img: c.img || '',
+      ...(c.y ? { y: c.y } : {}), ...(c.src ? { src: c.src } : {}),
     }));
     if (!add.length) return;
     const before = friends;
@@ -7160,6 +8949,7 @@
       friends = before.concat(add.map((f) => ({ ...f, img: '' })));
       if (!saveList(BDAY_KEY, friends)) { friends = before; return; }
     }
+    for (const src of new Set(add.map((f) => f.src || 'contacts'))) track('birthday_add', { source: src === 'file' ? 'vcf' : src, count: add.filter((f) => (f.src || 'contacts') === src).length });
     importing = [];
     importPanel(null);
     syncReminders();
@@ -7205,7 +8995,7 @@
   // Their card, filled in: name, photo, a birthday wish and your name; it opens at Scene to pick a background and music.
   async function makeBirthdayVideo(f) {
     const o = OCCASIONS[0];
-    card.o = o.id; card.h = o.head; card.m = o.msg; card.p = o.theme; card.t = f.name; card.rel = ''; card.friend = f.id; card.id = ''; card.pg = []; card.rm = null; // a new card in My Cards (their birthday reminds you already)
+    card.o = o.id; card.h = o.head; card.m = o.msg; card.p = o.theme; card.t = f.name; card.rel = ''; card.friend = f.id; card.id = ''; card.pg = []; card.rm = null; card.d = ''; card.dr = 0; // a new card in My Cards (their birthday reminds you already)
     try { card.f = card.f || localStorage.getItem('luts:from') || ''; } catch (e) { /* ignore */ }
     card.imgFull = f.img || '';
     card.img = f.img ? await linkPhoto(f.img) : '';
@@ -7230,6 +9020,193 @@
     download(new Blob([ics], { type: 'text/calendar' }), `${f.name.replace(/[^\w-]+/g, '-').toLowerCase() || 'birthday'}-birthday.ics`);
     toast('Open the file to add it to your calendar', 3200);
   }
+
+  // ----- The birthday calendar: a month at a glance, a day's people and festivals, and a wish for each -----
+  // Birthdays show as one or two small faces (+N for more), festivals and special days (festivals.js) as a diya or a
+  // rangoli; today is ringed. Swipe or the arrows change the month; arrow keys move between days (the TV remote moves
+  // focus the same way). Everything here comes from this device: saved birthdays and the built-in festival table.
+  const calNow = new Date();
+  const cal = { y: calNow.getFullYear(), m: calNow.getMonth(), focus: '' };
+  const festsOn = (key) => (window.LUTSFestivals ? window.LUTSFestivals.on(key) : []);
+  const keyOf = (y, m, d) => dayKey(new Date(y, m, d));
+  const peopleOn = (y, m, d) => friends.filter((f) => { const b = birthdayIn(f, y); return b.getMonth() === m && b.getDate() === d; })
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const daysFromToday = (y, m, d) => { const t = new Date(); return Math.round((new Date(y, m, d) - new Date(t.getFullYear(), t.getMonth(), t.getDate())) / 864e5); };
+  const relText = (n, y, m, d) => (n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n > 1 ? `In ${n} days` : `${d} ${MONTHS[m].slice(0, 3)}`);
+  const weekdayNames = (() => {
+    let fmt = null;
+    try { fmt = new Intl.DateTimeFormat(document.documentElement.lang || 'en', { weekday: 'narrow' }); } catch (e) { /* old engine */ }
+    return [0, 1, 2, 3, 4, 5, 6].map((i) => (fmt ? fmt.format(new Date(2026, 1, i + 1)) : 'SMTWTFS'[i])); // 1 Feb 2026 is a Sunday
+  })();
+  $('#bcalWeek').innerHTML = weekdayNames.map((w) => `<span>${w}</span>`).join('');
+  function faceOf(f, cls) {
+    const av = document.createElement(f.img ? 'img' : 'span');
+    av.className = cls;
+    if (f.img) { av.src = photoSrc(f.img); av.alt = ''; } else av.textContent = initials(f.name) || '🎂';
+    return av;
+  }
+  function festMark(fe) {
+    const i = document.createElement('i');
+    i.className = `bcal-mark m-${fe.mark}`;
+    i.setAttribute('aria-hidden', 'true');
+    if (fe.mark === 'diya') i.textContent = '🪔';
+    return i;
+  }
+  function renderCal() {
+    const { y, m } = cal, first = new Date(y, m, 1).getDay(), n = new Date(y, m + 1, 0).getDate(), today = dayKey();
+    $('#bcalTitle').innerHTML = '';
+    const mn = document.createElement('span'); mn.textContent = MONTHS[m];
+    $('#bcalTitle').append(mn, ` ${y}`);
+    if (!cal.focus || !cal.focus.startsWith(`${y}-${String(m + 1).padStart(2, '0')}-`)) cal.focus = today.startsWith(`${y}-${String(m + 1).padStart(2, '0')}-`) ? today : keyOf(y, m, 1);
+    const grid = $('#bcalGrid');
+    grid.innerHTML = '';
+    let row = null;
+    for (let i = 0; i < first + n; i++) {
+      if (i % 7 === 0) { row = document.createElement('div'); row.className = 'bcal-row'; row.setAttribute('role', 'row'); grid.append(row); }
+      if (i < first) { const e = document.createElement('span'); e.className = 'bcal-cell blank'; e.setAttribute('role', 'gridcell'); row.append(e); continue; }
+      const d = i - first + 1, key = keyOf(y, m, d), people = peopleOn(y, m, d), fests = festsOn(key);
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'bcal-cell'; b.dataset.day = key; b.setAttribute('role', 'gridcell');
+      b.tabIndex = key === cal.focus ? 0 : -1;
+      if (key === today) { b.classList.add('today'); b.setAttribute('aria-current', 'date'); }
+      if (people.length) b.classList.add('has-b');
+      if (fests.length) b.classList.add('has-f');
+      b.setAttribute('aria-label', [`${d} ${MONTHS[m]}`, ...people.map((f) => f.name), ...fests.map((fe) => fe.name)].join(', '));
+      const num = document.createElement('span'); num.className = 'bcal-n'; num.textContent = String(d);
+      b.append(num);
+      if (fests.length) b.append(festMark(fests[0]));
+      if (people.length) {
+        const dots = document.createElement('span'); dots.className = 'bcal-dots';
+        people.slice(0, people.length > 2 ? 1 : 2).forEach((f) => dots.append(faceOf(f, 'bcal-face')));
+        if (people.length > 2) { const more = document.createElement('span'); more.className = 'bcal-more'; more.textContent = `+${people.length - 1}`; dots.append(more); }
+        b.append(dots);
+      }
+      row.append(b);
+    }
+    while (row && row.children.length < 7) { const e = document.createElement('span'); e.className = 'bcal-cell blank'; e.setAttribute('role', 'gridcell'); row.append(e); }
+    // This month: its birthdays and festivals in order, from today on in the current month.
+    const up = $('#bcalUp'), items = [];
+    up.innerHTML = '';
+    for (let d = 1; d <= n; d++) {
+      const away = daysFromToday(y, m, d);
+      if (away < 0 && y === calNow.getFullYear() && m === new Date().getMonth()) continue;
+      for (const f of peopleOn(y, m, d)) items.push({ d, away, f });
+      for (const fe of festsOn(keyOf(y, m, d))) items.push({ d, away, fe });
+    }
+    for (const it of items) {
+      const li = document.createElement('li');
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'bcal-up-row' + (it.away >= 0 && it.away <= 1 ? ' soon' : '');
+      b.append(it.f ? faceOf(it.f, 'bcal-face') : festMark(it.fe));
+      const name = document.createElement('b'); name.textContent = it.f ? it.f.name : it.fe.name;
+      const when = document.createElement('small'); when.textContent = relText(it.away, y, m, it.d);
+      b.append(name, when);
+      b.addEventListener('click', () => openDay(keyOf(y, m, it.d)));
+      li.append(b); up.append(li);
+    }
+    if (!items.length) { const li = document.createElement('li'); li.className = 'bcal-none'; li.textContent = 'Nothing else this month. Add a birthday below.'; up.append(li); }
+  }
+  function moveMonth(step, focusKey) {
+    const t = new Date(cal.y, cal.m + step, 1);
+    cal.y = t.getFullYear(); cal.m = t.getMonth(); cal.focus = focusKey || '';
+    renderCal();
+    if (focusKey) { const c = $(`#bcalGrid [data-day="${focusKey}"]`); if (c) c.focus(); }
+  }
+  $('#bcalPrev').addEventListener('click', () => moveMonth(-1));
+  $('#bcalNext').addEventListener('click', () => moveMonth(1));
+  // Swipe sideways for the next or previous month (a swipe is never also a tap on a day).
+  let calSwipe = null, calSwiped = 0;
+  const bcal = $('#bdayCal');
+  bcal.addEventListener('pointerdown', (e) => { calSwipe = e.target.closest('#bcalGrid') ? { x: e.clientX, y: e.clientY } : null; });
+  bcal.addEventListener('pointerup', (e) => {
+    if (!calSwipe) return;
+    const dx = e.clientX - calSwipe.x, dy = e.clientY - calSwipe.y;
+    calSwipe = null;
+    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy) * 1.5) { calSwiped = performance.now(); moveMonth(dx < 0 ? 1 : -1); }
+  });
+  bcal.addEventListener('pointercancel', () => { calSwipe = null; });
+  $('#bcalGrid').addEventListener('click', (e) => {
+    const c = e.target.closest('.bcal-cell[data-day]');
+    if (!c || performance.now() - calSwiped < 400) return;
+    cal.focus = c.dataset.day;
+    openDay(c.dataset.day);
+  });
+  $('#bcalGrid').addEventListener('keydown', (e) => {
+    const c = e.target.closest('.bcal-cell[data-day]');
+    const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
+    if (!c || (!step && e.key !== 'PageUp' && e.key !== 'PageDown')) return;
+    e.preventDefault();
+    const [y, m, d] = c.dataset.day.split('-').map(Number);
+    const to = e.key === 'PageUp' ? new Date(y, m - 2, Math.min(d, new Date(y, m - 1, 0).getDate())) : e.key === 'PageDown' ? new Date(y, m, Math.min(d, new Date(y, m + 1, 0).getDate())) : new Date(y, m - 1, d + step);
+    const key = dayKey(to);
+    if (to.getMonth() !== cal.m || to.getFullYear() !== cal.y) { moveMonth((to.getFullYear() - cal.y) * 12 + to.getMonth() - cal.m, key); return; }
+    cal.focus = key;
+    document.querySelectorAll('#bcalGrid .bcal-cell[data-day]').forEach((x) => { x.tabIndex = x.dataset.day === key ? 0 : -1; });
+    const n = $(`#bcalGrid [data-day="${key}"]`); if (n) n.focus();
+  });
+
+  // A day's sheet: its people (name, age when the year is known) and festivals, each with Create a wish.
+  let dayOpen = '';
+  function openDay(key) {
+    const [y, m, d] = key.split('-').map(Number), people = peopleOn(y, m - 1, d), fests = festsOn(key);
+    dayOpen = key;
+    const tt = $('#bdayDayTitle'), mn = document.createElement('span');
+    mn.textContent = MONTHS[m - 1];
+    tt.textContent = `${d} `; tt.append(mn, ` ${y}`);
+    const list = $('#bdayDayList');
+    list.innerHTML = '';
+    const row = (av, title, note, onWish) => {
+      const li = document.createElement('li'); li.className = 'sheet-row';
+      const text = document.createElement('span'); text.className = 'row-text';
+      const b = document.createElement('b'); b.textContent = title;
+      text.append(b);
+      if (note.length) text.append(noteEl(note));
+      const wish = document.createElement('button');
+      wish.type = 'button'; wish.className = 'btn small primary bcal-wish'; wish.textContent = 'Create a wish';
+      wish.addEventListener('click', onWish);
+      li.append(av, text, wish); list.append(li);
+    };
+    for (const f of people) row(faceOf(f, 'row-avatar'), f.name, friendNote(f, new Date(y, m - 1, d)).concat(ageOn(f, y) ? [] : ['Birthday']), () => { closeDay(); makeBirthdayVideo(f); });
+    for (const fe of fests) { const av = document.createElement('span'); av.className = 'row-avatar fest'; av.append(festMark(fe)); row(av, fe.name, ['Festival'], () => { closeDay(); festWish(fe); }); }
+    if (!people.length && !fests.length) { const li = document.createElement('li'); li.className = 'sheet-empty'; li.textContent = 'No birthdays on this day yet.'; list.append(li); }
+    $('#bdayDay').hidden = false;
+    const first = list.querySelector('.bcal-wish') || $('#bdayDayAdd');
+    first.focus({ preventScroll: true });
+  }
+  function closeDay() {
+    if ($('#bdayDay').hidden) return;
+    $('#bdayDay').hidden = true;
+    const c = $(`#bcalGrid [data-day="${dayOpen}"]`);
+    if (c && !$('#bdayModal').hidden) c.focus({ preventScroll: true });
+  }
+  $('#bdayDayX').addEventListener('click', closeDay);
+  $('#bdayDay').addEventListener('pointerdown', (e) => { if (e.target === $('#bdayDay')) closeDay(); });
+  $('#bdayDay').addEventListener('keydown', (e) => { if (e.key === 'Escape' || e.key === 'Backspace' && !/INPUT|TEXTAREA/.test(e.target.tagName)) { e.preventDefault(); e.stopPropagation(); closeDay(); } });
+  $('#bdayDayAdd').addEventListener('click', () => {
+    const [, m, d] = dayOpen.split('-').map(Number);
+    closeDay(); importPanel(null); showBdayForm(true, { m, d });
+  });
+  // A festival's wish: the love card with that day's occasion (its theme, show and message) and heading, at To.
+  function festWish(fe) {
+    const o = OCC_BY_ID[fe.occ] || OCC_BY_ID.custom;
+    closeSheets();
+    openCardModal({ o: o.id, p: o.theme, h: fe.head, m: fe.msg || o.msg }, 0);
+    try { card.f = localStorage.getItem('luts:from') || ''; } catch (e) { /* ignore */ }
+    fillForm();
+  }
+
+  // Reminders need notifications: on Android 13+ the sheet asks in the game's own words first, and only Turn on brings
+  // the phone's dialog. Not now is remembered.
+  const NOTIFY_NO = 'luts:bday-notify-no';
+  let notifyAsked = false;
+  function syncNotifyAsk() {
+    let no = false;
+    try { no = localStorage.getItem(NOTIFY_NO) === '1'; } catch (e) { /* ignore */ }
+    $('#bdayNotify').hidden = no || notifyAsked || !friends.length || !nativeReminders() || !(window.LUTSNative && window.LUTSNative.needsNotifyPermission)
+      || document.documentElement.classList.contains('tv');
+  }
+  $('#bdayNotifyYes').addEventListener('click', () => { notifyAsked = true; syncNotifyAsk(); askNotifyNative(); });
+  $('#bdayNotifyNo').addEventListener('click', () => { try { localStorage.setItem(NOTIFY_NO, '1'); } catch (e) { /* ignore */ } syncNotifyAsk(); });
 
   // ----- Light Someone Up (grown from Daily joy) -----
   // Once a day (or more) the player dedicates a fireworks show to someone: a reason, a name, today's landmark.
@@ -7396,6 +9373,7 @@
   $('#joyText').addEventListener('input', syncJoyButton);
   $('#joyText').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#btnJoyGo').click(); } });
   $('#btnJoyGo').addEventListener('click', () => {
+    if ($('#joyText').value.trim()) setTimeout(() => celebrateFirst('wish', 'Your first wish is lit. Gratitude glows ✨'), 1200);
     Sound.resume();
     let j = todayJoy();
     const typed = clean($('#joyText').value, 20);
@@ -7412,6 +9390,7 @@
       festCheck(); // Choti Diwali's challenge
       $('#joyText').value = ''; $('#joyNote').value = '';
       const n = joyStreak();
+      moment({ kind: 'joy', icon: reasonOf(j).icon, line: 'Lit up {0}', args: [j.t], thumb: worldThumb(j.w, 'assets/menu/daily-joy.webp'), ref: `${j.d}:${j.t}`, key: `joy:${j.d}:${j.t}` });
       if (window.LUTSGoals) LUTSGoals.tick('joy'); achieve('joy1');
       festPoints('joy', 40);
       gratitudeLit();
@@ -7430,7 +9409,7 @@
   function dedicationUrl(j) {
     const r = reasonOf(j);
     const data = { o: 'thanks', t: j.t, f: savedName(), h: r.label.replace(/,$/, ''), m: j.m || `${dedication(j)}.`, p: j.r ? r.palette : MOODS[j.mood - 1][2], w: j.w || '', lit: 1 };
-    return `${linkBase()}#card=${encodeCard(data)}`;
+    return tagLink(`${linkBase()}#card=${encodeCard(data)}`, 'dedication');
   }
   function openLightBack(name) {
     hideOverlay($('#intro'));
@@ -7454,7 +9433,7 @@
       if (file && navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: 'Light someone up', text: `${text}\n${url}${getApp('dedication')}` });
       else {
         const r = reasonOf(j);
-        const blob = shareCard({ art: worldArt(j.w, 'assets/menu/daily-joy.jpg'), kicker: `${r.icon} Lit up in fireworks`, title: `${r.label} ${j.t}`, line: `Day ${day || joyStreak()} of lighting up someone` });
+        const blob = shareCard({ art: worldArt(j.w, 'assets/menu/daily-joy.webp'), kicker: `${r.icon} Lit up in fireworks`, title: `${r.label} ${j.t}`, line: `Day ${day || joyStreak()} of lighting up someone` });
         if (!(await shareThing({ title: 'Light someone up', text, url, blob, name: 'light-someone-up.png', src: 'dedication' }))) return;
         if (window.LUTSGoals) LUTSGoals.tick('share'); achieve('share');
         joyGems(); // gems for sharing who you lit up, once a day
@@ -7480,12 +9459,8 @@
     renderFest();
   }
 
-  // First play: three things to try, once.
-  function maybeWelcome() {
-    let seen = true;
-    try { seen = localStorage.getItem('luts:welcomed') === '1'; localStorage.setItem('luts:welcomed', '1'); } catch (e) { /* storage unavailable: skip it */ }
-    if (!seen) setTimeout(() => { if (mode === 'play') openSheet($('#welcomeModal')); }, 900);
-  }
+  // The contextual coach teaches the first action; the longer tips stay available on demand.
+  $('#setHelp').addEventListener('click', () => { closeDrawer(); openSheet($('#welcomeModal')); });
   $('#btnWelcome').addEventListener('click', () => closeSheet($('#welcomeModal')));
   $('#btnWelcomeX').addEventListener('click', () => closeSheet($('#welcomeModal')));
   $('#btnTrialX').addEventListener('click', () => { $('#crackerTrial').hidden = true; });
@@ -7507,7 +9482,9 @@
   $('#btnBirthdays').addEventListener('click', () => {
     Sound.resume();
     $('#btnImportContacts').hidden = !nativeContacts();
-    importing = []; importPanel(null); showBdayForm(false); renderBirthdays();
+    importing = []; importPanel(null); showBdayForm(false);
+    const t = new Date(); cal.y = t.getFullYear(); cal.m = t.getMonth(); cal.focus = ''; $('#bdayDay').hidden = true;
+    renderBirthdays();
     openSheet($('#bdayModal'));
   });
   $('#btnJoy').addEventListener('click', () => { Sound.resume(); renderJoy(); openSheet($('#joyModal')); });
@@ -7581,6 +9558,7 @@
     if (rush.ownWorld === null) rush.ownWorld = now;
     // A challenge or the Daily Sky may be over a Premium landmark: everyone gets to play it (like a received card).
     if (isWorld(wid) && wid !== now) selectWorld(wid, { silent: true, save: false, force: true });
+    if (kind !== 'duel') { const n = kind === 'daily' ? 'daily_sky' : 'score_challenge'; track.enter(n); track.level(n, kind === 'daily' ? 'daily' : vs ? 'vs' : 'solo'); }
     Object.assign(rush, { on: true, kind, seed, world: wid, t: -3, count: 4, plan: lanternPlan(seed), next: 0, live: [], pops: [], score: 0, combo: 0, best: 0, hits: 0, vs });
     document.body.classList.add('rushing');
     $('#rushHud').hidden = false;
@@ -7713,8 +9691,9 @@
     document.body.classList.remove('rushing');
     $('#rushHud').hidden = true;
     rush.live = []; rush.pops = [];
+    { const n = rush.kind === 'daily' ? 'daily_sky' : 'score_challenge', won = rush.vs ? rush.score > rush.vs.s : rush.score > 0;
+      track.levelEnd(n, quit ? 'quit' : won ? 'win' : 'lose'); track.home(); }
     if (quit) return;
-    adBreak('break'); // the round's result waits under the video
     const r = { kind: rush.kind, seed: rush.seed, world: rush.world, score: rush.score, best: rush.best, hits: rush.hits, total: rush.plan.length, vs: rush.vs };
     const st = loadRush();
     r.newBest = r.score > (st.best || 0) && r.score > 0;
@@ -7735,6 +9714,9 @@
     const won = r.vs && r.score > r.vs.s;
     if (won) { achieve('rival'); festPoints('rival', 50); }
     if (won || r.newBest) celebrate();
+    if (r.kind === 'daily') moment({ kind: 'daily', icon: '🏮', line: 'Daily Sky #{0} · {1} points', args: [dailyNo(), fmt(st.days[dayKey()] ?? r.score)], thumb: 'assets/menu/daily-sky.webp', key: `daily:${dayKey()}`, within: 864e5, best: st.days[dayKey()] ?? r.score }); // (the day's best, not the last replay)
+    else if (r.vs) moment({ kind: 'rush', icon: won ? '🏆' : '🏮', line: won ? 'Score Challenge: beat {0} · {1} points' : 'Score Challenge vs {0} · {1} points', args: [r.vs.n || 'a friend', fmt(r.score)], thumb: 'assets/menu/badges/rush.webp' });
+    else moment({ kind: 'rush', icon: '🏮', line: 'Lantern Rush · {0} points', args: [fmt(r.score)], thumb: 'assets/menu/daily-sky.webp' });
     showRushSheet('result');
   }
 
@@ -7807,17 +9789,20 @@
   $('#btnRush').addEventListener('click', () => { Sound.resume(); showRushSheet('free'); });
 
   // ----- Sharing: results, challenge links, badges -----
-  const rushLink = (hash) => { const base = appLink(); return base ? `${base}#${hash}` : ''; };
+  // A challenge link's kind for its utm tags, by its key: #vs= is a Lantern Rush challenge, #rrvs= Rocket Rush, and so on.
+  const LINK_KINDS = { vs: 'challenge', duel: 'duel', rrvs: 'rocket', dpvs: 'diya', heist: 'heist', room: 'room' };
+  const rushLink = (hash) => { const base = appLink(); return base ? tagLink(`${base}#${hash}`, hash === 'daily' ? 'daily' : LINK_KINDS[hash.split('=')[0]] || 'link') : ''; };
   // Shares an image (when given) or text with a link; without a share sheet, saves the image and copies the text.
   // Every share carries the Play link, so whoever receives it can install the game: the card or challenge link first
-  // (it opens what was shared), then "Get the app: …" tagged with where it was shared from (src).
-  const getApp = (src) => `\nGet the app: ${playLink(src)}\n${TAG_LINE}`;
-  async function shareThing({ title, text, url, blob, name, src }) {
+  // (it opens what was shared), then "Get the app: …" tagged with where it was shared from (src; o: see playLink).
+  const getApp = (src, o) => `\nGet the app: ${playLink(src, o)}\n${TAG_LINE}`;
+  async function shareThing({ title, text, url, blob, name, src, play }) {
     if (blob instanceof Promise) blob = await blob.catch(() => null);
     if (src && !/play\.google\.com/.test(url || '')) { // apps put a separate url last, so it goes into the text, before the Play line
-      text = `${url ? `${text}\n${url}` : text}${getApp(src)}`; url = '';
+      text = `${url ? `${text}\n${url}` : text}${getApp(src, play)}`; url = '';
     }
     if (window.LUTSGoals && src !== 'wall') LUTSGoals.tick('share');
+    track('share', { kind: src === 'card' ? 'card' : src === 'wall' ? 'wallpaper' : blob ? 'photo' : 'link', from: src || 'other', app: 'system' });
     const file = blob ? new File([blob], name, { type: 'image/png' }) : null;
     if (file) setShareCaption(url ? `${text}\n${url}` : text); // the Android app sends it with the picture
     try {
@@ -7836,7 +9821,7 @@
     const r = rush.last;
     if (!r) return;
     const text = `🏮 Light Up the Skies · Daily Sky #${dailyNo()}\n${starText(starsFor(r.score))} ${fmt(r.score)} points · ${r.best} in a row · 🔥 ${dailyStreak()}\nPlay today’s sky:`;
-    const blob = shareCard({ art: 'assets/menu/daily-sky.jpg', kicker: `Daily Sky #${dailyNo()}`, title: placeName(r.world), big: fmt(r.score), stars: starsFor(r.score), line: `${r.best} in a row · 🔥 ${dailyStreak()}-day streak` });
+    const blob = shareCard({ art: 'assets/menu/daily-sky.webp', kicker: `Daily Sky #${dailyNo()}`, title: placeName(r.world), big: fmt(r.score), stars: starsFor(r.score), line: `${r.best} in a row · 🔥 ${dailyStreak()}-day streak` });
     shareThing({ title: `Daily Sky #${dailyNo()}`, text, url: rushLink('daily'), blob, name: `daily-sky-${dailyNo()}.png`, src: 'daily' });
   });
   $('#btnRushChallenge').addEventListener('click', () => {
@@ -7850,7 +9835,7 @@
       ? `🥇 ${who} beat ${r.vs.n || 'your'}${r.vs.n ? '’s' : ''} ${fmt(r.vs.s)} with ${fmt(r.score)} points of lanterns! Your turn, same sky:`
       : `🏮 ${who} burst ${fmt(r.score)} points of lanterns over ${placeName(r.world)}. Can you beat it? Same sky, 30 seconds:`;
     const won = r.vs && r.score > r.vs.s;
-    const blob = shareCard({ art: 'assets/menu/challenge.jpg', kicker: won ? `${who} won the challenge` : `${name || 'A friend'} challenges you`, title: 'Can you beat it?', big: fmt(r.score), line: `Same lanterns over ${placeName(r.world)} · 30 seconds` });
+    const blob = shareCard({ art: 'assets/menu/challenge.webp', kicker: won ? `${who} won the challenge` : `${name || 'A friend'} challenges you`, title: 'Can you beat it?', big: fmt(r.score), line: `Same lanterns over ${placeName(r.world)} · 30 seconds` });
     shareThing({ title: 'Lantern Rush challenge', text, url: link, blob, name: 'lantern-rush-challenge.png', src: 'challenge' });
   });
   // A challenge or the Daily Sky, opened from a link: #vs=<b64 JSON> or #daily.
@@ -7877,15 +9862,20 @@
   // One branded picture for every share (results, challenges, badges, cards, invites): the moment's art, its headline
   // and score, and the app's icon and name with Gem Creators at the bottom, sized for WhatsApp status and the like.
   const APP_NAME = 'Light Up the Skies: Diwali', MAKER = 'Gem Creators';
-  const worldArt = (id, fallback) => (isWorld(id) && WORLD_BY_ID[id].image ? `assets/worlds/bg/${WORLD_BY_ID[id].image}.jpg` : fallback);
+  const worldArt = (id, fallback) => (isWorld(id) && WORLD_BY_ID[id].image ? `assets/worlds/thumb/${WORLD_BY_ID[id].thumb || WORLD_BY_ID[id].image}.webp` : fallback);
+  // A world's small picture (378x256, as the Live Sky list shows it): My sky's 44px icons don't decode the full background.
+  const worldThumb = (id, fallback) => (isWorld(id) ? `assets/worlds/thumb/${WORLD_BY_ID[id].thumb || id}.webp` : fallback);
+  // My sky: a shared moment's short title, by kind (the moment's own line goes under it).
+  const MOMENT_TITLE = { card: 'Love card', bday: 'Birthdays', joy: 'Light someone up', live: 'Live Sky', story: 'Story', gears: 'Spiral', ach: 'Achievements',
+    daily: 'Daily Sky', rush: 'Lantern Rush', rocket: 'Rocket Rush', diya: 'Diya Path', duel: 'Sky Duel', mela: 'Mela Night', heist: 'Street Heist', spark: 'Sparkler' };
   const artCache = new Map();
   const loadArt = (src) => {
     if (!artCache.has(src)) artCache.set(src, new Promise((res) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => res(null); i.src = src; }));
     return artCache.get(src);
   };
-  async function shareCard({ kicker = '', title = '', big = '', stars = -1, line = '', art = '', emoji = '' }) {
+  async function shareCard({ kicker = '', title = '', big = '', stars = -1, line = '', art = '', emoji = '', mark = !premium.active }) { // mark: the footer, on a free player's card only (Premium's carry no mark)
     if (document.fonts && document.fonts.load) await Promise.all(['700 78px Cinzel', '300 38px Outfit', '600 36px Outfit'].map((f) => document.fonts.load(f).catch(() => {})));
-    const [pic, icon] = await Promise.all([art ? loadArt(art) : null, loadArt('assets/icons/icon-512.png')]);
+    const [pic, icon] = await Promise.all([art && art.getContext ? art : art ? loadArt(art) : null, loadArt('assets/icons/icon-512.png')]); // (art: a picture's path, or a canvas)
     const c = document.createElement('canvas');
     c.width = 1080; c.height = 1350;
     const g = c.getContext('2d');
@@ -7916,9 +9906,10 @@
     g.fillStyle = '#1b1745'; g.beginPath(); g.arc(540, cy, rr - 26, 0, TAU); g.fill();
     g.textAlign = 'center'; g.textBaseline = 'middle';
     if (pic) {
-      const r = rr - 26, k = Math.max((2 * r) / pic.naturalWidth, (2 * r) / pic.naturalHeight);
+      const pw = pic.naturalWidth || pic.width, ph = pic.naturalHeight || pic.height;
+      const r = rr - 26, k = Math.max((2 * r) / pw, (2 * r) / ph);
       g.save(); g.beginPath(); g.arc(540, cy, r, 0, TAU); g.clip();
-      g.drawImage(pic, 540 - (pic.naturalWidth * k) / 2, cy - (pic.naturalHeight * k) / 2, pic.naturalWidth * k, pic.naturalHeight * k);
+      g.drawImage(pic, 540 - (pw * k) / 2, cy - (ph * k) / 2, pw * k, ph * k);
       g.restore();
     } else if (emoji) {
       g.font = `${Math.round(rr * 0.82)}px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif`;
@@ -7927,7 +9918,9 @@
     let y = cy + rr + 92;
     if (kicker) { g.fillStyle = '#c9c6e6'; g.font = '600 34px Outfit, sans-serif'; g.fillText(kicker.toUpperCase(), 540, y, 960); y += 84; }
     const gold = (y0, y1) => { const t = g.createLinearGradient(0, y0, 0, y1); t.addColorStop(0, '#fff2c4'); t.addColorStop(1, '#f2a83a'); return t; };
-    if (title) { g.fillStyle = gold(y - 40, y + 40); g.font = '700 72px Cinzel, Georgia, serif'; g.fillText(title, 540, y, 960); y += big ? 116 : 96; }
+    // A long title or line steps its type down until it fits (fillText's maxWidth alone squeezes it sideways).
+    const fit = (text, sizes, face) => { for (const px of sizes) { g.font = face(px); if (g.measureText(text).width <= 960) return; } };
+    if (title) { g.fillStyle = gold(y - 40, y + 40); fit(title, [72, 60, 50, 42], (px) => `700 ${px}px Cinzel, Georgia, serif`); g.fillText(title, 540, y, 960); y += big ? 116 : 96; }
     if (big) { g.fillStyle = gold(y - 60, y + 70); g.font = '700 150px Cinzel, Georgia, serif'; g.fillText(big, 540, y + 20, 960); y += 140; }
     if (stars >= 0) {
       g.font = '64px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
@@ -7938,7 +9931,8 @@
       }
       y += 84;
     }
-    if (line) { g.fillStyle = '#ebe5fb'; g.font = '300 38px Outfit, sans-serif'; g.fillText(line, 540, y, 960); }
+    if (line) { g.fillStyle = '#ebe5fb'; fit(line, [38, 33, 29], (px) => `300 ${px}px Outfit, sans-serif`); g.fillText(line, 540, y, 960); }
+    if (!mark) return new Promise((res) => c.toBlob(res, 'image/png'));
     // The footer: app icon, app name, and the maker.
     g.fillStyle = 'rgba(255,255,255,0.07)'; g.fillRect(0, 1178, 1080, 172);
     g.fillStyle = 'rgba(255,210,122,0.35)'; g.fillRect(0, 1178, 1080, 2);
@@ -8000,17 +9994,18 @@
     if (arOn) stopAR();
     try { syncWorld3d(); } catch (error) { world3dLost(error); }
     if (liveSky && !liveShown()) liveSky.stop();
-    if (offStage) for (const g of [ctx, glx, gctx, actx, flightCtx]) g.clearRect(0, 0, W, H);
+    if (offStage) for (const g of [ctx, gctx, actx, flightCtx]) g.clearRect(0, 0, W, H);
   }
   // The logo takes you back home from anywhere.
   $('#btnHome').addEventListener('click', () => {
+    const fromFeature = mode !== 'intro'; // leaving a show, a card, a puzzle or the street (not a tap on home itself)
+    stopLive();
     abortLaunch();
     if (rush.on) endRush(true);
     restoreRushWorld();
     closeDrawer(); closeCardModal(); closeSheets();
     if (mode === 'card' || mode === 'envelope') { $('#envelope').hidden = true; exitCardMode(); }
     mode = 'intro';
-    // No video here: Play's policy bars an ad between a tap and what the player tapped for.
     updateHomeTiles();
     $('#intro').classList.remove('leaving');
     $('#intro').hidden = false;
@@ -8054,6 +10049,7 @@
   }
   function setPlayMode(m) {
     if (launch.state !== 'READY') return;
+    try { if (!live.boot && !live.on) track.screen(m === 'spark' ? 'sparkler' : `play_${m}`); } catch (e) { /* before Live Sky is set up */ }
     if (m === 'spark') setShapesBar(true); // choosing the Sparkler (again) brings the shapes back
     if (rush.on && m !== 'sky') endRush(true); // lanterns are a sky game
     if (pen) penUp();
@@ -8075,21 +10071,733 @@
     syncLaunchUi();
   }
   document.querySelectorAll('#modeTabs [data-mode]').forEach((b) => b.addEventListener('click', () => setPlayMode(b.dataset.mode)));
+  // Home's Sparkler Name tile: the show opens straight on sparkler writing, the shapes bar out.
+  $('#btnSparkName').addEventListener('click', () => { $('#btnStart').click(); setPlayMode('spark'); track.screen('spark_name'); });
+
+  // ---------- Live Sky ----------
+  // Home's Live Sky tile: a show that never ends, nothing to touch, for leaving on a TV on Diwali night. Each round picks
+  // a landmark at random and the show director (directShow) fires random crackers over it; a dark veil fades between
+  // rounds. All offline (the director's shells are not a player's launch, so no show ends count),
+  // and the screen kept awake while it runs. Exit (OK on a TV), Back or Escape ends it.
+  const LIVE_WORLDS = WORLDS.filter((w) => w.image || w.live).map((w) => w.id);
+  const live = { on: false, from: '', last: '', lock: null, round: 0, seen: 0, allowed: 0, tick: 0 };
+  // Standard players get a one-minute preview (and a one-minute show to its end); Premium has no limit.
+  const LIVE_FREE = 75, LIVE_PER_VIDEO = 60; // 75: a one-minute show always plays to its end
+  // The shows to choose from: Endless Sky (any landmark, any style, never ends) and themed shows of one or two minutes,
+  // each with its own landmark, colours and set pieces. A themed show plays once, then the list comes back.
+  const LIVE_SHOWS = [
+    { id: 'endless', name: 'Endless Sky', line: 'Every landmark, every style, never ends', mins: 0, world: '' },
+    // After the character fireworks shows of Japan: smiling faces, animals, sweets and toys drawn in light (character-art.js).
+    { id: 'characters', name: 'Character Festival', line: 'Smiling faces, animals and sweets drawn in light', mins: 6, world: 'gateway-of-india', chars: true, acts: [['#ffcf6b', '#ffffff'], ['#ff5fa2', '#5ff0ff'], ['#33ff88', '#ffd36b'], ['#b56bff', '#ff8a8a']], only: ['comets', 'sparse', 'character', 'charpeacock', 'charanimal', 'fan'] }, // one character at a time, nothing over it
+    // Stick figures in neon, one at a time: its story first, then every other figure once, about eight minutes (character-art.js anims).
+    { id: 'stickman', name: 'Stickman Show', line: 'Neon stick figures dance, laugh, sneeze and hug', mins: 8, world: 'india-gate', chars: true, acts: [['#5ff0ff', '#ffffff'], ['#ff5fa2', '#ffd36b'], ['#33ff88', '#b56bff']], only: ['charmove'], stories: true },
+    // Safe Diwali: a question to stop and think, then the precaution, with every act (SAFETY_LINES); free for everyone.
+    { id: 'safety', name: 'Safe Diwali', line: 'A question and a safety tip with every burst', mins: 4, world: 'india-gate', safety: true, acts: [['#ffcf6b', '#fff1c9'], ['#33ff88', '#ffffff'], ['#5ff0ff', '#ffffff'], ['#ff8a2b', '#ffd36b']] },
+    // Wishes of India: the Public Wishes players published (wishes.js), each one's names in light; this phone's own first.
+    { id: 'wishes', name: 'Wishes of India', line: 'Real wishes from across India, written in light', mins: 5, world: 'gateway-of-india', wishes: true, acts: [['#ff5fa2', '#ffd1e1'], ['#ffcf6b', '#fff1c9'], ['#b56bff', '#ff8fd8'], ['#5ff0ff', '#ffffff']] },
+    // After the drone shows of India: fireworks, and each great cracker breaks into a thousand lights that make one god (drone-show.js).
+    { id: 'drones', name: 'Drone Show', line: 'Fireworks, and each great cracker becomes a god in a thousand lights', mins: 6, world: 'brihadeeswarar-temple', drones: true },
+    // Giants of Light: India's great animals as a thousand lights each, walking and flying across the sky over the sea,
+    // their lights shining back in the water (drone-show.js: a rig walks them, walk carries them across).
+    { id: 'giants', name: 'Giants of Light', line: 'A tiger, an elephant and a peacock of lights cross the sky', mins: 2, world: 'gateway-of-india', drones: true, reflect: true, program: ['tiger', 'elephant', 'peacock', 'tiger', 'elephant', 'peacock'] },
+    // Laser Light Gala: after the great harbour LED, laser and fireworks festivals. The landmark's LEDs wash and chase in
+    // colour, fans of laser beams cut the haze from the ground, LED pictures draw themselves in the sky and fall as
+    // glitter, and the fireworks land on the same half-second beat (laser-show.js). A different LED-lit landmark each time.
+    { id: 'lasers', name: 'Laser Light Gala', line: 'LED lights, laser beams and fireworks in one show', mins: 5, world: '', lasers: true },
+    // Sky Story: a story told chapter by chapter in thousands of warm white drone lights, after the great city drone shows:
+    // jellyfish, a puppy and its ball, a pianist, a family under a heart, the Taj Mahal, a dragon, and a mother elephant
+    // with her calf at the end. Pale searchlights sweep behind and fountains rise between the chapters (tools/drone-story).
+    { id: 'story', name: 'Sky Story', line: 'A story of love and dreams told in drone lights', mins: 6, world: '', drones: true, story: true, white: true, searchlights: true, only: ['fence', 'tents', 'fan', 'domes', 'mist', 'comets'],
+      program: ['jelly', 'puppy', 'pianist', 'honeybear', 'family', 'drummer', 'warrior', 'airliner', 'worldhand', 'tajlight', 'skydragon', 'galloper', 'parachute', 'roadster', 'elephants'], data: 'drone-story-data.js' },
+    // Unseen Angles: the same story, its figures traced from detailed drone-light pictures (tools/drone-unseen), the lights
+    // flying in to form each one and the picture itself glowing in over them, so it is as smooth and fine as a real show;
+    // each
+    // is drawn as a real city drone show draws it, in its own fine lines: fur, feathers, keys and ribs, 2400 lights where
+    // the phone has room (1300 where it runs lighter).
+    { id: 'unseen', name: 'Unseen Angles', line: 'The story in fine lines of thousands of drone lights', mins: 6, world: '', drones: true, story: true, white: true, dense: true, pictures: true, searchlights: true, only: ['fence', 'tents', 'fan', 'domes', 'mist', 'comets'],
+      program: ['jelly2', 'puppy2', 'pianist2', 'bear2', 'family2', 'drummer2', 'warrior2', 'airliner2', 'globe2', 'taj2', 'dragon2', 'horse2', 'parachute2', 'car2', 'elephants2'], data: 'drone-unseen-data.js' },
+    // India: Gift to the World: India's story for the world, chapter by chapter in fine drone-light line art (tools/drone-india,
+    // pictures made in Google Flow), each figure dancing on its own skeleton, after a hook line in the dark: zero, yoga,
+    // chess, Ayurveda, Nalanda, the Konark wheel, the charkha, dance, the Taj, Mars, the Moon, cricket, Digital India, the
+    // tricolour, and the world as one family. Tricolour lasers and LED washes, fireworks between, Jai Hind in lights.
+    { id: 'india', name: 'India: Gift to the World', line: 'Zero, yoga, the Moon: India’s story in drone lights and lasers', mins: 7, world: '', drones: true, story: true, white: true, dense: true, pictures: true, searchlights: true, tricolour: true,
+      hook: 'What did one country give the whole world? Watch the sky.', greet: 'Jai Hind', acts: [['#ff9933', '#ffd36b'], ['#ffffff', '#fff1c9'], ['#33cc66', '#b6ff5f']], only: ['fence', 'tents', 'fan', 'domes', 'mist', 'comets', 'spheres', 'crowns'],
+      program: ['indiya', 'inzero', 'inyoga', 'inchess', 'inayur', 'innalanda', 'inkonark', 'incharkha', 'indance', 'intaj', 'inrocket', 'inmoon', 'incricket', 'indigital', 'inflag', 'innamaste'], data: 'drone-india-data.js' },
+    { id: 'flags', name: 'Flag Show', line: 'Country flags drawn in a thousand lights, one flag at a time', mins: 4, world: 'india-gate', flagshow: true },
+    { id: 'galaxy', name: 'Galaxy Formation', line: 'A blue and violet star mine', mins: 2, world: 'taj-mahal', acts: [['#4a7dff', '#9fc0ff'], ['#b56bff', '#ff4fd8'], ['#5ff0ff', '#ffffff']], only: ['hang', 'comets', 'spheres', 'rings', 'strobes', 'galaxy', 'tiers', 'domes', 'fan'] },
+    { id: 'golden', name: 'Golden Night', line: 'Gold palms, crowns and kamuro', mins: 1, world: 'golden-temple', acts: [['#ffcf6b', '#fff1c9'], ['#ffb347', '#ffd36b']], only: ['comets', 'sparse', 'crowns', 'kamuro', 'glitter', 'palms', 'crossettes', 'fan', 'domes'] },
+    { id: 'royal', name: 'Royal Red', line: 'Red and white spheres over the fort', mins: 1, world: 'red-fort', acts: [['#ff3355', '#ffffff'], ['#ff8a8a', '#ffd1e1']], only: ['sparse', 'comets', 'spheres', 'rings', 'vcross', 'strobes', 'horizon', 'tiers', 'fan'] },
+    { id: 'tricolour', name: 'Tricolour Sky', line: 'Saffron, white and green', mins: 1, world: 'india-gate', flags: true, acts: [['#ff9933', '#ffd36b'], ['#ffffff', '#fff1c9'], ['#33cc66', '#b6ff5f']], only: ['comets', 'hang', 'spheres', 'horizon', 'crowns', 'palms', 'tiers', 'domes'] },
+    { id: 'ocean', name: 'Ocean Lights', line: 'Blue and cyan over the sea', mins: 2, world: 'gateway-of-india', acts: [['#5ff0ff', '#ffffff'], ['#4a7dff', '#5ff0ff']], only: ['hang', 'comets', 'strobes', 'glitter', 'horizon', 'spheres', 'rings', 'galaxy', 'domes', 'fan'] },
+    { id: 'rose', name: 'Rose Garden', line: 'Pink peonies and hearts of light', mins: 1, world: 'mysore-palace', acts: [['#ff5fa2', '#ffd1e1'], ['#e04dff', '#ff8fb8']], only: ['sparse', 'hang', 'spheres', 'rings', 'vcross', 'glitter', 'kamuro', 'tiers', 'domes'] },
+    { id: 'temple', name: 'Temple Festival', line: 'Every colour, crowns and fans', mins: 2, world: 'meenakshi-amman-temple' },
+    // From the Akagawa Fireworks Display: wide shapes along the horizon, one minute each.
+    { id: 'river', name: 'River of Light', line: 'Belts of colour, a fence of light and an arch', mins: 1, world: 'golden-temple', acts: [['#4a7dff', '#ffffff'], ['#ff5fa2', '#ffcf6b']], only: ['mist', 'comets', 'belt', 'arch', 'fence', 'spheres', 'tiers', 'domes'] },
+    { id: 'mountain', name: 'Mountain of Flowers', line: 'Blooms stacked like a mountain, then gold kamuro', mins: 1, world: 'india-gate', acts: [['#ff5fa2', '#ffcf6b'], ['#ffcf6b', '#ffffff']], only: ['sparse', 'mountain', 'cloud', 'kamuro', 'mist', 'fan', 'tiers'] },
+    { id: 'niagara', name: 'Niagara Night', line: 'Curtains of falling gold and green', mins: 1, world: 'vivekananda-rock-memorial', acts: [['#33ff88', '#ffcf6b'], ['#ffcf6b', '#ffffff']], only: ['comets', 'waterfall', 'belt', 'glitter', 'kamuro', 'fence', 'domes'] },
+    { id: 'bridge', name: 'Rainbow Bridge', line: 'An arch of colour across the sky', mins: 1, world: 'gateway-of-india', acts: [['#ff3355', '#ff9933'], ['#33ff88', '#4a7dff'], ['#b56bff', '#ff4fd8']], only: ['hang', 'arch', 'ringrow', 'belt', 'spheres', 'galaxy', 'tiers'] },
+    { id: 'cloud', name: 'White Cloud', line: 'Bright white heaped into one cloud', mins: 1, world: 'taj-mahal', acts: [['#ffffff', '#9fd8ff'], ['#fff1c9', '#ffffff']], only: ['mist', 'hang', 'cloud', 'strobes', 'ringrow', 'fence', 'domes'] },
+    { id: 'fence', name: 'Festival Fence', line: 'Jets, tents and fans from the ground', mins: 1, world: 'red-fort', acts: [['#ffcf6b', '#ffffff'], ['#ff3355', '#ffcf6b']], only: ['comets', 'fence', 'tents', 'spheres', 'crowns', 'tiers', 'fan', 'domes'] },
+    // Colour washes: soft shells filling the whole sky in a Japanese colour gradient, oohs without the booms.
+    { id: 'sakura', name: 'Sakura Dawn', line: 'Cherry pink to white to pale gold', mins: 1, world: 'mysore-palace', soft: 0.35, wash: ['#ff7eb6', '#ffd1e1', '#ffffff', '#ffe9a8'] },
+    { id: 'indigo', name: 'Indigo Wave', line: 'Deep indigo washing into sky blue', mins: 2, world: 'gateway-of-india', soft: 0.35, wash: ['#2b2fb8', '#4a7dff', '#9fd8ff', '#ffffff'] },
+    { id: 'maple', name: 'Autumn Maple', line: 'Maple red, orange and gold', mins: 1, world: 'konark-sun-temple', soft: 0.4, wash: ['#d61f2c', '#ff6a2b', '#ffb347', '#ffe08a'] },
+    { id: 'wisteria', name: 'Wisteria Dream', line: 'Lavender, violet and rose', mins: 2, world: 'victoria-memorial', soft: 0.35, wash: ['#c9a6ff', '#8f5bff', '#e04dff', '#ffb6d9'] },
+    { id: 'matcha', name: 'Tea Garden', line: 'Green to lime to gold', mins: 1, world: 'brihadeeswarar-temple', soft: 0.4, wash: ['#1fa65a', '#7ee06b', '#d8f56a', '#ffd36b'] },
+    { id: 'silk', name: 'Rainbow Silk', line: 'The whole rainbow, one colour into the next', mins: 2, world: 'hawa-mahal', soft: 0.35, wash: ['#ff3355', '#ff9933', '#ffe066', '#33ff88', '#5ff0ff', '#4a7dff', '#b56bff'] },
+    { id: 'pearl', name: 'Moonlit Pearl', line: 'Pearl white and silver blue', mins: 1, world: 'cross-by-the-sea', soft: 0.3, wash: ['#ffffff', '#e6f0ff', '#b8d4ff', '#fff4e0'] },
+    { id: 'lotus', name: 'Lotus Glow', line: 'Lotus pink, magenta and gold', mins: 1, world: 'charminar', soft: 0.35, wash: ['#ff8fb8', '#ff4fd8', '#ffb6d9', '#ffd36b'] },
+    { id: 'peacock', name: 'Peacock Silk', line: 'Teal, emerald and royal blue', mins: 2, world: 'velankanni-basilica', soft: 0.35, wash: ['#00b3a4', '#1fd17a', '#3a6bff', '#7a3cff'] },
+    { id: 'sunset', name: 'Golden Hour', line: 'Amber, rose and violet, like a sunset', mins: 1, world: 'golden-manor', soft: 0.35, wash: ['#ffb347', '#ff7a6b', '#ff4fd8', '#7a3cff'] },
+    { id: 'stars', name: 'Sea of Stars', line: 'Glitter falling over the ocean rock', mins: 1, world: 'vivekananda-rock-memorial', acts: [['#fff1c9', '#9fc0ff'], ['#ffd36b', '#ffffff']], only: ['hang', 'comets', 'glitter', 'kamuro', 'horizon', 'crossettes', 'fan'] },
+  ];
+  // The New Year countdown: not one of the shows (their number and locks stay as they are), at the top of the list in
+  // the weeks before New Year and free for everyone. Calm rounds over a landmark each, the countdown to this screen's
+  // own midnight in the sky, the midnight climax, then Endless Sky (cdLiveStart, cdCalm, cdLiveClimax).
+  const COUNTDOWN_SHOW = { id: 'countdown', name: 'New Year countdown', line: 'Counts down to your midnight, then lights up the sky', mins: 0, world: '', countdown: true };
+  // A free player's shows: one of each kind open always (Royal Red is the first-launch show), one more of their choice
+  // each day, and any show kept for good with gems (one, or all at once); Premium plays every show, all night.
+  // Shows a player watched before the lock came stay theirs (luts:liveseen, read once into luts:liveowned).
+  const LIVE_FREE_SHOWS = new Set(['endless', 'royal', 'tricolour', 'countdown']); // most shows are Premium; free players keep these (and the New Year countdown), a daily pick and gem keeps
+  const LIVE_OWN_KEY = 'luts:liveowned', LIVE_DAY_KEY = 'luts:liveday', LIVE_SHOW_GEMS = 15, LIVE_ALL_GEMS = 200;
+  const liveJSON = (k) => { try { return JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch (e) { return {}; } };
+  const liveSet = (k, v) => { try { localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); } catch (e) { /* storage unavailable */ } };
+  const liveDay = () => { try { return (localStorage.getItem(LIVE_DAY_KEY) || '').split('|'); } catch (e) { return []; } }; // [day, show]
+  const liveDayFree = () => liveDay()[0] !== dayKey(); // today's free show not chosen yet
+  const liveOwned = (id) => !!liveJSON(LIVE_OWN_KEY)[id];
+  const showOpen = (sh) => !!sh && (premium.active || LIVE_FREE_SHOWS.has(sh.id) || liveOwned(sh.id) || (liveDay()[0] === dayKey() && liveDay()[1] === sh.id));
+  function liveOwn(ids) { const o = liveJSON(LIVE_OWN_KEY); for (const id of ids) o[id] = 1; liveSet(LIVE_OWN_KEY, o); }
+  (function liveGrandfather() { // once: what the player already watched stays theirs
+    let old = false; // an install from before locks: every show stays theirs
+    try { if (localStorage.getItem('luts:livegf')) return; old = LUTS_OLD; } catch (e) { return; }
+    liveOwn(old ? LIVE_SHOWS.map((x) => x.id) : Object.keys(liveJSON('luts:liveseen')));
+    try { localStorage.setItem('luts:livegf', '1'); } catch (e) { /* storage unavailable */ }
+  })();
+  const liveVeil = document.createElement('div');
+  liveVeil.className = 'live-veil';
+  document.body.append(liveVeil);
+  async function liveAwake(on) {
+    try {
+      if (on && !live.lock && navigator.wakeLock) live.lock = await navigator.wakeLock.request('screen');
+      else if (!on && live.lock) { const l = live.lock; live.lock = null; await l.release(); }
+    } catch (e) { /* not allowed here: the screen sleeps as usual */ }
+  }
+  // The system drops the lock when the page is hidden; take it again on return.
+  document.addEventListener('visibilitychange', () => { if (live.on && !document.hidden) { live.lock = null; liveAwake(true); } });
+  // A New Year countdown (a card's or Live Sky's) back in view, or back from the back/forward cache: see cdBack. (Here,
+  // after the daily gift's own check: on a return after midnight, the replay's line is the one left showing.)
+  document.addEventListener('visibilitychange', cdBack);
+  window.addEventListener('pageshow', cdBack);
+  // Live Sky's New Year countdown: to this screen's own coming midnight, the countdown's screen without its buttons (the
+  // list offers it only in its weeks; past midnight it plays as Endless Sky).
+  function cdLiveStart() {
+    const year = countdownYear();
+    cdStop(); // (a card's countdown on screen when the show was opened from a link)
+    if (!year) { live.cdDone = true; return; }
+    Object.assign(cdShow, CD_IDLE, { on: true, live: true, year, target: +new Date(year, 0, 1), waiting: true });
+    cdScreen({ year, live: true });
+    document.body.classList.add('countdown-on');
+    cdShow.tick = setInterval(cdTick, 250);
+    cdTick();
+    cdAwake(true);
+  }
+  // Its rounds until midnight: a landmark each with a gentle shell every 2-4 s (cdAmbient), never the director, whose
+  // every round ends in a finale. None starts in the last two and a half minutes, so no round's change of landmark (which
+  // clears the sky and every timer) can meet the climax: that landmark stays to midnight. Returns the round's length.
+  function cdCalm() {
+    cdAmbient();
+    return cdShow.target - Date.now() > 150e3 ? rand(40, 60) : 0;
+  }
+  // Its midnight: the calm rounds stop (and a change of landmark under way is called off), the climax plays over the
+  // landmark on screen, then the show carries on as Endless Sky, under its free minute for a free player.
+  function cdLiveClimax(lead = 0) {
+    const s = cdShow;
+    clearTimers('director'); clearTimers('live'); live.round++; liveVeil.classList.remove('on');
+    const t = cdClimax({ tag: 'director', tap: true, year: s.year, head: inLang('Happy New Year'), lead });
+    after(t + 4, () => { live.cdDone = true; s.over = true; clearInterval(s.tick); document.body.classList.remove('countdown-on'); liveRound(); }, 'live');
+  }
+  function liveRound() {
+    if (!live.on) return;
+    const show = live.show;
+    if (show && show.countdown && cdShow.fired && !live.cdDone) return; // its climax is on: the round after it starts at its end
+    if (show && show.mins && live.played > 0) { // a themed show plays once, then the end card
+      // ...once the sky is quiet: no clock cuts a finale short (a slow phone's show runs behind real seconds), up to 30 s more
+      const busy = timers.some((x) => x.tag === 'director') || shells.length > 0;
+      if (busy && (live.wait = (live.wait || 0) + 1) <= 30) { after(1, liveRound, 'live'); return; }
+      live.wait = 0; liveEnd(true); return;
+    }
+    if (show && show.mins) live.played++;
+    const pool = LIVE_WORLDS.filter((id) => id !== live.last && !(show && show.story && !(WORLDS.find((w) => w.id === id) || {}).image)); // (a story plays over a real LED-lit landmark)
+    const id = live.last = show && show.world && isWorld(show.world) ? show.world : pick(pool);
+    const round = ++live.round;
+    liveVeil.classList.add('on');
+    setTimeout(() => {
+      if (!live.on || round !== live.round) return;
+      clearScene();
+      selectWorld(id, { silent: true, save: false, force: true }).catch(() => false).then(() => (show && show.drones ? droneData(show) : 0)).then(() => {
+        if (!live.on || round !== live.round) return;
+        liveVeil.classList.remove('on');
+        // Endless Sky plays a colour wash now and then (one round in three), in one of the wash shows' gradients. The New
+        // Year countdown's rounds are calm until its climax (cdCalm; 0: this landmark stays to midnight).
+        const washes = LIVE_SHOWS.filter((w) => w.wash);
+        const len = show && show.countdown && !live.cdDone ? cdCalm() : show && show.mins ? liveDirector(show.mins * 60 - 18, show) : Math.random() < 0.34 ? liveDirector(rand(40, 60), { ...pick(washes), only: null }) : liveDirector(rand(40, 60));
+        if (len) after(len, liveRound, 'live');
+      });
+    }, 1300);
+  }
+  function startLive(show) {
+    live.show = show && show.id ? show : LIVE_SHOWS[0]; live.played = 0; live.wait = 0;
+    { const id = live.show.id, free = LIVE_FREE_SHOWS.has(id);
+      track('live_show_play', { show: id, locked: free ? 0 : 1, how: free ? 'free' : premium.active ? 'premium' : liveOwned(id) ? 'gems' : 'daily' }); }
+    const seen = liveJSON('luts:liveseen'); seen[live.show.id] = 1; liveSet('luts:liveseen', seen);
+    live.boot = true; $('#btnStart').click(); live.boot = false;
+    setPlayMode('sky');
+    live.on = true; live.from = world.id; live.last = world.id;
+    live.seen = 0; live.allowed = LIVE_FREE; live.watched = 0;
+    { // My sky: this watch's moment (or the last one's, when the same show was left less than a minute ago)
+      const id = live.show.id, prev = window.LUTSTimeline ? LUTSTimeline.list().find((m) => m.k === 'live' && typeof m.key === 'string' && m.key.startsWith(`live:${id}:`)) : null;
+      const again = prev && Date.now() - prev.at < 60000;
+      live.mkey = again ? prev.key : `live:${id}:${Date.now()}`; live.mbase = again && prev.r && prev.r.s > 0 ? prev.r.s : 0;
+    }
+    clearInterval(live.tick);
+    live.tick = setInterval(liveTick, 1000);
+    track.enter('live_sky');
+    document.body.classList.add('live-sky'); stripRect = null;
+    if (world.img && W > H) drawSky(); // (worldGround: on a landscape screen a show moves the landmark down)
+    $('#btnLiveExit').hidden = false;
+    liveAwake(true);
+    live.cdDone = false;
+    if (live.show.countdown) cdLiveStart();
+    liveRound();
+    setTimeout(() => { if (live.on && document.documentElement.classList.contains('tv')) $('#btnLiveExit').focus(); }, 400);
+  }
+  // My sky: a show watched for half a minute or more. Each watch is one moment (its own key), kept up to date as it goes:
+  // on leaving the show, and whenever the app is hidden (a WebView swiped away or ended by the system writes nothing
+  // more). The same show again within a minute of the last watch carries on that moment, minutes added.
+  function liveMoment() {
+    if (!live.on || !live.show || !live.mkey || live.watched < 30) return;
+    const secs = (live.mbase || 0) + live.watched;
+    moment({ kind: 'live', icon: '📺', line: 'Watched {0} on Live Sky · {1} min', args: [live.show.name, Math.max(1, Math.round(secs / 60))],
+      thumb: worldThumb(live.show.world, 'assets/menu/thumb-livesky.webp'), ref: { s: secs, w: live.show.world || '' }, key: live.mkey, within: 864e5 });
+  }
+  document.addEventListener('visibilitychange', () => { if (document.hidden) liveMoment(); });
+  addEventListener('pagehide', liveMoment);
+  // keep: the show's landmark stays (the player lights the same sky themselves) instead of the world they had before.
+  function stopLive(keep) {
+    if (!live.on) return false;
+    liveMoment();
+    live.on = false; live.round++; hideCaption();
+    track.home();
+    clearInterval(live.tick); liveGate(false);
+    cdStop(); live.cdDone = false; // the New Year countdown's clock, its screen and the screen kept on
+    clearTimers('live'); clearScene();
+    liveVeil.classList.remove('on');
+    document.body.classList.remove('live-sky'); stripRect = null;
+    if (world.img && W > H) drawSky();
+    $('#btnLiveExit').hidden = true;
+    liveAwake(false);
+    liveEnd(false); togglePause(false); // the end card paused the show: leaving it (Home or Back) must not leave the game paused
+    if (!keep) selectWorld(live.from, { silent: true, save: false, force: true }).catch(() => false);
+    return true;
+  }
+  // The end card of a themed show: the show waits (paused) behind it.
+  function liveEnd(on) {
+    const c = $('#liveEnd');
+    if (on === !c.hidden) return;
+    c.hidden = !on;
+    if (on) { togglePause(true); setTimeout(() => { if (!c.hidden) $('#btnLivePlay').focus(); }, 50); }
+    // A happy moment: one quiet line for a free player after a themed show, at most once a day, never opened for them.
+    let offer = false;
+    try { offer = on && !premium.active && !!(live.show && live.show.mins) && localStorage.getItem('luts:liveoffer') !== dayKey(); if (offer) localStorage.setItem('luts:liveoffer', dayKey()); } catch (e) { offer = false; }
+    $('#btnLiveOffer').hidden = !offer;
+  }
+  $('#btnLiveOffer').addEventListener('click', () => openPremium({ live: live.show && live.show.id, moment: true }));
+  // Each show's signature cracker, picked for the player who goes on to light the same sky.
+  const LIVE_SIGNATURE = { galaxy: 'lscomb', golden: 'lspalms', royal: 'lsecho', tricolour: 'flagindia', ocean: 'lshang', rose: 'heart',
+    temple: 'lstiers', river: 'lsfence', mountain: 'lsmountain', niagara: 'lsniagara', bridge: 'lsarch', cloud: 'lscloud', fence: 'lstents',
+    sakura: 'lspetals', indigo: 'lstide', maple: 'lscurtain', wisteria: 'lsbloom', matcha: 'lsaurora', silk: 'lswash', pearl: 'lscloud',
+    lotus: 'lsbloom', peacock: 'peacock', sunset: 'lscurtain', stars: 'lsniagara' };
+  $('#btnLivePlay').addEventListener('click', () => { // into the game on the same landmark, the show's cracker ready
+    const sig = live.show && LIVE_SIGNATURE[live.show.id];
+    liveEnd(false); togglePause(false);
+    stopLive(true);
+    setPlayMode('sky');
+    if (sig && TYPES[sig]) { setShell(sig); const chip = shellList.querySelector(`[data-shell="${sig}"]`); if (chip) chip.scrollIntoView({ inline: 'center', block: 'nearest' }); }
+    if (coach.done('sky')) toast(hintFor('sky'), 4000); // (a first player gets the sky coach instead) how this device lights it: the sparkler to a fuse on a phone, Fire elsewhere
+  });
+  $('#btnLiveAgain').addEventListener('click', () => { const sh = live.show; liveEnd(false); togglePause(false); stopLive(true); startLive(sh); });
+  $('#btnLiveMore').addEventListener('click', () => { liveEnd(false); togglePause(false); stopLive(); $('#btnHome').click(); openLiveShows(); });
+  // A second of show watched (not while paused, hidden or at the gate); at the free minute's end the gate opens.
+  // What Live Sky is doing, for checking on a phone over the WebView inspector.
+  window.LUTSLive = { names: () => liveNames.slice(), piece: (name) => liveDirector(0, { one: name }), shot: (g, w, h) => { composite(g, w, h); drawBrandMark(g, w / W); }, sound: Sound, state: () => ({ drones: drones ? { god: drones.id, age: drones.age, n: drones.count } : null, lasers: lasers ? { t: lasers.time, lite: lasers.lite, cues: lasers.cues.map((c) => `${c.kind}:${c.shape || c.mode}`) } : null, on: live.on, show: live.show && live.show.id, seen: live.seen, allowed: live.allowed, paused, premium: premium.active, gate: !$('#liveGate').hidden, tier: measuredTier, stars: stars.length, shells: shells.length, frameMs: Math.round(frameMean) }) };
+  function liveTick() {
+    if (!live.on || paused || document.hidden || !$('#liveGate').hidden) return;
+    live.watched = (live.watched || 0) + 1; // (unpaused seconds of this show, for everyone: the coach waits 12)
+    if (premium.active) return;
+    if (live.show && live.show.countdown && !live.cdDone) return; // the New Year countdown is free to its climax (then Endless Sky's minute)
+    // A one-minute show always plays to its end card: on a slow phone its clock runs behind real seconds, so it could
+    // outlast the free preview and meet the gate just before its finale.
+    if (live.show && live.show.mins === 1) return;
+    ++live.seen;
+    // A free minute running out: a few seconds' notice, then the Premium card while the show waits behind it.
+    const left = live.allowed - live.seen;
+    if (left > 0 && left <= 3) toast(inLang('Free preview ends in {0}…').replace('{0}', left), 1100);
+    if (left <= 0) liveGate(true);
+  }
+  function liveGate(on) {
+    const g = $('#liveGate');
+    if (on === !g.hidden) return;
+    g.hidden = !on;
+    togglePause(on); // the show waits behind the card
+    if (on) setTimeout(() => { if (live.on) $('#btnLivePremium').focus(); }, 50);
+    else if (live.on && document.documentElement.classList.contains('tv')) $('#btnLiveExit').focus();
+  }
+  $('#btnLivePremium').addEventListener('click', () => openPremium({ live: (live.show && live.show.id) || true }));
+  $('#btnLiveGateExit').addEventListener('click', () => $('#btnLiveExit').click());
+  // Premium bought (or a pass) at the gate: the show goes on at once, for good.
+  window.addEventListener('luts:premium-changed', (e) => { if (e.detail && e.detail.active && live.on) liveGate(false); });
+  // The list of shows, opened from home's Live Sky tile: each with its landmark's picture, its length and its line.
+  function openLiveShows() {
+    if (window.LUTSWishes) LUTSWishes.load(); // (Wishes of India's list, read once a day)
+    const list = $('#liveList');
+    if (!list.children.length) for (const sh of LIVE_SHOWS) {
+      if (sh.wash && !list.querySelector('.live-group')) { // the colour washes under their own heading
+        const h = document.createElement('div');
+        h.className = 'live-group';
+        h.innerHTML = '<b></b><small></small>';
+        h.querySelector('b').textContent = inLang('Colour washes');
+        h.querySelector('small').textContent = inLang('Soft colour filling the whole sky, without the big booms');
+        list.append(h);
+      }
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'live-show'; b.dataset.show = sh.id;
+      const cfg = sh.world && WORLD_BY_ID[sh.world];
+      const art = cfg ? `assets/worlds/thumb/${cfg.thumb || cfg.id}.webp` : 'assets/menu/thumb-livesky.webp';
+      b.innerHTML = `<img src="${art}" alt="" width="56" height="56" loading="lazy" decoding="async"><span><b></b><small></small><em></em></span>`;
+      b.querySelector('b').textContent = inLang(sh.name);
+      b.querySelector('small').textContent = inLang(sh.line);
+      b.querySelector('em').textContent = sh.mins ? (cfg ? `${inLang(cfg.name)} · ` : '') + inLang(sh.mins === 1 ? '1 minute' : '{0} minutes').replace('{0}', sh.mins) : inLang('Never ends');
+      b.addEventListener('click', () => { if (!showOpen(sh)) { track('live_show_locked_tap', { show: sh.id }); liveLockCard(sh); return; } closeSheet($('#liveModal')); startLive(sh); });
+      list.append(b);
+    }
+    // In the weeks before New Year its countdown leads the list (not a show: never locked, nor counted among them).
+    let cdb = $('#btnLiveCountdown');
+    if (!cdb) {
+      cdb = document.createElement('button');
+      cdb.type = 'button'; cdb.className = 'live-special'; cdb.id = 'btnLiveCountdown';
+      cdb.innerHTML = '<i aria-hidden="true">⏳</i><span><b></b><small></small><em></em></span>';
+      cdb.querySelector('b').textContent = inLang(COUNTDOWN_SHOW.name);
+      cdb.querySelector('small').textContent = inLang(COUNTDOWN_SHOW.line);
+      cdb.addEventListener('click', () => { if (!countdownYear()) return; closeSheet($('#liveModal')); startLive(COUNTDOWN_SHOW); });
+      list.prepend(cdb);
+    }
+    cdb.hidden = !countdownYear();
+    if (!cdb.hidden) cdb.querySelector('em').textContent = inLang('Countdown to {0}').replace('{0}', countdownYear());
+    syncLiveLocks();
+    openSheet($('#liveModal'));
+  }
+  $('#liveBack').addEventListener('click', () => closeSheet($('#liveModal')));
+  // The 👑 marks on locked shows, and today's free show, kept current each time the list opens or Premium changes.
+  function syncLiveLocks() {
+    for (const b of $('#liveList').querySelectorAll('.live-show')) {
+      const sh = LIVE_SHOWS.find((x) => x.id === b.dataset.show), locked = !showOpen(sh);
+      b.classList.toggle('premium-item', locked);
+      let tag = b.querySelector('.live-lock');
+      if (locked && !tag) { tag = document.createElement('i'); tag.className = 'live-lock'; tag.textContent = `👑 · 💎${LIVE_SHOW_GEMS}`; b.append(tag); }
+      if (!locked && tag) tag.remove();
+    }
+    const today = $('#liveToday');
+    today.hidden = premium.active;
+    today.textContent = inLang(liveDayFree() ? 'Today\'s free show: tap any 👑 show to watch it free' : 'Free again tomorrow');
+  }
+  window.addEventListener('luts:premium-changed', () => { if ($('#liveList').children.length) syncLiveLocks(); });
+  // A locked show: Premium, its gems once (or every show at once), or today's free show. No timers, nothing chosen.
+  let lockShow = null;
+  function liveLockCard(sh) {
+    lockShow = sh;
+    const c = $('#liveLock');
+    $('#liveLockTitle').textContent = inLang(sh.name);
+    $('#liveLockLine').textContent = inLang('Watch it with Premium, or keep it for good with {0} gems (you have {1}).').replace('{0}', LIVE_SHOW_GEMS).replace('{1}', fmtGems(gems()));
+    $('#liveLockGems').textContent = ` · ${LIVE_SHOW_GEMS} 💎`;
+    $('#liveLockAll').textContent = ` · ${LIVE_ALL_GEMS} 💎`;
+    $('#btnLockFree').hidden = !liveDayFree();
+    c.hidden = false;
+    setTimeout(() => { if (!c.hidden) $('#btnLockClose').focus(); }, 50);
+  }
+  const lockClose = () => { $('#liveLock').hidden = true; };
+  const lockPlay = (sh) => { lockClose(); closeSheet($('#liveModal')); closeSheet($('#storeModal')); if (live.on) stopLive(); startLive(sh); };
+  $('#btnLockClose').addEventListener('click', lockClose);
+  $('#btnLockFree').addEventListener('click', () => { const sh = lockShow; if (!sh || !liveDayFree()) return; liveSet(LIVE_DAY_KEY, `${dayKey()}|${sh.id}`); syncLiveLocks(); lockPlay(sh); });
+  $('#btnLockPremium').addEventListener('click', () => { const sh = lockShow; lockClose(); openPremium({ live: sh && sh.id }); });
+  const lockBuy = (n, ids, label) => {
+    const sh = lockShow;
+    if (!spendGems(n, ids.length > 1 ? 'live_all_shows' : 'live_show')) { lockClose(); openGems({ cost: n, label }); return; }
+    liveOwn(ids); syncLiveLocks();
+    toast(inLang('{0} is unlocked!').replace('{0}', label));
+    lockPlay(sh);
+  };
+  $('#btnLockGems').addEventListener('click', () => lockShow && lockBuy(LIVE_SHOW_GEMS, [lockShow.id], inLang(lockShow.name)));
+  $('#btnLockAll').addEventListener('click', () => lockShow && lockBuy(LIVE_ALL_GEMS, LIVE_SHOWS.map((x) => x.id), inLang('All shows')));
+  window.addEventListener('luts:premium-changed', (e) => { if (e.detail && e.detail.active && lockShow && !$('#liveLock').hidden) lockPlay(lockShow); });
+  // The Store's light-shows shelf: every show's picture, a 👑 on the locked ones; a tap plays an open show or opens the
+  // lock card (Premium, its gems once, or all at once). The prices are the shows' own gem prices, nothing else.
+  function storeShows() {
+    const shelf = $('#storeShelf');
+    if (!shelf) return;
+    $('#storeShowsLine').textContent = premium.active ? inLang('Every light show is yours with Premium') : inLang('💎{0} a show · all {1} · 👑 included in Premium').replace('{0}', LIVE_SHOW_GEMS).replace('{1}', LIVE_ALL_GEMS);
+    if (!shelf.children.length) for (const sh of LIVE_SHOWS) {
+      const cfg = sh.world && WORLD_BY_ID[sh.world], b = document.createElement('button');
+      b.type = 'button'; b.className = 'store-show'; b.dataset.show = sh.id;
+      b.innerHTML = `<img src="${cfg ? `assets/worlds/thumb/${cfg.thumb || cfg.id}.webp` : 'assets/menu/thumb-livesky.webp'}" alt="" width="84" height="84" loading="lazy" decoding="async"><b></b>`;
+      if (sh.wash) b.querySelector('img').style.background = `linear-gradient(135deg, ${sh.wash.join(', ')})`;
+      b.querySelector('b').textContent = inLang(sh.name);
+      b.addEventListener('click', () => {
+        if (!showOpen(sh)) { liveLockCard(sh); return; }
+        closeSheet($('#storeModal')); if (live.on) stopLive(); startLive(sh);
+      });
+      shelf.append(b);
+    }
+    for (const b of shelf.children) {
+      const sh = LIVE_SHOWS.find((x) => x.id === b.dataset.show), locked = !showOpen(sh);
+      b.classList.toggle('locked', locked);
+      let tag = b.querySelector('.live-lock');
+      if (locked && !tag) { tag = document.createElement('i'); tag.className = 'live-lock'; tag.textContent = `👑 · 💎${LIVE_SHOW_GEMS}`; b.append(tag); }
+      if (!locked && tag) tag.remove();
+    }
+  }
+  window.addEventListener('luts:premium-changed', () => { if ($('#storeShelf') && $('#storeShelf').children.length) storeShows(); });
+  // A link straight to a show (#live=galaxy, or lightuptheskies://open?h=live%3Dgalaxy in the app): it opens at once.
+  function liveFromHash() {
+    const m = location.hash.match(/live=([a-z]+)/);
+    const sh = m && (m[1] === COUNTDOWN_SHOW.id ? (countdownYear() ? COUNTDOWN_SHOW : null) : LIVE_SHOWS.find((x) => x.id === m[1])); // (the countdown in its weeks)
+    if (!sh) return;
+    history.replaceState(null, '', location.pathname + location.search);
+    if (live.on) stopLive();
+    closeSheets();
+    if (!showOpen(sh)) { openLiveShows(); liveLockCard(sh); return; }
+    startLive(sh);
+  }
+  window.addEventListener('hashchange', liveFromHash);
+  setTimeout(liveFromHash, 0);
+  // A brand-new player sees fireworks first: a one-minute show over the Red Fort, then its end card (Light this sky
+  // yourself). The daily gift comes as a toast meanwhile and the welcome tips once they play.
+  setTimeout(() => {
+    let fresh = false;
+    try { fresh = !localStorage.getItem('luts:welcomed') && !localStorage.getItem('luts:firstshow'); localStorage.setItem('luts:firstshow', '1'); } catch (e) { /* storage unavailable: skip it */ }
+    if (fresh && !live.on && !location.hash && document.body.classList.contains('home') && sheets.every((s) => s.hidden)) startLive(LIVE_SHOWS.find((x) => x.id === 'royal'));
+  }, 300);
+  $('#btnLiveSky').addEventListener('click', openLiveShows);
+  // ----- Public Wishes (home): watch Wishes of India, or write a wish (two first names and an occasion) -----
+  const WISH_OCCS = ['diwali', 'love', 'birthday', 'thanks', 'missyou', 'anniversary', 'congrats', 'newyear', 'getwell', 'justbecause'];
+  // Two of each occasion's own wishes (already translated). A tap picks the one this wish shares and the sky says.
+  const WISH_LINES = {
+    diwali: ['May a thousand diyas light your path to happiness this Diwali.', 'Wishing you sweets, sparkle and the warmth of family this Diwali.'],
+    love: ['Every firework tonight is a reason I love you.', 'With you, every ordinary day feels like a celebration.'],
+    birthday: ['Wishing you a year full of light, laughter and wonderful surprises.', 'Another year of you is the best gift for all of us'],
+    thanks: ['For everything you do, this show is for you.', 'Thank you for the love, the laughter and the second helpings. Wishing you a wonderful year.'],
+    missyou: ['Missing you more than words can say. This sky is for you.', 'Every day feels a little dimmer without you'],
+    anniversary: ['Here’s to every year we have shared, and all the ones still to come.', 'Every year together is better than the one before'],
+    congrats: ['You did it! The whole sky is celebrating you tonight.', 'You worked so hard for this, and it shows'],
+    newyear: ['May the year ahead sparkle as brightly as these skies.', 'I can’t wait to share another year with you'],
+    getwell: ['Sending you healing wishes and a sky full of light. Get well soon!', 'You are stronger than anything you’re facing'],
+    justbecause: ['No reason at all. You just deserve a sky full of light.', 'Thinking of you today. This sky is for you.'],
+  };
+  const WISH_FROM_KEY = 'luts:wishfrom', WISH_PLACE_KEY = 'luts:wishplace', WISH_SPARK_KEY = 'luts:wishspark';
+  let wishOcc = 'diwali', wishLineI = 0, wishSpark = false, wishEdit = null;
+  try { wishSpark = localStorage.getItem(WISH_SPARK_KEY) === '1'; } catch (e) { /* storage unavailable */ }
+  let wishSignPts = [];
+  function syncWishSpark() {
+    const b = $('#btnWishSpark'), sky = $('#wishSky'), box = $('#wishSignBox'), help = $('#wishSparkHelp');
+    if (b) { b.setAttribute('aria-pressed', String(wishSpark)); b.classList.toggle('on', wishSpark); }
+    if (sky) sky.classList.toggle('spark', wishSpark);
+    if (box) box.hidden = !wishSpark;
+    if (help) help.textContent = inLang(wishSpark ? 'On: their name, place, and wish will be traced in sparkler light.' : 'Turn on to trace their name and wish across the sky.');
+  }
+  function fitWishSign() {
+    const c = $('#wishSign'); if (!c) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1), w = Math.max(280, Math.round(c.clientWidth * dpr)), h = Math.round(148 * dpr);
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; paintWishSign(); }
+  }
+  function paintWishSign() {
+    const c = $('#wishSign'); if (!c) return;
+    const g = c.getContext('2d');
+    g.clearRect(0, 0, c.width, c.height);
+    g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#ffe7b0'; g.lineWidth = Math.max(3, c.height / 28);
+    const pts = wishSignPts;
+    if (pts.length < 2) { if (pts.length === 1) { g.fillStyle = '#ffe7b0'; g.beginPath(); g.arc(pts[0].x, pts[0].y, g.lineWidth, 0, TAU); g.fill(); } return; }
+    g.beginPath(); g.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) {
+      const mx = (pts[i].x + pts[i + 1].x) / 2, my = (pts[i].y + pts[i + 1].y) / 2;
+      g.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+    }
+    g.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+    g.stroke();
+  }
+  function signFromEvent(e) {
+    const c = $('#wishSign'), r = c.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / Math.max(1, r.width) * c.width, y: (e.clientY - r.top) / Math.max(1, r.height) * c.height };
+  }
+  function wishSignPacked() {
+    return window.LUTSWishes && wishSignPts.length >= 8 ? LUTSWishes.packSign(wishSignPts) : '';
+  }
+  function showWishSign(g) {
+    const pts = window.LUTSWishes && LUTSWishes.unpackSign(g);
+    const c = $('#wishSign');
+    wishSignPts = [];
+    if (!pts || !c) { paintWishSign(); return; }
+    fitWishSign();
+    const size = Math.min(c.width, c.height) * 0.86;
+    wishSignPts = pts.map(([x, y]) => ({ x: c.width / 2 + x * size, y: c.height / 2 + y * size }));
+    paintWishSign();
+  }
+  const wishLines = () => WISH_LINES[wishOcc] || [];
+  const wishPlace = () => ($('#wPlace') && $('#wPlace').value || '').trim();
+  // The sky shows the two names, where the wish is from, and the line that will be shared.
+  function paintWishSky() {
+    const names = $('#wishSkyNames'), occ = $('#wishSkyOcc'), place = $('#wishSkyPlace');
+    if (!names) return;
+    const from = ($('#wFrom').value || '').trim(), to = ($('#wTo').value || '').trim(), where = wishPlace();
+    names.textContent = `${from || inLang('Your name')} → ${to || inLang('Their name')}`;
+    names.classList.toggle('set', !!(from && to));
+    if (place) { place.hidden = !where; place.textContent = where ? `from ${where}` : ''; }
+    const line = wishLines()[wishLineI] || '';
+    if (occ) occ.textContent = line;
+  }
+  function paintWishLines() {
+    const box = $('#wLines'); if (!box) return;
+    const lines = wishLines();
+    if (wishLineI >= lines.length) wishLineI = 0;
+    box.replaceChildren();
+    lines.forEach((line, i) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'wish-line' + (i === wishLineI ? ' on' : ''); b.textContent = line;
+      b.addEventListener('click', () => { wishLineI = i; paintWishLines(); paintWishSky(); });
+      box.append(b);
+    });
+  }
+  // One real wish on the home tile, when this phone already has tonight's list. Never a made-up name.
+  function paintWishTile() {
+    const el = $('#wishTileSky');
+    if (!el || !window.LUTSWishes) return;
+    const w = LUTSWishes.list()[0];
+    if (!w || !w.f || !w.t) { el.hidden = true; el.textContent = ''; return; }
+    el.hidden = false;
+    el.textContent = w.p ? `${w.f} → ${w.t}, ${inLang(`from ${w.p}`)}` : `${w.f} → ${w.t}`;
+  }
+  function markWishOcc(scroll) {
+    const box = $('#wOcc'); if (!box) return;
+    box.querySelectorAll('.chip').forEach((x) => {
+      const on = x.dataset.occ === wishOcc;
+      x.classList.toggle('on', on); x.setAttribute('aria-checked', String(on));
+      if (on && scroll) {
+        // Keep the selected chip in view without scrolling the entire wish sheet
+        // past its preview and names on short landscape screens.
+        const chip = x.getBoundingClientRect(), track = box.getBoundingClientRect();
+        box.scrollLeft += chip.left - track.left - (track.width - chip.width) / 2;
+      }
+    });
+  }
+  // Today's wishes, so one can be opened and changed. A tap fills the form; New wish leaves that edit.
+  function paintWishMine() {
+    const box = $('#wOwn'), list = $('#wOwnList');
+    if (!box || !list || !window.LUTSWishes) return;
+    const mine = LUTSWishes.todays().slice().sort((a, b) => (a.n || 1) - (b.n || 1));
+    if (wishEdit && !mine.some((w) => (w.n || 1) === wishEdit.n)) wishEdit = null;
+    box.hidden = !mine.length;
+    list.replaceChildren();
+    for (const w of mine) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      const on = !!(wishEdit && wishEdit.n === (w.n || 1));
+      b.className = 'wish-own-item' + (on ? ' on' : '');
+      b.setAttribute('aria-pressed', String(on));
+      const name = document.createElement('b'), sub = document.createElement('small'), occ = OCC_BY_ID[w.o];
+      name.textContent = `${w.f} → ${w.t}`;
+      sub.textContent = [w.p ? inLang(`from ${w.p}`) : '', occ ? inLang(occ.label) : ''].filter(Boolean).join(' · ');
+      b.append(name, sub);
+      b.addEventListener('click', () => selectWish(w));
+      list.append(b);
+    }
+  }
+  function selectWish(w) {
+    wishEdit = w ? { n: w.n || 1 } : null;
+    if (w) {
+      $('#wFrom').value = w.f || ''; $('#wTo').value = w.t || ''; $('#wPlace').value = w.p || '';
+      wishOcc = WISH_OCCS.includes(w.o) ? w.o : 'diwali';
+      wishLineI = Number.isInteger(w.s) ? w.s : 0;
+      wishSpark = !!w.k;
+    } else {
+      $('#wTo').value = ''; wishLineI = 0;
+      try { wishSpark = localStorage.getItem(WISH_SPARK_KEY) === '1'; } catch (e) { wishSpark = false; }
+    }
+    markWishOcc(true); syncWishSpark(); showWishSign(w && w.g); paintWishLines(); paintWishSky(); paintWishMine(); syncWishSheet();
+  }
+  function syncWishSheet(say, ok) {
+    if (!window.LUTSWishes) return;
+    const editing = !!wishEdit, done = !editing && LUTSWishes.publishedToday(premium.active), some = LUTSWishes.todays().length > 0, b = $('#btnWPublish');
+    b.classList.toggle('done', done); b.disabled = done;
+    b.innerHTML = editing
+      ? `<span aria-hidden="true">✓</span> ${inLang('Save changes')}`
+      : `<span aria-hidden="true">${done ? '✓' : '🎆'}</span> ${inLang(done ? 'Published today' : some ? 'Publish another wish' : 'Publish wish')}`;
+    $('#btnWTakeBack').hidden = !some;
+    $('#btnWPremium').hidden = !(done && !premium.active);
+    const st = $('#wStatus'); st.textContent = say ? inLang(say) : ''; st.classList.toggle('ok', ok === true); st.classList.toggle('bad', ok === false);
+  }
+  function openWishes() {
+    if (window.LUTSWishes) LUTSWishes.load();
+    const box = $('#wOcc');
+    if (!box.children.length) for (const id of WISH_OCCS) {
+      const o = OCC_BY_ID[id]; if (!o) continue;
+      const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.dataset.occ = id; c.textContent = inLang(o.label); c.setAttribute('role', 'radio');
+      c.addEventListener('click', () => { wishOcc = id; wishLineI = 0; markWishOcc(true); paintWishLines(); paintWishSky(); });
+      box.append(c);
+    }
+    markWishOcc(false);
+    try {
+      if (!$('#wFrom').value) $('#wFrom').value = localStorage.getItem(WISH_FROM_KEY) || card.f || '';
+      if (!$('#wPlace').value) $('#wPlace').value = localStorage.getItem(WISH_PLACE_KEY) || '';
+    } catch (e) { /* storage unavailable */ }
+    paintWishMine();
+    syncWishSheet();
+    syncWishSpark();
+    paintWishLines();
+    paintWishSky();
+    openSheet($('#wishModal'));
+    markWishOcc(true);
+    requestAnimationFrame(fitWishSign);
+  }
+  async function watchWishes() {
+    const sh = LIVE_SHOWS.find((s) => s.id === 'wishes');
+    if (!sh) return;
+    closeSheet($('#wishModal'));
+    if (window.LUTSWishes) await Promise.race([LUTSWishes.load(), new Promise((r) => setTimeout(r, 2500))]); // (offline: the show starts anyway)
+    startLive(sh);
+  }
+  $('#btnWishes').addEventListener('click', openWishes);
+  $('#btnWishNew').addEventListener('click', () => selectWish(null));
+  $('#wFrom').addEventListener('input', paintWishSky);
+  $('#wTo').addEventListener('input', paintWishSky);
+  $('#wPlace').addEventListener('input', paintWishSky);
+  $('#btnWishSpark').addEventListener('click', () => {
+    wishSpark = !wishSpark;
+    try { localStorage.setItem(WISH_SPARK_KEY, wishSpark ? '1' : '0'); } catch (e) { /* not kept */ }
+    syncWishSpark();
+    if (wishSpark) requestAnimationFrame(fitWishSign);
+  });
+  { // one stroke on the pad: a new touch replaces the previous line
+    const c = $('#wishSign');
+    let drawing = false;
+    if (c) {
+      c.addEventListener('pointerdown', (e) => {
+        if (e.button) return;
+        e.preventDefault();
+        fitWishSign();
+        try { c.setPointerCapture(e.pointerId); } catch (err) { /* the pointer is already held */ }
+        drawing = true;
+        wishSignPts = [signFromEvent(e)];
+        if (!wishSpark) { wishSpark = true; try { localStorage.setItem(WISH_SPARK_KEY, '1'); } catch (err) { /* not kept */ } syncWishSpark(); }
+        paintWishSign();
+      }, { passive: false });
+      c.addEventListener('pointermove', (e) => {
+        if (!drawing) return;
+        const p = signFromEvent(e), last = wishSignPts[wishSignPts.length - 1];
+        if (last && Math.hypot(p.x - last.x, p.y - last.y) < 2.5) return;
+        wishSignPts.push(p);
+        paintWishSign();
+      });
+      const endStroke = () => { drawing = false; if (wishSignPts.length && wishSignPts.length < 8) { wishSignPts = []; paintWishSign(); } };
+      c.addEventListener('pointerup', endStroke);
+      c.addEventListener('pointercancel', endStroke);
+    }
+    const clear = $('#btnWishSignClear');
+    if (clear) clear.addEventListener('click', () => { wishSignPts = []; paintWishSign(); });
+  }
+  $('#btnWishShare').addEventListener('click', () => {
+    const f = ($('#wFrom').value || '').trim(), t = ($('#wTo').value || '').trim(), p = wishPlace();
+    const line = inLang(wishLines()[wishLineI] || '');
+    const who = `${f || inLang('Your name')} → ${t || inLang('Their name')}`;
+    const where = p ? `, ${inLang(`from ${p}`)}` : '';
+    shareThing({ title: 'Wishes of India', text: `🎆 ${who}${where}: ${line}`, url: '', src: 'wish' });
+  });
+  if (window.LUTSWishes) LUTSWishes.load().then(paintWishTile).catch(() => {});
+  $('#btnWishWatch').addEventListener('click', watchWishes);
+  $('#btnWPublish').addEventListener('click', async () => {
+    const b = $('#btnWPublish'); if (b.disabled || !window.LUTSWishes) return;
+    b.disabled = true; $('#wStatus').textContent = inLang('Publishing…'); $('#wStatus').classList.remove('ok', 'bad');
+    const f = $('#wFrom').value, t = $('#wTo').value;
+    const p = wishPlace();
+    const g = wishSignPacked();
+    const body = { f, t, o: wishOcc, p, s: wishLineI, k: (wishSpark || g) ? 1 : 0, g };
+    try { localStorage.setItem(WISH_FROM_KEY, f.trim()); localStorage.setItem(WISH_PLACE_KEY, p); } catch (e) { /* not kept */ }
+    if (wishEdit) {
+      const r = await LUTSWishes.update({ ...body, n: wishEdit.n });
+      b.disabled = false;
+      track('wish_edit', { result: r, occasion: wishOcc });
+      paintWishMine();
+      syncWishSheet(r === 'ok' ? 'Your wish is updated.' : (PUB_SAY[r] || PUB_SAY.offline), r === 'ok');
+      if (r === 'ok') paintWishTile();
+      return;
+    }
+    const r = await LUTSWishes.publish({ ...body, premium: premium.active });
+    b.disabled = false;
+    track('wish_publish', { result: r, occasion: wishOcc, from: 'sheet' });
+    syncWishSheet(r === 'today' && !premium.active ? PUB_SAY.todayFree : PUB_SAY[r] || PUB_SAY.offline, r === 'ok' || r === 'today');
+    if (r === 'ok') { paintWishTile(); paintWishMine(); $('#wTo').value = ''; wishSignPts = []; paintWishSign(); paintWishSky(); if (!premium.active && LUTSWishes.publishedToday(false)) $('#wStatus').textContent += ' ' + inLang(PUB_SAY.todayFree); else wishOffer($('#btnWPremium')); }
+  });
+  $('#btnWTakeBack').addEventListener('click', async () => {
+    const b = $('#btnWTakeBack'); if (b.disabled) return;
+    const editingN = wishEdit ? wishEdit.n : undefined;
+    b.disabled = true; const ok = await LUTSWishes.takeBack(editingN); b.disabled = false;
+    if (ok) paintWishTile();
+    if (ok && editingN != null) selectWish(null);
+    else paintWishMine();
+    syncWishSheet(ok ? 'Your wish is taken back.' : PUB_SAY.offline, ok);
+  });
+  $('#btnWPremium').addEventListener('click', () => openPremium({ wishes: true }));
+  window.addEventListener('luts:premium-changed', () => { syncPubWish(); syncWishSheet(); }); // (bought: no more offer, and 10 wishes a day at once)
+
+  // ---------- Live Wallpapers ----------
+  // The Android app's four fireworks wallpapers (FireworksWallpaper): a choice opens the phone's own preview, where Set
+  // wallpaper applies it. Phones only: the website has no wallpapers and a TV no home-screen wallpaper.
+  const canWallpaper = () => ANDROID_WEBVIEW && !!window.LUTSAndroid && typeof window.LUTSAndroid.wallpaper === 'function' && !document.documentElement.classList.contains('tv');
+  const syncWallTile = () => { $('#btnWallpapers').hidden = !canWallpaper(); };
+  syncWallTile();
+  window.addEventListener('load', syncWallTile); // the app shell marks a TV (html.tv) as the page loads
+  // The wallpapers carry the app's mark for free players, as photos and videos do; Premium removes it. The wallpaper
+  // runs apart from the game, so the app keeps the answer (LUTSAndroid.wallpaperMark).
+  function syncWallMark() {
+    try { if (window.LUTSAndroid && typeof window.LUTSAndroid.wallpaperMark === 'function') window.LUTSAndroid.wallpaperMark(!premium.active); } catch (e) { /* an older app */ }
+  }
+  syncWallMark();
+  $('#btnWallpapers').addEventListener('click', () => openSheet($('#wallModal')));
+  $('#wallBack').addEventListener('click', () => closeSheet($('#wallModal')));
+  document.querySelectorAll('#wallModal [data-wall]').forEach((b) => b.addEventListener('click', () => {
+    try { window.LUTSAndroid.wallpaper(b.dataset.wall); } catch (e) { /* an older app */ }
+  }));
+  $('#btnLiveExit').addEventListener('click', () => { stopLive(); $('#btnHome').click(); });
+  document.addEventListener('keydown', (e) => { if (live.on && (e.key === 'Escape' || e.key === 'Backspace')) { e.preventDefault(); $('#btnLiveExit').click(); } });
 
   // ---------- Street floor ----------
   // The street ends just above the dock so crackers are never hidden under the controls.
+  // Called a few times a frame: the controls bar is one fixed element, looked up once.
+  const bottomUi = $('.bottom-ui');
   function groundBottom() {
-    const controls = $('.bottom-ui');
-    const bounds = controls.getBoundingClientRect();
+    let bounds = bottomUi.getBoundingClientRect();
     if (document.body.classList.contains('ui-hidden') || !bounds.height) return H - 12;
-    return Math.min(H - 12, bounds.top - 12);
+    // The optional hint/status row floats above the wide console. Its invisible
+    // space must not make a cracker hover above the paved foreground.
+    if (W > H) {
+      const dock = $('#dock').getBoundingClientRect(), tabs = $('#modeTabs').getBoundingClientRect();
+      if (dock.height) bounds = { top: Math.min(dock.top, tabs.height ? tabs.top : dock.top) };
+    }
+    return Math.min(H - 12, bounds.top - (W > H ? 2 : 12));
   }
-  const floorH = () => clamp(H * 0.13, 70, 130); // deep enough for crackers to sit near and far, shallow enough to leave the landmark room
+  const floorH = () => W > H && world.img?.sceneKind === 'wide' && !w3dShown() && !arOn ? clamp(H * .035, 12, 50) : clamp(H * 0.13, 70, 130); // deep enough for crackers to sit near and far, shallow enough to leave the landmark room
   const floorTop = () => (arOn ? H * 0.55 : groundBottom() - floorH());
   function drawFloor() {
     const g = fctx;
     g.clearRect(0, 0, W, H);
-    if (playMode !== 'ground' || arOn) return;
+    if (playMode !== 'ground' || arOn || world.img?.fullScene) return;
     const top = floorTop(), fh = H - top;
     if (world.img) {
       // Blend the street into the landmark scene instead of cutting across it with a hard edge.
@@ -8974,6 +11682,76 @@
       },
       run() {},
     },
+    luckystar: {
+      // The Lucky Star (a spade fountain): the spade itself turns on its base. A colour-changing
+      // tower, then two fire wings from the shoulders, a carpet of sparks, and white, blue and red flashes.
+      label: 'Lucky Star', fuse: 0.7, dur: 14, keep: 1.2, full: true,
+      tip: [0, -33],
+      ignite(it) { Sound.hiss(it.dur, 3800, 0.16, pan(it.x)); it.burst = 0; it.rot = 0; },
+      run(it, a, dt) {
+        const u = a / it.dur, fade = Math.min(1, a / 0.35) * Math.min(1, (it.dur - a) / 0.8);
+        const [tx, ty] = tipPos(it), sc = U * it.s, q = Math.max(0.35, Q().count);
+        const cols = ['#ff3355', '#fff6e8', '#3dce7a', '#ffcf6b', '#ff4fd8', '#7fd6ff'];
+        const col = cols[Math.floor(a / 0.65) % cols.length];
+        it.rot += 6.5 * dt;
+        // Short streaks, no glitter: the wings stay on the screen and the street carpet can keep its share of the budget.
+        const jet = (x, y, ang, spread, speed, c, life, n, grav) => {
+          for (let i = 0; i < n; i++) {
+            const d = ang + rand(-spread, spread), v = speed * rand(0.88, 1);
+            star(x, y, Math.cos(d) * v, Math.sin(d) * v, Math.random() < 0.85 ? c : '#fffaf0', life,
+              { drag: 1.05, grav, size: 1.5 });
+          }
+        };
+        // A low pool on the street. Spawned before the wings so the ending still has it when the sky is busy.
+        const carpet = (thick) => {
+          const n = thick * dt * q;
+          for (let i = 0; i < n; i++) {
+            const ang = rand(0, TAU), rv = rand(140, 380) * U;
+            star(it.x, it.y - 2, Math.cos(ang) * rv, Math.sin(ang) * rv * 0.18, Math.random() < 0.8 ? '#ffcf6b' : '#fff6e8', rand(1, 1.5),
+              { drag: 1.45, grav: 1.1, size: 1.8 });
+          }
+        };
+        const ground = Math.min(1, a / 0.3) * Math.min(1, (it.dur - a) / 0.35);
+        if (u > 0.08) carpet((u < 0.7 ? 90 : 210) * ground);
+        if (u < 0.22) {
+          jet(tx, ty, -Math.PI / 2, 0.1, rand(220, 380) * sc, col, rand(0.38, 0.55), fade * 140 * dt * q, 2.4);
+          if (a - it.burst > 0.45) {
+            it.burst = a;
+            const hy = ty - rand(28, 80) * sc;
+            curLayer = 1;
+            sphere(Math.round(8 * q), (dx, dy) => star(tx, hy, dx * 70 * sc, dy * 70 * sc, col, rand(0.28, 0.45), { drag: 1.6, size: 1.5 }));
+            flash(tx, hy, col, 0.35, gctx);
+            curLayer = 0;
+            Sound.crackle(pan(tx));
+          }
+        } else {
+          // The spade yaws. Face-on, the two shoulders throw a wide V. Edge-on, both jets stand up together.
+          const S = it.s * U * IS, reach = 12 * S, yaw = it.rot, v = rand(240, 400) * sc, nWing = fade * 90 * dt * q;
+          for (const side of [-1, 1]) {
+            const across = Math.cos(yaw) * side, depth = Math.sin(yaw) * side;
+            const px = tx + across * reach, py = it.y - 22 * S - depth * reach * 0.1;
+            const ang = Math.atan2(-0.9 - depth * 0.05, across * 0.95 || side * 0.04);
+            const c = side < 0 ? '#fff6e8' : col;
+            jet(px, py, ang, 0.08, v, c, rand(0.32, 0.48), nWing, 1.15);
+          }
+          const marks = [0.84, 0.9, 0.96], flashes = ['#ffffff', '#7fd6ff', '#ff3355'];
+          while (it.shots < marks.length && u >= marks[it.shots]) {
+            const c = flashes[it.shots++];
+            curLayer = 1;
+            flash(it.x, it.y - 6 * sc, c, 0.8, gctx);
+            for (let i = 0; i < Math.round(18 * q); i++) {
+              const ang = rand(0, TAU), rv = rand(80, 260) * U;
+              star(it.x, it.y - 2, Math.cos(ang) * rv, Math.sin(ang) * rv * 0.2, c, rand(0.55, 0.95), { drag: 1.5, grav: 0.9, size: 1.5 });
+            }
+            curLayer = 0;
+            Sound.pop(pan(tx));
+          }
+        }
+        if (Math.random() < dt * 2.2 * fade) smoke(tx, ty, rand(-12, 12) * U, -rand(24, 70) * U, '#b7b3c0', 8 * U, 40 * U * it.s, 2.2, 0.08);
+        glowAt(tx, ty, col, 56 * sc, 0.34 * fade, 1.6);
+        addLight(col, dt * fade);
+      },
+    },
   });
   // ---------- Show director ----------
   // A whole show from one Fire, built the way the six reference shows are (research/fireworks-videos): colour acts, a
@@ -9015,6 +11793,757 @@
     t += 1.2;
     X.forEach((x, i) => fire(t + i * 0.06, 'salute', x, band(0.35, 0.45), 0.6, null, null, { fast: 1.6 }));
     t += 0.9;
+    fire(t, 'kingwillow', 0.5, band(0, 0.08), 1.3);
+    directorUntil = gameTime + t + 2;
+    return t + 6;
+  }
+  // ---------- Live Sky's director ----------
+  // Live Sky's never-ending show is built like a Japanese music star mine, studied second by second from the Koga
+  // Fireworks Festival 2026 (Nomura Fireworks' "Galaxy Formation"; notes in the session folder):
+  // - rhythm: pieces land on a half-second beat in four-second phrases (two bars of the music), and each act runs a
+  //   quiet build (hanging lights, rising comets, sparse small pieces), two set pieces, a three-tier hit and a dark
+  //   breath, one colour an act;
+  // - timing: a sphere is full at once, dims within a second and twinkles out by two and a half; a set of spheres often
+  //   echoes, bursting again in the same places two seconds later;
+  // - set pieces: identical spheres side by side, tilted rings, blue strobes, comets crossing in a V, falling glitter,
+  //   a low row over the horizon, palm forests with a green palm in the middle, crowns, kamuro, crossettes, half-dome
+  //   fans and fans from the ground, and the "Galaxy Formation" itself: a rainbow comb of small ground fans across the
+  //   whole width with spheres firing over it again and again;
+  // - finale: a violet pair over a row of spheres and a curtain of fans, one beat of dark, then huge overlapping gold
+  //   chrysanthemums with blue centres over white fans, and out.
+  // The story every Live Sky show tells: delivering happiness. A true line about the place opens it; once in the middle a
+  // stick figure acts one moment of love, thanks or friendship (and lets go a love cracker); at the end the sky writes the
+  // names of the people the player lit up (Light someone up, love cards), newest first, or Thank you.
+  const PLACE_FACTS = {
+    'taj-mahal': 'Taj Mahal, Agra: built by Shah Jahan in memory of Mumtaz. Love, in marble.',
+    'golden-temple': 'Golden Temple, Amritsar: its kitchen feeds everyone who comes, free, every day.',
+    'india-gate': 'India Gate, Delhi: it carries the names of soldiers. Tonight, say thank you.',
+    'red-fort': 'Red Fort, Delhi: where India’s flag rises every Independence Day.',
+    'hawa-mahal': 'Hawa Mahal, Jaipur: 953 little windows, so the royal women could watch the festivals below.',
+    'mysore-palace': 'Mysore Palace: nearly 100,000 bulbs light it up for Dasara.',
+    'meenakshi-amman-temple': 'Meenakshi Amman Temple, Madurai: 14 towering gateways covered in painted figures.',
+    'vivekananda-rock-memorial': 'Vivekananda Rock, Kanyakumari: where Swami Vivekananda meditated in 1892.',
+    'konark-sun-temple': 'Konark Sun Temple: a stone chariot for the sun god, on 24 carved wheels.',
+    'victoria-memorial': 'Victoria Memorial, Kolkata: built with gifts from people across India.',
+    'brihadeeswarar-temple': 'Brihadeeswarar Temple, Thanjavur: over 1,000 years old and still standing tall.',
+    'charminar': 'Charminar, Hyderabad: four minarets, standing since 1591.',
+    'gateway-of-india': 'Gateway of India, Mumbai: the city’s arch on the sea, where families meet at dusk.',
+    'velankanni-basilica': 'Velankanni Basilica: pilgrims of every faith come here with their prayers.',
+    // (two places without a famous fact: a feeling instead)
+    'cross-by-the-sea': 'Tamil Nadu coast: every light on the shore says come home safe.',
+    'golden-manor': 'Garden estate: the best seat for fireworks is next to someone you love.',
+  };
+  // Safe Diwali's lines, a random handful each show: the hook is a question, the answer the precaution.
+  const SAFETY_LINES = [
+    'Know where your sky lantern lands? On a roof, a dry field or a sleeping cow, and it never says sorry. Light a diya instead.',
+    'No bucket of water nearby? Fire adores confident people. Keep one close before the first cracker.',
+    'Kids standing right beside you? A cracker can’t tell who’s cute. Keep everyone at least 5 metres back.',
+    'Cracker didn’t go off? It isn’t shy, it’s waiting for you. Never go back. Wait, then soak it in water.',
+    'Wearing synthetic tonight? Looks great, burns faster. Cotton is safer.',
+    'Want ten fingers tomorrow too? Never light it in your hand. Use a long agarbatti, at arm’s length.',
+    'Think your dog is being dramatic? To them, it’s the end of the world. Keep pets indoors, with the windows shut.',
+    'Toothpaste on a burn? Your skin is not a tooth. Cool it under running water for 20 minutes. No ice.',
+    'Someone near you has asthma? They breathe your celebration too. Choose green crackers, and fewer of them.',
+    'Crackers at 2 am? Nobody ever woke up and said thank you. Babies and elders need sleep. Follow your city’s cracker hours.',
+    'Crackers in your pocket? Your trousers did not sign up for this. Never carry them on you.',
+    'Leaning over a flower pot to check it? It will check you back. Never bend over a cracker.',
+    'Lighting crackers indoors? Your ceiling has never met a rocket. Keep it that way. Open spaces only.',
+    'Glass bottle as a rocket launcher? Glass makes a terrible sequel. Use a sturdy stand set in sand.',
+    'Cracker under a tin can? Congratulations, you invented shrapnel. Never cover a cracker with anything.',
+    'Dupatta floating near the flame? It will join the party first. Tie back anything loose.',
+    'Hair loose near the fuse? That’s the fastest haircut in India. Tie it back.',
+    'Bare feet or slippers? Sparks adore toes. Wear closed shoes tonight.',
+    'Sparkler finished? It looks dead, but it isn’t. Drop the hot wire in a bucket of water.',
+    'Think a sparkler is a toy? Toys don’t burn at over 1000°C. An adult watches every child.',
+    'Had a few drinks? Alcohol improves courage, not aim. Leave the crackers to someone sober.',
+    'Filming from too close? Don’t let this be your last reel. Step back and zoom in.',
+    'Lighting a whole bunch at once? Your hand is not the finale. Light one cracker at a time.',
+    'Open box of crackers beside you? One spark and that’s your finale. Keep it closed and far away.',
+    'Crackers stored by the stove? That’s a very short recipe. Keep them cool, dry and away from flame.',
+    'Drying damp crackers on a tawa? It is not a roti. Never heat crackers. Soak them and throw them away.',
+    'Cheap crackers from an unknown stall? The savings end at the hospital. Buy only from licensed sellers.',
+    'Bursting crackers beside parked cars? Your neighbour’s EMI has feelings. Keep well away from vehicles.',
+    'Gas cylinder nearby? You don’t need that kind of liftoff. Keep crackers far from fuel and gas.',
+    'Rocket aimed near power lines? The whole street gets a blackout finale. Fire away from wires.',
+    'Washing still on the terrace? Rockets love a soft landing. Bring clothes in before the show.',
+    'Lighting from the balcony? The neighbour’s curtains never voted for this. Use open ground and shut your windows.',
+    'Dry leaves or hay around you? That’s a bonfire waiting for a volunteer. Clear the ground first.',
+    'Bursting beside a hospital? Patients didn’t order a finale. Keep crackers far from hospitals.',
+    'Ears still ringing? That isn’t festive, that’s damage. Stand back and skip the loudest crackers.',
+    'Spark in your eye? Don’t rub. Rinse gently with clean water and see a doctor at once.',
+    'Clothes on fire? Running only feeds the flames. Stop, drop and roll.',
+    'Blister from a burn? It isn’t bubble wrap. Don’t pop it. See a doctor.',
+    'Butter on a burn? You aren’t cooking dinner. Use cool running water only.',
+    'Know the fire number? A bad night to start googling. In India: 101 for fire, 112 for emergencies.',
+    'Only water nearby? Oil and electrical fires disagree. Keep a bucket of sand too.',
+    'Cracker near a stray dog? Funny only to you. Hurting animals is cruel, and a crime.',
+    'Tree full of nesting birds? They have no insurance. Fire away from trees.',
+    'Grandpa dozing on the porch? Surprise blasts aren’t what the cardiologist ordered. Warn elders first.',
+    'Throwing crackers at friends? Friendships shouldn’t need a plastic surgeon. Never throw one at anybody.',
+    'Holding a lit cracker to throw? The fuse never read your plan. Never hold a lit cracker.',
+    'Running after you light it? The ground is waiting too. Clear your path, then walk back.',
+    'Trimming the fuse to look brave? Bravery has a very short fuse. Never tamper with a cracker.',
+    'Mixing your own cracker powder? Chemistry grades hard. Never open, mix or make crackers.',
+    'Picking dud crackers off the road? Those are duds with a grudge. Leave them. Soak them from a distance.',
+    'Inhaler within reach? Smoke never waits politely. Keep it close and stay indoors in heavy smoke.',
+    'Diya beside the curtains? Curtains are always ready to go up. Keep diyas away from fabric.',
+    'Long lehenga past a row of diyas? Flames love a grand entrance. Keep hems well clear.',
+    'Diyas still lit at bedtime? Fire doesn’t sleep. Put out every flame before you do.',
+    'Old fairy lights with taped wires? That’s a slow firework. Replace damaged lights.',
+    'Six plugs in one socket? It’s not a festival for sockets. Don’t overload extension boards.',
+    'Cracker waste in the dustbin? It may still be smouldering. Soak it in water first.',
+    'Taking crackers on a train? The whole coach becomes your accomplice, and it’s illegal. Leave them at home.',
+    'Who is in charge tonight? “Everyone” means no one. Pick one sober adult.',
+    'Lighter in a child’s hand? Small hands, big consequences. Grown-ups do the lighting.',
+  ];
+  // Each show's moment, by its feeling (a show not listed: a hug).
+  const SHOW_MOMENT = { rose: 'lovebig', lotus: 'kiss', galaxy: 'lovebig', cloud: 'kiss', sakura: 'shy', wisteria: 'lovebig', golden: 'hug', temple: 'hug',
+    tricolour: 'namaste', royal: 'namaste', fence: 'namaste', ocean: 'highfive', bridge: 'highfive', silk: 'happy', river: 'hello', stars: 'meditate',
+    pearl: 'meditate', matcha: 'meditate', safety: 'idea', niagara: 'laugh', mountain: 'bhangra', maple: 'dancer', indigo: 'hug', peacock: 'cute', sunset: 'hug' };
+  // The caption card (index.html #liveCaption): "Place: line" shows the place as its heading; a Safe Diwali line its
+  // question (up to the first ?) as the heading and the tip under it; a short line alone, large. Translations keep the
+  // colon and the question mark, so the same split works in every language.
+  let capTimer = 0;
+  function liveCaption(text, ms, kind, act) {
+    const c = $('#liveCaption'); if (!c) return;
+    let head = '', body = String(text);
+    const q = kind === 'safety' ? body.search(/[?？]\s/) : -1, colon = kind === 'place' || kind === 'wish' ? body.indexOf(': ') : -1;
+    if (q > 0) { head = body.slice(0, q + 1); body = body.slice(q + 2); }
+    else if (colon > 0) { head = body.slice(0, colon); body = body.slice(colon + 2); }
+    if (head) body = body.charAt(0).toLocaleUpperCase() + body.slice(1); // (after the heading, a sentence of its own)
+    $('#liveCapHead').textContent = head; $('#liveCapBody').textContent = body;
+    c.classList.toggle('safety', kind === 'safety'); c.classList.toggle('big', kind === 'big'); c.classList.toggle('wish', kind === 'wish');
+    // One action on the card (act: { label, cls, fn }): a wish's Report, your own wish's Share.
+    const b = $('#liveCapAct');
+    b.hidden = !act; b.className = 'live-cap-act' + (act && act.cls ? ` ${act.cls}` : ''); b.onclick = null;
+    if (act) { b.textContent = inLang(act.label); b.onclick = (e) => { e.stopPropagation(); act.fn(b); }; }
+    clearTimeout(capTimer);
+    c.hidden = false; requestAnimationFrame(() => c.classList.add('on'));
+    capTimer = setTimeout(hideCaption, ms || 6000);
+  }
+  function hideCaption() {
+    const c = $('#liveCaption'); if (!c || c.hidden) return;
+    clearTimeout(capTimer); c.classList.remove('on');
+    capTimer = setTimeout(() => { c.hidden = true; }, 450);
+  }
+  const SKY_FOR_KEY = 'luts:skyfor';
+  const skyFor = () => { try { return (localStorage.getItem(SKY_FOR_KEY) || '').trim() || 'Amma'; } catch (e) { return 'Amma'; } };
+  { // the Live Sky list's "Tonight's sky is for…": Amma until changed, kept on this phone
+    const f = $('#liveFor');
+    if (f) {
+      f.value = skyFor();
+      f.addEventListener('change', () => { try { localStorage.setItem(SKY_FOR_KEY, f.value.trim().slice(0, 18)); } catch (e) { /* not kept */ } f.value = skyFor(); });
+      f.addEventListener('keydown', (e) => { if (e.key === 'Enter') f.blur(); });
+    }
+  }
+  // The finale's names: the one chosen in the Live Sky list first, then the people lit up (newest first), three at most.
+  // Where a name in light goes while a caption card is up: just under the card (its top is 64 px under the status bar,
+  // about 120 px tall), never higher than the sky allows.
+  const belowCaption = () => Math.min(H * 0.5, safeTop() + 64 + 130 + Math.min(H * 0.13, W * 0.26) / 2);
+  // A wish's message: one of its occasion's own (the card ideas any relationship can use, in English so every language
+  // has it translated), picked by the wish and the day, so everyone watching sees the same one.
+  function wishLine(w, occ) {
+    const chosen = (WISH_LINES[w.o] || [])[w.s];
+    if (chosen) return chosen;
+    const pool = [occ.msg, ...(((IDEAS[w.o] || IDEAS.custom) || {}).any || []).filter((m) => /^[\x20-\x7e‘’“”…–—]+$/.test(m))];
+    let h = window.LUTSWishes ? LUTSWishes.day() : 0;
+    for (const ch of `${w.id || ''}${w.f}${w.t}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    return pool[h % pool.length];
+  }
+  // What performs the wishes, in turn: a love story for two (character-art.js), then a dance, and so on.
+  const WISH_DANCES = ['lovegift', 'her_inlove', 'twirl', 'lovekiss', 'her_starstruck', 'heartdance', 'lovereunion', 'her_party', 'clapdance', 'lovepropose', 'her_kiss', 'cutewave',
+    'lovewaltz', 'her_blush', 'shimmy', 'lovehome', 'her_cool', 'groove', 'her_lol']; // (only the happy emojis perform a wish)
+  function shareWish(w, occ) {
+    track('wish_share', { occasion: w.o });
+    const where = w.p ? inLang(`from ${w.p}`) : inLang(`from ${w.f}`);
+    const blob = shareCard({ art: 'assets/menu/welcome.webp', kicker: 'Wishes of India', title: `For ${w.t}`, line: `${where} · ${inLang(wishLine(w, occ))}` });
+    return shareThing({ title: 'Wishes of India', text: `🎆 ${w.f} → ${w.t}, ${where}: ${inLang(occ.head)}! ${inLang(wishLine(w, occ))}`, url: '', blob, name: 'wishes-of-india.png', src: 'wish' });
+  }
+  function gratefulNames() {
+    const first = skyFor(), seen = new Set([first.toLowerCase()]), out = [first.slice(0, 18)];
+    for (const m of window.LUTSTimeline ? LUTSTimeline.list() : []) {
+      if (m.k !== 'card' && m.k !== 'joy') continue;
+      const n = String((m.a && m.a[0]) || '').trim(), k = n.toLowerCase();
+      if (!n || seen.has(k)) continue;
+      seen.add(k); out.push(n.slice(0, 18));
+      if (out.length === 3) break;
+    }
+    return out;
+  }
+  const LIVE_ACTS = [['#4a7dff', '#9fc0ff'], ['#ff3355', '#ff8a8a'], ['#ffcf6b', '#fff1c9'], ['#b56bff', '#ff4fd8'], ['#33ff88', '#b6ff5f'], ['#5ff0ff', '#ffffff']];
+  // The colour at f (0..1) along a list of hex colours, blended between neighbours.
+  function mixHex(list, f) {
+    const n = list.length - 1, i = Math.min(n - 1, Math.floor(f * n)), k = f * n - i;
+    if (n < 1) return list[0];
+    const a = parseInt(list[i].slice(1), 16), b = parseInt(list[i + 1].slice(1), 16);
+    const ch = (sh) => Math.round(((a >> sh) & 255) * (1 - k) + ((b >> sh) & 255) * k);
+    return '#' + ((1 << 24) | (ch(16) << 16) | (ch(8) << 8) | ch(0)).toString(16).slice(1);
+  }
+  // Every sky cracker in the dock has its place in Live Sky: the shaped ones star alone in the middle of the sky (solo),
+  // the other shells join the sphere pieces. (The Grand show is left out: it is a whole show of its own.)
+  const LIVE_SOLO = ['peacock', 'butterfly', 'heart', 'star', 'smile', 'fish', 'tiger', 'wand', 'ghost', 'kaleido', 'flagindia', 'india'];
+  const LIVE_FLAGS = ['flagindia', 'india', 'bangladesh', 'usa', 'uk', 'china', 'brazil', 'japan'];
+  const LIVE_EXTRA = ['rondelle', 'twotone', 'barrel', 'bouquet', 'multibreak', 'shellofshells', 'senrin', 'spider', 'horsetail', 'whistle'];
+  const RAINBOW = ['#33ff88', '#5ff0ff', '#4a7dff', '#b56bff', '#ff4fd8', '#ff8a8a', '#ffffff'];
+  // o.acts: the show's colours, act by act; o.only: the set pieces it draws from (all of them when left out).
+  // A saved Sky Gears signature's points (sky-gears.js), or null: none saved, or the player turned them off for Live Sky.
+  const liveSignature = () => { try { return (window.SkyGears && window.SkyGears.liveSignature && window.SkyGears.liveSignature()) || null; } catch (e) { return null; } };
+  let liveNames = []; // (for the tests: the set pieces the last show could pick from)
+  function liveDirector(len, o = {}) {
+    const top = world.img && world.rect ? clamp(world.rect.roof - H * 0.08, H * 0.16, H * 0.42) : H * 0.42;
+    const band = (lo, hi) => H * 0.08 + rand(lo, hi) * (top - H * 0.08); // 0 = the top of the sky, 1 = just above the roofline
+    const groundY = world.img && world.rect ? Math.min(H - 6, world.rect.roof + (H - world.rect.roof) * 0.75) : H - 6;
+    // A full sky skips the smallest extra shells (streaks, sparkles): fewer on a slow phone (measured on an Oppo CPH2725,
+    // where the ground fans and the rainbow comb dropped frames), never the set pieces' main bursts.
+    const shellCap = () => [28, 48, 80][measuredTier] || 48;
+    const fire = (t, type, x, y, size, c1, c2, extra) => after(t, () => { if (size < 0.4 && shells.length > shellCap()) return; launchShell({ tap: true, type, x: W * x, y, size, c1, c2, exact: true, soft: o.soft, ...extra }); }, 'director');
+    const beat = (t) => Math.ceil(t * 2) / 2; // the half-second grid
+    // A colour wash's gradient: o.wash is a list of colours; f 0..1 picks between them.
+    const grad = o.wash || ['#ff5fa2', '#ffd1e1', '#fff1c9'];
+    const tint = (f) => mixHex(grad, clamp(f, 0, 1));
+    const wy = (lo, hi) => H * (0.08 + rand(lo, hi) * 0.58); // a wash's height: the whole sky, down over the landmark
+    const X3 = [0.25, 0.5, 0.75], X5 = [0.12, 0.31, 0.5, 0.69, 0.88];
+    // A fan of streaks from one mouth on the ground: spread 0.9 a fan, 1.35 a half dome; low ones are short.
+    const fanFrom = (t, m, c1, spread, lo, hi, rays = 7) => { for (let i = 0; i < rays; i++) { const a = -spread + (i / (rays - 1)) * spread * 2; fire(t + i * 0.03, 'peony', clamp(m + Math.sin(a) * 0.22, 0.03, 0.97), band(lo, hi), 0.15, c1, '#ffffff', { sx: W * m, sy: groundY, lift: 'comet', fast: 1.6, soft: 0.3 }); } }; // a streak with a tiny quiet puff, not a crackle (a dome is up to 42 of them)
+    const spheresAt = (t, xs, y, type, size, c1, c2) => xs.forEach((x) => fire(t, type, x, y, size, c1, c2));
+    // The Character Festival's pictures: never the same one twice running; a grid as fine as the budget allows (finer on
+    // a TV), less fine for the small ones; a size whose picture keeps within `share` of the width each side.
+    const CH = window.LUTSCharacters;
+    let charLast = '', charLastMove = '', charDeck = [], charAnimals = ['india', 'usa', 'uk', 'china', 'brazil', 'bangladesh', 'japan', 'tiger'].sort(() => Math.random() - 0.5);
+    let charPics = [];
+    const charPick = () => { if (!charPics.length) charPics = CH.ids.filter((i) => i !== charLast).sort(() => Math.random() - 0.5); return (charLast = charPics.shift()); }; // every picture once before any comes again
+    const charGrid = (less) => Math.max(11, (Q().maxStars >= 900 ? 32 : Q().maxStars >= 400 ? 27 : 22) - less);
+    // Every picture fits the clear sky between the status bar and the landmark's roof (a tall landmark leaves less).
+    const skyTop = () => safeTop() + 14, skyH = () => Math.max(H * 0.2, top - skyTop() - 10);
+    const charSize = (share, most) => Math.min(most, (W * share) / (R0() * 1.55), skyH() / 2 / (R0() * 1.55));
+    const fitSize = (size) => Math.min(size, skyH() / 2 / (R0() * 1.55));
+    const charY = (size) => skyTop() + drawingR(size) + rand(0, Math.max(0, skyH() - drawingR(size) * 2)) * 0.5;
+    const charAt = (t, x, size, id, less, share = 1) => {
+      const outline = id === 'trump';
+      size = outline ? Math.min(2, (W * 0.42) / (R0() * 1.55), (H * 0.46) / (R0() * 1.55)) : fitSize(size);
+      const y = charY(size);
+      fire(t, 'drawing', x, y, size, null, null, { char: id, share, grid: charGrid(outline ? 0 : less), fill: true, hold: outline ? 6.2 : 3.6, still: outline, straight: true, fast: 1.25 });
+      // Colour beside a big face, so the sky keeps changing while the picture holds. A parade of small ones stays clear.
+      // The outline portrait keeps a gold field of its own, so the side bursts do not paint over the face.
+      if (share <= 2 && !outline) {
+        const dye = ['#ff4fd8', '#5ff0ff', '#ffd23d', '#33ff88', '#b56bff', '#ff8a2b'];
+        fire(t + 0.4, 'peony', clamp(x - 0.2, 0.08, 0.92), y, 0.36, dye[0], dye[1]);
+        fire(t + 0.65, 'peony', clamp(x + 0.2, 0.08, 0.92), y, 0.36, dye[3], dye[2]);
+        for (let i = 0; i < 3; i++) fire(t + 1.4 + i * 0.7, 'strobe', clamp(x + (i - 1) * 0.15, 0.1, 0.9), y, 0.2, dye[i + 2], '#ffffff');
+      }
+      return y;
+    };
+    const pieces = {
+      // the quiet builds
+      hang(t, c1) { const y = band(0.78, 0.9); X5.forEach((x, i) => fire(t + i * 0.1, 'strobe', x, y, 0.3, c1, '#5ff0ff', { fast: 1.3 })); return 4; },
+      comets(t, c1) { X5.forEach((x, i) => fire(t + i * 0.12, 'crackle', x, band(0.05, 0.2), 0.22, c1, '#ffffff', { lift: 'comet', straight: true })); return 2.5; },
+      sparse(t, c1, c2) { for (let i = 0; i < 4; i++) fire(t + i * 0.5, 'peony', rand(0.15, 0.85), band(0.75, 0.92), 0.25, i % 2 ? c1 : c2, null, { lift: 'comet', fast: 1.3 }); return 2.5; },
+      // the set pieces
+      spheres(t, c1, c2) { // two or three alike, often echoing two seconds later in the same places
+        const n = Math.random() < 0.5 ? 2 : 3, xs = n === 2 ? [0.32, 0.68] : X3, y = band(0.15, 0.35), type = Math.random() < 0.4 ? pick(LIVE_EXTRA) : pick(['peony', 'pistil', 'dahlia']), sz = n === 2 ? 1.15 : 0.9;
+        spheresAt(t, xs, y, type, sz, c1, c2);
+        if (Math.random() < 0.6) { spheresAt(t + 2, xs, y, type, sz, c1, c2); return 4.5; }
+        return 2.5;
+      },
+      rings(t, c1, c2) { [0.25, 0.5, 0.75].forEach((x, i) => fire(t + i * 0.25, 'ring', x, band(0.2, 0.4), 0.8, c1, c2)); fire(t + 0.8, 'peony', 0.5, band(0.05, 0.2), 0.9, c2, c1); return 2.5; },
+      strobes(t, c1) { const y = band(0.35, 0.55); X5.forEach((x, i) => fire(t + i * 0.1, 'strobe', x, y, 0.6, c1, '#ffffff')); return 2.5; },
+      vcross(t, c1, c2) { for (let i = 0; i < 4; i++) { fire(t + i * 0.2, 'peony', 0.3 + i * 0.07, band(0.2, 0.4), 0.55, c1, c2, { sx: W * 0.15 }); fire(t + i * 0.2, 'peony', 0.7 - i * 0.07, band(0.2, 0.4), 0.55, c1, c2, { sx: W * 0.85 }); } return 2.5; },
+      glitter(t, c1) { X3.forEach((x, i) => fire(t + i * 0.3, pick(['timerain', 'kamuro']), x, band(0.1, 0.3), 0.85, '#ffd36b', c1)); return 3.5; },
+      horizon(t, c1, c2) { for (let i = 0; i < 7; i++) fire(t + i * 0.14, pick(['peony', 'ring']), 0.1 + i * 0.133, band(0.82, 0.95), 0.35, c1, c2, { fast: 1.4 }); return 2; },
+      crowns(t) { const type = pick(['palm', 'brocade']); fire(t, type, 0.5, band(0.0, 0.15), 1.2, '#ffcf6b'); fire(t + 0.5, type, 0.25, band(0.2, 0.35), 0.8, '#ffcf6b'); fire(t + 0.5, type, 0.75, band(0.2, 0.35), 0.8, '#ffcf6b'); return 3; },
+      palms(t) { // a palm forest, three times, a green palm in the middle the last time
+        for (let k = 0; k < 3; k++) X5.forEach((x, i) => fire(t + k * 2 + i * 0.08, 'palm', x, band(0.2, 0.4), 0.6, k === 2 && i === 2 ? '#33ff88' : '#ffcf6b'));
+        return 6.5;
+      },
+      kamuro(t) { [0.35, 0.65, 0.5].forEach((x, i) => fire(t + i * 0.35, 'kamuro', x, band(0.05, 0.25), 1.2)); return 3.5; },
+      crossettes(t, c1) { X3.forEach((x, i) => fire(t + i * 0.2, 'crossette', x, band(0.15, 0.3), 0.8, '#ffcf6b')); pieces.horizon(t + 0.6, c1, c1); return 3; },
+      galaxy(t) { // the rainbow comb across the ground with spheres over it, for eight seconds
+        for (let k = 0; k < 8; k++) {
+          for (let i = 0; i < 7; i++) fanFrom(t + k + i * 0.05, 0.1 + i * 0.133, RAINBOW[(i + k) % RAINBOW.length], 0.3, 0.7, 0.9, 2); // light enough for a slow phone
+          if (k % 2 === 0) spheresAt(t + k + 0.5, X3, band(0.15, 0.35), 'peony', 0.85, RAINBOW[(k / 2 + 2) % RAINBOW.length], '#ffffff');
+          if (k % 2 === 1) fire(t + k + 0.2, 'crackle', pick(X3), band(0.05, 0.2), 0.3, '#ffffff', null, { lift: 'comet', straight: true });
+        }
+        return 9;
+      },
+      // the colour washes (o.wash): big soft shells filling the whole sky, over the landmark too, the colour moving
+      // through the gradient (wy: 0 = the top of the screen, 1 = two thirds of the way down)
+      wash(t) { // a wave across the sky, column by column, three rows deep
+        for (let c = 0; c < 5; c++) for (let row = 0; row < 3; row++) fire(t + c * 0.4 + row * 0.1, pick(['peony', 'colorchange', 'dahlia']), 0.1 + c * 0.2, wy(row * 0.33 + 0.05, row * 0.33 + 0.2), 1.25, tint(c / 4), tint(c / 4 + 0.2));
+        return 4;
+      },
+      bloom(t) { // from the centre outward: one, then six around it, then a wide ring of eight
+        const cy = wy(0.42, 0.48);
+        fire(t, 'pistil', 0.5, cy, 1.5, tint(0), tint(0.15));
+        for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; fire(t + 0.7, 'peony', 0.5 + Math.cos(a) * 0.24, clamp(cy + Math.sin(a) * H * 0.15, H * 0.06, H * 0.7), 1.1, tint(0.45), tint(0.55)); }
+        for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU + 0.4; fire(t + 1.5, 'peony', clamp(0.5 + Math.cos(a) * 0.42, 0.06, 0.94), clamp(cy + Math.sin(a) * H * 0.28, H * 0.06, H * 0.7), 0.95, tint(0.9), tint(1)); }
+        return 4.5;
+      },
+      curtain(t) { // falling colour, row by row from the top down
+        for (let row = 0; row < 3; row++) for (let i = 0; i < 4; i++) fire(t + row * 0.8 + i * 0.08, pick(['kamuro', 'timerain', 'willow']), 0.14 + i * 0.24, wy(row * 0.3, row * 0.3 + 0.1), 1.3, tint(row / 2), tint(row / 2 + 0.1));
+        return 5;
+      },
+      aurora(t) { // three bands across the sky, each sweeping through the gradient
+        for (let b = 0; b < 3; b++) for (let i = 0; i < 7; i++) fire(t + b * 0.5 + i * 0.14, pick(['strobe', 'peony']), 0.07 + i * 0.143, wy(0.1 + b * 0.32, 0.16 + b * 0.32), 0.85, tint((i / 6 + b * 0.3) % 1), '#ffffff');
+        return 3.5;
+      },
+      petals(t) { // a soft storm of blooms everywhere
+        for (let i = 0; i < 20; i++) fire(t + i * 0.15, pick(['peony', 'pistil', 'colorchange']), rand(0.06, 0.94), wy(0, 1), rand(0.6, 0.95), tint(rand(0, 1)), tint(rand(0, 1)));
+        return 4;
+      },
+      tide(t) { // colour meeting from both sides
+        for (let i = 0; i < 5; i++) { const y = wy(0.1, 0.9); fire(t + i * 0.3, 'dahlia', 0.1 + i * 0.1, y, 1.05, tint(i / 8), tint(i / 8 + 0.1)); fire(t + i * 0.3, 'dahlia', 0.9 - i * 0.1, y, 1.05, tint(1 - i / 8), tint(0.9 - i / 8)); }
+        return 3.5;
+      },
+      // the Akagawa pieces (32nd Akagawa Fireworks Display 2025): very wide shapes along the horizon
+      arch(t, c1, c2) { // small bursts along a rainbow-shaped curve across the sky
+        for (let i = 0; i < 9; i++) { const f = i / 8; fire(t + i * 0.12, 'peony', 0.08 + f * 0.84, band(0.15, 0.17) + Math.pow((f - 0.5) * 2, 2) * (top - H * 0.15) * 0.75, 0.5, i % 2 ? c1 : c2); }
+        return 3;
+      },
+      belt(t, c1) { // a long ribbon of glitter the whole width at one height
+        const y = band(0.55, 0.7);
+        for (let i = 0; i < 12; i++) fire(t + i * 0.06, pick(['strobe', 'crackle']), 0.04 + i * 0.084, y + rand(-6, 6) * U, 0.4, c1, '#ffffff');
+        return 2.5;
+      },
+      mountain(t, c1, c2) { // bursts stacked into a wide triangle, the peak in the middle
+        const rows = [[0.12, 0.3, 0.5, 0.7, 0.88], [0.24, 0.42, 0.58, 0.76], [0.36, 0.5, 0.64], [0.5]];
+        rows.forEach((xs, k) => xs.forEach((x) => fire(t + k * 0.35, 'peony', x, band(0.78 - k * 0.24, 0.8 - k * 0.24), 0.55 + k * 0.1, k % 2 ? c2 : c1)));
+        return 3.5;
+      },
+      mist(t, c1, c2) { // a low carpet of soft colour hugging the ground
+        for (let i = 0; i < 14; i++) fire(t + i * 0.1, pick(['peony', 'strobe']), rand(0.04, 0.96), band(0.88, 0.98), 0.3, i % 2 ? c1 : c2, null, { fast: 1.4 });
+        return 2.5;
+      },
+      waterfall(t, c1) { // a curtain of falling glitter across the whole width
+        for (let i = 0; i < 7; i++) fire(t + i * 0.08, pick(['willow', 'kamuro', 'timerain']), 0.08 + i * 0.14, band(0.05, 0.12), 0.9, i % 2 ? '#ffcf6b' : c1);
+        return 4.5;
+      },
+      cloud(t) { // dense white peonies heaped into one bright mass
+        for (let i = 0; i < 9; i++) fire(t + i * 0.1, pick(['peony', 'chrysanthemum']), 0.5 + rand(-0.28, 0.28), band(0.25, 0.6), rand(0.6, 0.85), '#ffffff', '#fff1c9');
+        return 3;
+      },
+      fence(t, c1) { // a row of evenly spaced straight white jets from the ground
+        for (let i = 0; i < 9; i++) fire(t + i * 0.05, 'peony', 0.1 + i * 0.1, band(0.6, 0.65), 0.15, '#ffffff', c1, { sx: W * (0.1 + i * 0.1), sy: groundY, lift: 'comet', straight: true, fast: 1.5, soft: 0.3 });
+        return 2;
+      },
+      tents(t, c1) { // narrow cone fountains from the ground, little triangles in a row
+        [0.2, 0.4, 0.6, 0.8].forEach((m, j) => fanFrom(t + j * 0.15, m, c1, 0.3, 0.75, 0.85, 4));
+        return 2;
+      },
+      ringrow(t, c1, c2) { // small rings in a line
+        const y = band(0.4, 0.5);
+        for (let i = 0; i < 5; i++) fire(t + i * 0.15, 'ring', 0.14 + i * 0.18, y, 0.45, i % 2 ? c1 : c2);
+        return 2.5;
+      },
+      solo(t, c1, c2) { // one shaped cracker alone in the middle of the sky (a tricolour show flies the flags)
+        const pool = o.flags ? LIVE_FLAGS.slice(0, 2).concat('tiger') : Math.random() < 0.15 ? LIVE_FLAGS : LIVE_SOLO;
+        fire(t, pick(pool), 0.5, band(0.15, 0.3), 1.3, c1, c2);
+        return 4;
+      },
+      signature(t, c1, c2) { // one of the player's own Sky Gears signatures, alone in the middle of the sky (as a solo)
+        const pts = liveSignature();
+        if (!pts) return pieces.solo(t, c1, c2);
+        fire(t, 'drawing', 0.5, Math.max(band(0.2, 0.3), safeTop() + drawingR(1.05) + 16), 1.05, c1, c2, { pts, straight: true, fast: 1.25 });
+        return 5;
+      },
+      // Character Festival (character-art.js): pictures of light, after Japan's character fireworks shows. One big picture
+      // alone with a burst each side, three side by side (the outer two alike, as those shows fire them) or a parade of
+      // five small ones across the sky; and the peacock, India's bird, out of a flower. Each is a grid of stars sized to this phone's budget, kept clear of its neighbours.
+      character(t, c1, c2) {
+        charAt(t, 0.5, 1.5, charPick(), 0); // alone, as big as the clear sky allows, so every detail reads
+        return 6.5;
+      },
+      charanimal(t) { // a great animal of the world, roaring out of its country's flag (the tiger out of India's tricolour)
+        const kind = charAnimals.shift() || 'india';
+        if (!charAnimals.length) charAnimals = ['india', 'usa', 'uk', 'china', 'brazil', 'bangladesh', 'japan', 'tiger'].sort(() => Math.random() - 0.5);
+        fire(t, kind, 0.5, Math.max(band(0.18, 0.3), skyTop() + tigerS(1.3) * 1.3), 1.3);
+        return 9;
+      },
+      charpeacock(t) { // the peacock, as a peacock-face shell plays it: a pink and white flower first, then out of it the bird
+        fire(t, 'chrysanthemum', 0.5, band(0.15, 0.25), 0.9, '#ff9ec8', '#ffffff');
+        charAt(t + 1.4, 0.5, 1.5, 'peacock', 0);
+        fire(t + 1.6, 'willow', 0.62, band(0.2, 0.3), 0.8, '#33dd66', '#5ff0ff');
+        return 6.5;
+      },
+      charmove(t, c1, c2) { // a stick figure in neon acting its moment (the Stickman Show): never the same one twice running
+        // the Stickman Show opens with its story, then every other figure once, in a shuffled order, before any comes again
+      const all = CH.anims || [];
+      if (!charDeck.length) charDeck = all.filter((a) => a !== 'friends').sort(() => Math.random() - 0.5);
+      const id = charLastMove = !charLastMove && all.includes('friends') ? 'friends' : charDeck.shift() || pick(all);
+        if (!id) return pieces.character(t, c1, c2);
+        const sz = fitSize(1.5), a = CH.anim(id, 40);
+        fire(t, 'drawing', 0.5, skyTop() + drawingR(sz), sz, null, null, { anim: id, straight: true, fast: 1.25 });
+        // its whole story: the rise (~0.6 s), every pose, the blast and the fall, then a breath before the next
+        return 0.6 + a.times[a.times.length - 1] + 0.9 + 3.6; // (+ the love-and-happiness burst that closes it)
+      },
+      chartrio(t) {
+        const side = charPick(), mid = charPick(), sz = charSize(0.19, 0.66);
+        charAt(t, 0.2, sz, side, 5, 3); charAt(t, 0.8, sz, side, 5, 2); charAt(t + 0.5, 0.5, sz * 1.1, mid, 4, 1);
+        return 5.5;
+      },
+      charparade(t) {
+        const sz = charSize(0.1, 0.5);
+        for (let i = 0; i < 5; i++) charAt(t + i * 0.45, 0.1 + i * 0.2, sz, charPick(), 8, 5 - i);
+        return 6;
+      },
+      // the hits
+      fan(t, c1) { pick([[0.5], [0.3, 0.7], X3]).forEach((m, j) => fanFrom(t + j * 0.1, m, c1, 0.9, 0.55, 0.85)); return 1.5; },
+      domes(t, c1) { const n = pick([3, 5, 6]); for (let i = 0; i < n; i++) fanFrom(t + i * 0.12, (i + 0.5) / n, c1, 1.35, 0.8, 0.95, 7); return 1.5; },
+      tiers(t, c1, c2) { // half domes on the ground, a band of colour, big spheres on top, all at once
+        pieces.domes(t, '#ffffff');
+        for (let i = 0; i < 7; i++) fire(t + 0.2 + i * 0.06, 'strobe', 0.1 + i * 0.133, band(0.55, 0.65), 0.45, c2, '#ffffff');
+        spheresAt(t + 0.4, X3, band(0.05, 0.25), pick(['peony', 'chrysanthemum', 'pistil']), 1.05, c1, c2);
+        return 3.5;
+      },
+    };
+    if (o.one) { // a single set piece (a Live Sky cracker fired from the dock)
+      const [c1, c2] = o.colors || pick(LIVE_ACTS);
+      return pieces[o.one](0, c1 || '#ffcf6b', c2 || '#ffffff');
+    }
+    if (o.lasers && window.LUTSLaserShow) return laserGala();
+    // Laser Light Gala (laser-show.js), after the big harbour LED + laser + fireworks nights: each scene opens on the
+    // landmark's LEDs, the beams come in, an LED picture draws itself in the sky while fountains rise under it (never a
+    // shell across it), then it falls as glitter into the next. Everything on a 120 bpm grid: beams, strobes and bursts.
+    function laserGala() {
+      lasers = LUTSLaserShow.rig({ lite: laserLite() });
+      const L = (at, kind, opts) => after(at, () => { if (live.on && lasers) lasers.cue(kind, opts); }, 'director');
+      const RB = ['#ff3355', '#ff9933', '#ffe066', '#33ff88', '#5ff0ff', '#4a7dff', '#b56bff'];
+      const low = (at, c1) => fanFrom(at, pick(X3), c1, 0.35, 0.72, 0.86, 5); // a short fountain under a picture
+      const rainbowFans = (at) => X5.forEach((m, i) => fanFrom(at + i * 0.08, m, RB[(i * 2) % RB.length], 0.4, 0.62, 0.8, 4));
+      let t = 0.6;
+      // 1. The glow: the landmark's lights climb, one white fan opens, white comets.
+      L(t, 'wash', { dur: 9.5, mode: 'rise', cols: ['#9fe8ff'], speed: 0.22, amt: 0.75 });
+      L(t + 1, 'fan', { dur: 8.5, n: 9, xs: [0.5], cols: ['#ffffff', '#9fd8ff'], mode: 'open', spread: 1.3, speed: 0.7 });
+      pieces.fence(t + 3.5, '#5ff0ff'); pieces.comets(t + 6, '#ffffff');
+      t = 10;
+      // 2. Green scissors from both sides, a green chase across the landmark, white strobes on the beat.
+      L(t, 'fan', { dur: 10, n: 7, xs: [0.1, 0.9], cols: ['#33ff66'], mode: 'scissor', spread: 0.35, speed: 1.6 });
+      L(t, 'wash', { dur: 10, mode: 'chase', cols: ['#33ff66'], speed: 0.5, amt: 1 });
+      for (let k = 0; k < 4; k++) pieces.strobes(t + 1 + k * 2, '#b6ff5f');
+      pieces.fan(t + 8.5, '#33ff88');
+      t = 20.5;
+      // 3. Every picture of the festival, one at a time (laser-show.js SHAPES, all 26 before the finale's mandala), each
+      // with its own look: beams, the landmark's wash and the fountains under it change with every picture. After every
+      // sixth, a beam interlude with nothing in the sky: the tunnel, or the running chase with bursts.
+      const PICS = LUTSLaserShow.SHAPES.filter((id) => id !== 'mandala');
+      const looks = [
+        (at) => { L(at, 'fan', { dur: 8, n: 6, xs: [0.2, 0.8], cols: ['#ff4fd8', '#b56bff'], mode: 'sweep', spread: 0.5, speed: 1.2, strobe: true }); L(at, 'wash', { dur: 9, mode: 'pulse', cols: ['#ff4fd8'], amt: 0.9 }); rainbowFans(at + 1.5); rainbowFans(at + 4); low(at + 6.5, '#ffffff'); },
+        (at) => { L(at, 'fan', { dur: 9, n: 8, xs: [0.5], cols: ['#ffcf6b', '#fff1c9'], mode: 'sweep', spread: 0.6, speed: 0.9 }); L(at, 'wash', { dur: 9, mode: 'solid', cols: ['#ffcf6b'], amt: 0.7 }); pieces.fence(at + 2, '#ffcf6b'); low(at + 4.5, '#ffcf6b'); pieces.fence(at + 7, '#ffffff'); },
+        (at) => { L(at, 'wash', { dur: 9, mode: 'rainbow', speed: 0.3, amt: 0.9 }); L(at + 2.5, 'fan', { dur: 6.5, n: 12, xs: [0.5], rainbow: true, mode: 'open', spread: 1.6, speed: 0.6 }); pieces.domes(at + 3, '#ffffff'); pieces.domes(at + 6, '#fff1c9'); },
+        (at) => { L(at, 'fan', { dur: 8.5, n: 7, xs: [0.15, 0.85], cols: ['#b56bff', '#4a7dff'], mode: 'scissor', spread: 0.3, speed: 2.2 }); L(at, 'wash', { dur: 8.5, mode: 'pulse', cols: ['#b56bff'], beat: 1, amt: 0.9 }); low(at + 2, '#b56bff'); low(at + 4, '#5ff0ff'); },
+        (at) => { L(at, 'fan', { dur: 9, n: 7, xs: [0.1, 0.9], cols: ['#33ff66'], mode: 'scissor', spread: 0.35, speed: 1.6 }); L(at, 'wash', { dur: 9, mode: 'chase', cols: ['#33ff66'], speed: 0.5, amt: 1 }); pieces.fence(at + 1.5, '#33ff88'); low(at + 5, '#b6ff5f'); },
+        (at) => { L(at, 'wash', { dur: 9, mode: 'rainbow', speed: 0.6, amt: 1 }); L(at + 1, 'fan', { dur: 7.5, n: 9, xs: [0.25, 0.75], cols: ['#5ff0ff', '#ffffff'], mode: 'open', spread: 1, speed: 0.8 }); pieces.fence(at + 1.5, '#ffffff'); rainbowFans(at + 4.5); },
+      ];
+      PICS.forEach((id, k) => {
+        const wide = ['wings', 'dragon', 'phoenix', 'arch', 'bouquet', 'blossom', 'palace'].includes(id);
+        L(t, 'figure', { dur: 9, shape: id, r: wide ? 0.42 : 0.38, drift: 20 + (k % 4) * 15, build: 1.8, spin: id === 'ring' || id === 'spiral' || id === 'yinyang' ? 0.3 : 0 });
+        looks[k % looks.length](t);
+        t += 9.5;
+        if (k % 6 === 5 && k < PICS.length - 1) { // the beam interlude
+          if ((k / 6) % 2 < 1) { L(t, 'fan', { dur: 8, n: 10, mode: 'aim', cols: ['#5ff0ff', '#b56bff'], speed: 0.9 }); L(t, 'wash', { dur: 8, mode: 'strobe', cols: ['#ffffff'], amt: 0.8 }); pieces.belt(t + 2, '#5ff0ff'); spheresAt(t + 5, [0.32, 0.68], band(0.1, 0.25), 'peony', 1, '#5ff0ff', '#ffffff'); }
+          else { L(t, 'fan', { dur: 8, n: 9, xs: [0.2, 0.5, 0.8], rainbow: true, mode: 'chase', spread: 1.1, beat: 0.25 }); L(t, 'wash', { dur: 8, mode: 'chase', cols: ['#4a7dff'], speed: 0.8, amt: 1 }); pieces.spheres(t + 1, '#ff3355', '#ffffff'); pieces.rings(t + 4.5, '#5ff0ff', '#ff4fd8'); }
+          t += 8.5;
+        }
+      });
+      // 10. The finale: every beam in rainbow, the mandala, the landmark strobing, gold kamuro over glitter, then dark.
+      L(t, 'fan', { dur: 10, n: 8, xs: [0.12, 0.5, 0.88], rainbow: true, mode: 'sweep', spread: 0.7, speed: 2 });
+      L(t, 'figure', { dur: 7, shape: 'mandala', r: 0.42, spin: 0.6, drift: 90 });
+      L(t, 'wash', { dur: 10, mode: 'strobe', cols: ['#ffffff'], beat: 0.25, amt: 0.8 });
+      pieces.belt(t + 1, '#ffffff'); pieces.domes(t + 3, '#ffffff');
+      pieces.waterfall(t + 7, '#33ff88'); pieces.tiers(t + 7.5, '#ffcf6b', '#ff4fd8');
+      [0.3, 0.7, 0.5].forEach((x, i) => fire(t + 8.5 + i * 0.25, 'kamuro', x, band(0.02, 0.2), 1.3, '#ffcf6b'));
+      t += 12;
+      fire(t, 'kingwillow', 0.5, band(0, 0.08), 1.3);
+      directorUntil = gameTime + t + 2;
+      return t + 6;
+    }
+    const BUILDS = ['hang', 'comets', 'sparse'], HITS = ['tiers', 'fan', 'domes'], WASHES = ['wash', 'bloom', 'curtain', 'aurora', 'petals', 'tide'];
+    // Every show has its solo; a player with Sky Gears signatures (and "My signatures in Live Sky" on) sometimes sees one
+    // of them in its place.
+    const sig = !!liveSignature();
+    const CHARS = ['character', 'charpeacock', 'charanimal', 'charmove', 'chartrio', 'charparade']; // the Character Festival's own pieces, in no other show
+    const allowed = (n) => (n === 'signature' ? sig : CHARS.includes(n) ? !!(o.chars && CH) && (!o.only || o.only.includes(n)) : !o.only || o.only.includes(n) || n === 'solo');
+    const builds = BUILDS.filter(allowed), hits = HITS.filter(allowed);
+    // The wash pieces belong to the wash shows (o.wash); the others never pick them.
+    const names = Object.keys(pieces).filter((n) => !BUILDS.includes(n) && !HITS.includes(n) && allowed(n) && (o.wash ? WASHES.includes(n) : !WASHES.includes(n)));
+    liveNames = names;
+    const acts = o.acts ? [...o.acts] : [...LIVE_ACTS].sort(() => Math.random() - 0.5);
+    let t = o.flagshow ? 0.05 : 0.5, a = 0;
+    // The story (see PLACE_FACTS): not in the Character Festival or the Stickman Show, which are stories already.
+    const story = !o.chars && !o.stories, themed = !!o.mins && !!live.show && live.show.id !== 'endless' && !live.show.countdown; // (Endless Sky's wash rounds carry a show's mins, the countdown's after midnight too)
+    if (story && !o.safety && !o.wishes && !o.drones && !o.flagshow && PLACE_FACTS[world.id] && (themed || Math.random() < 0.5)) after(1.2, () => { if (live.on) liveCaption(inLang(PLACE_FACTS[world.id]), 7000, 'place'); }, 'director');
+    let moment = story && !o.wishes && !o.drones && !o.flagshow && CH && (CH.anims || []).length && (themed || Math.random() < 0.5) ? (SHOW_MOMENT[o.id] || pick(['hug', 'lovebig', 'namaste', 'highfive', 'kiss'])) : '';
+    const momentAt = (tt) => { // the figure alone at the top of the sky; the next act waits for its love cracker
+      const id = moment; moment = '';
+      const sz = fitSize(1.5), an = CH.anim(id, 40);
+      fire(tt, 'drawing', 0.5, skyTop() + drawingR(sz), sz, null, null, { anim: id, straight: true, fast: 1.25 });
+      return 0.6 + an.times[an.times.length - 1] + 0.9 + 3.6;
+    };
+    const thanks = (tt) => { // the gratitude finale: the people lit up, each name in light between two hearts
+      if (!story || !(themed || Math.random() < 0.25)) return 0;
+      const names = gratefulNames(), list = names.length ? names : [inLang('Thank you')];
+      after(tt, () => { if (live.on) liveCaption(inLang(names.length ? 'Tonight’s sky is for…' : 'Who are you grateful for?'), 3600, 'big'); }, 'director');
+      list.forEach((n, i) => {
+        const at = tt + 1.4 + i * 4.2, y = belowCaption();
+        after(at, () => { if (live.on) launchShell({ tap: true, exact: true, type: 'text', text: n.toLocaleUpperCase(), x: W / 2, y, textH: Math.min(H * 0.13, W * 0.26), hold: 3.6, straight: true, size: 1 }); }, 'director'); // (tap: a show's own shell; launchText's would be refused in play)
+        fire(at + 1.8, 'heart', 0.17, band(0.25, 0.35), 0.6, '#ff5fa2', '#ffd1e1');
+        fire(at + 2.1, 'heart', 0.83, band(0.25, 0.35), 0.6, '#ff3355', '#ffffff');
+      });
+      if (!names.length) after(tt + 4.6, () => { if (live.on) liveCaption(inLang('Light someone up, and their name lights this sky'), 5000, 'big'); }, 'director');
+      return 1.4 + list.length * 4.2 + 1;
+    };
+    if (o.stories) { // the Stickman Show: one figure's story at a time, nothing else in the sky over it
+      while (t < len) t += pieces.charmove(t);
+      return t;
+    }
+    if (o.chars && !o.one && CH) {
+      // The character night, beat by beat, the way that show runs: a picture inside a burst, a V of comets,
+      // lightning, hearts, gold falls, rain, a parade, then a last wall. Every picture is our own.
+      const bolt = (at) => {
+        after(at, () => { if (live.on) flash(W * rand(0.22, 0.78), band(0.02, 0.18), '#e7f3ff', 1.15, ctx); }, 'director');
+        for (let i = 0; i < 4; i++) fire(at + i * 0.05, 'strobe', 0.16 + i * 0.22, band(0.02, 0.16), 0.42, '#d7e8ff', '#ffffff');
+      };
+      const fireball = (at) => fire(at, 'crackle', 0.86, band(0.28, 0.4), 0.5, '#ff8a2b', '#ffcf6b', { sx: W * 0.12, sy: groundY, lift: 'comet', fast: 0.8 });
+      const pic = (at, x, id, size, less = 0, share = 1) => charAt(at, x, size, id, less, share);
+      const around = (at, x, id, size, type, c1, c2) => {
+        const y = pic(at, x, id, size, 1);
+        fire(at + 0.45, type, x, y, Math.min(0.9, size * 0.7), c1, c2);
+      };
+      let t = 0.6;
+      pic(t, 0.5, 'trump', 1.8, 0);
+      t += 8;
+      around(t, 0.22, 'smile', 0.95, 'chrysanthemum', '#ff3355', '#4a7dff');
+      fire(t + 0.3, 'peony', 0.5, band(0.18, 0.3), 0.85, '#33ff88', '#ff3355');
+      fire(t + 0.5, 'star', 0.78, band(0.16, 0.28), 0.8, '#ffcf6b', '#fff6e0');
+      t += 8;
+      pic(t, 0.5, 'smile', 1.5, 0);
+      t += 8;
+      pic(t, 0.5, 'musk', 1.45, 0);
+      t += 8;
+      fire(t, 'peony', 0.32, band(0.3, 0.42), 0.32, '#ffcf6b', '#ffffff', { sx: W * 0.5, sy: groundY, lift: 'comet', fast: 1.5 });
+      fire(t, 'peony', 0.68, band(0.3, 0.42), 0.32, '#ffcf6b', '#ffffff', { sx: W * 0.5, sy: groundY, lift: 'comet', fast: 1.5 });
+      t += 6;
+      bolt(t);
+      t += 5;
+      fire(t, 'chrysanthemum', 0.32, band(0.16, 0.28), 1.05, '#fff6e0', '#9fc0ff');
+      fire(t + 0.35, 'chrysanthemum', 0.7, band(0.16, 0.28), 1.05, '#fff6e0', '#ffcf6b');
+      t += 7;
+      fire(t, 'heart', 0.18, band(0.22, 0.34), 0.7, '#ff5fa2', '#ffffff');
+      pic(t + 0.25, 0.5, 'bunny', 1.15, 1);
+      fire(t + 0.15, 'heart', 0.82, band(0.22, 0.34), 0.7, '#ff3355', '#ffd1e1');
+      t += 8;
+      around(t, 0.5, 'crown', 1.4, 'pistil', '#4a7dff', '#ffcf6b');
+      t += 8;
+      ['#ff3355', '#ffcf6b', '#33ff88', '#4a7dff', '#b56bff'].forEach((c, i) => fire(t + i * 0.12, 'peony', 0.12 + i * 0.19, band(0.26, 0.4), 0.55, c, '#ffffff'));
+      t += 6;
+      for (const id of ['ghost', 'dragon', 'cat', 'panda']) {
+        around(t, 0.5, id, 1.15, 'peony', '#ffcf6b', '#ffffff');
+        fire(t + 0.4, 'peony', 0.18, band(0.36, 0.5), 0.4, '#5ff0ff', '#ffffff');
+        fire(t + 0.6, 'peony', 0.82, band(0.36, 0.5), 0.4, '#ff5fa2', '#ffffff');
+        t += 8;
+      }
+      fire(t, 'ring', 0.5, band(0.2, 0.32), 0.9, '#fff6e0', '#ffcf6b');
+      t += 6;
+      fireball(t);
+      t += 5;
+      [0.28, 0.5, 0.72].forEach((x) => fire(t, 'willow', x, band(0.42, 0.55), 0.95, '#ffcf6b', '#fff6e0'));
+      t += 8;
+      X5.forEach((x, i) => fire(t + i * 0.15, 'willow', x, band(0.02, 0.12), 0.75, '#9fc0ff', '#ffffff'));
+      t += 6;
+      pieces.sparse(t, '#d7e8ff', '#ffffff');
+      t += 5;
+      pic(t, 0.5, 'giraffe', 1.35, 0);
+      t += 8;
+      t += pieces.charpeacock(t);
+      t += 2;
+      fire(t, 'peony', 0.28, band(0.22, 0.34), 0.7, '#ff5fa2', '#ffffff');
+      fire(t + 0.25, 'peony', 0.72, band(0.22, 0.34), 0.7, '#4a7dff', '#ffffff');
+      t += 6;
+      pic(t, 0.32, 'watermelon', 0.85, 3, 2);
+      pic(t + 0.4, 0.68, 'chick', 0.85, 3, 2);
+      t += 8;
+      [0.25, 0.5, 0.75].forEach((x, i) => fire(t + i * 0.15, 'pistil', x, band(0.2, 0.32), 0.7, i % 2 ? '#33ff88' : '#ffcf6b', '#ffffff'));
+      t += 6;
+      pic(t, 0.5, 'bear', 1.25, 1);
+      t += 8;
+      X5.forEach((x, i) => fire(t + i * 0.1, 'crossette', x, band(0.14, 0.32), 0.4, '#fff6e0', '#ffcf6b'));
+      t += 6;
+      pic(t, 0.5, 'snowman', 1.2, 1);
+      for (let i = 0; i < 5; i++) fire(t + 0.4 + i * 0.12, 'strobe', 0.18 + i * 0.16, band(0.1, 0.26), 0.28, '#f4f8ff', '#ffffff');
+      t += 8;
+      pic(t, 0.5, 'whale', 1.35, 0);
+      t += 8;
+      t += pieces.charanimal(t);
+      t += 2;
+      pic(t, 0.5, 'jellyfish', 1.2, 1);
+      t += 8;
+      const parade = charSize(0.1, 0.46);
+      ['fish', 'frog', 'owl', 'crab', 'dolphin'].forEach((id, i) => pic(t + i * 0.4, 0.12 + i * 0.19, id, parade, 8, 5));
+      t += 9;
+      pic(t, 0.3, 'lion', 0.9, 3, 2);
+      pic(t + 0.5, 0.7, 'elephant', 0.9, 3, 2);
+      t += 8;
+      bolt(t);
+      bolt(t + 0.8);
+      X5.forEach((x, i) => fire(t + 1.3 + i * 0.08, 'chrysanthemum', x, band(0.16, 0.3), 0.65, '#ffcf6b', '#ffffff'));
+      t += 6;
+      pic(t, 0.32, 'ghost', 1.05, 2, 2);
+      pic(t + 0.5, 0.68, 'dragon', 1.05, 2, 2);
+      t += 8;
+      bolt(t);
+      fire(t + 1.2, 'kingwillow', 0.5, band(0, 0.08), 1.2);
+      directorUntil = gameTime + t + 2;
+      return t + 6;
+    }
+    let safeI = 0;
+    const safeLines = o.safety ? [...SAFETY_LINES].sort(() => Math.random() - 0.5) : []; // a different handful every show
+    // Wishes of India: one wish an act (its names, the occasion's own wish, the name in light, hearts, its cracker),
+    // then the act's colours; with none to show, an invitation to be the first, and the show plays on as any other.
+    const wishes = o.wishes && window.LUTSWishes ? LUTSWishes.list() : [];
+    let wishI = 0;
+    if (o.wishes && !wishes.length) after(1.5, () => { if (live.on) liveCaption(inLang('Be tonight’s first wish: tap Publish a wish.'), 9000, 'big', { label: 'Publish a wish', cls: 'share', fn: () => { $('#btnLiveExit').click(); setTimeout(openWishes, 500); } }); }, 'director');
+    const wishAt = (tt, w) => {
+      const occ = OCC_BY_ID[w.o] || OCC_BY_ID.custom, head = `${w.f} → ${w.t}${w.p ? `, ${inLang(`from ${w.p}`)}` : ''}`;
+      const body = w.mine ? `${inLang('Your wish is in tonight’s sky!')} ${inLang(occ.head)}${w.k ? `! ${inLang(wishLine(w, occ))}` : ''}` : `${inLang(occ.head)}! ${inLang(wishLine(w, occ))}`;
+      const place = w.p ? inLang(`from ${w.p}`) : '';
+      const wishText = inLang(wishLine(w, occ));
+      const sparkWish = !!w.k && !reduceMotion();
+      const pen = sparkWish
+        ? (w.g ? 3.6 : sparklerSeconds(w.t, true)) + (place ? sparklerSeconds(place, false) : 0) + sparklerSeconds(wishText, false) + 5.4
+        : 0;
+      after(tt, () => {
+        if (!live.on) return;
+        liveCaption(`${head}: ${body}`, sparkWish ? Math.round((pen + 2.2) * 1000) : 6200, sparkWish ? 'wish' : 'place', w.mine ? { label: 'Share', cls: 'share', fn: () => shareWish(w, occ) }
+          : w.id ? { label: 'Report', fn: (b) => {
+            if (!b.classList.contains('confirm')) { b.classList.add('confirm'); b.textContent = inLang('Report this wish?'); return; } // (a second tap: no report by a slip)
+            LUTSWishes.report(w.id); track('wish_report', {}); hideCaption();
+            toast(inLang('Thanks. This wish won’t show for you again, and after a few reports it’s hidden for everyone.'), 4200);
+          } } : null);
+        if (w.mine && window.LUTSTimeline) LUTSTimeline.add({ kind: 'wish', icon: '🎆', line: 'Your wish for {0} lit up Wishes of India', args: [w.t], key: `wish:${LUTSWishes.day()}` });
+      }, 'director');
+      // A sparkler signs the name, then "from {place}", then the wish in the clear sky; its readable caption sits below.
+      // The dancer waits until that pen has lifted and the lines have held.
+      let nameH = Math.min(H * 0.095, W * 0.18);
+      if (sparkWish) {
+        const skyBottom = world.img && world.rect ? clamp(world.rect.roof - H * 0.06, H * 0.19, H * 0.49) : H * 0.49;
+        const wishLines = wrapSig(wishText, W * 0.65, nameH * 0.36).length;
+        const factor = 0.75 + 1.22 + (place ? 0.46 * 1.22 : 0) + Math.max(0, wishLines - 1) * 0.36 * 1.22 + 0.12;
+        nameH = clamp((skyBottom - safeTop() - 70) / factor, 22, nameH);
+      }
+      const y = sparkWish ? safeTop() + 70 + nameH * 0.75 : w.k ? Math.min(H * 0.38, safeTop() + 188 + nameH * 0.78) : belowCaption();
+      after(tt + 1.4, () => {
+        if (!live.on) return;
+        launchShell({
+          tap: true, exact: true, type: 'text', text: w.t.toLocaleUpperCase(),
+          where: w.k ? place : '', wish: w.k ? wishText : '', sign: w.k && w.g ? w.g : '',
+          x: W / 2, y, textH: w.k ? nameH : Math.min(H * 0.13, W * 0.26), hold: 3.6, straight: true, size: 1, sparkler: !!w.k,
+        });
+      }, 'director');
+      fire(tt + 3.2, 'heart', 0.17, band(0.25, 0.35), 0.6, '#ff5fa2', '#ffd1e1');
+      fire(tt + 3.5, 'heart', 0.83, band(0.25, 0.35), 0.6, '#ff3355', '#ffffff');
+      // Then a stick figure dances the wish (a triangle-dress dancer most often), and lets go its love cracker.
+      const dance = CH && (CH.anims || []).length ? WISH_DANCES[(wishI - 1 + LUTSWishes.day()) % WISH_DANCES.length] : '';
+      if (dance && CH.anims.includes(dance)) {
+        // (launched directly: fire() skips small shells in a busy sky, and on a short sky like the Gateway's the
+        // dancer fits small enough to count as one)
+        // A size that reads on any landmark (a short sky may let it stand over the rooftops), in the middle of the sky.
+        const sz = Math.max(1.3, fitSize(1.5)), an = CH.anim(dance, 40);
+        after(tt + 6.4 + pen, () => { if (live.on) launchShell({ tap: true, exact: true, type: 'drawing', x: W / 2, y: Math.max(skyTop() + drawingR(sz), H * 0.3), size: sz, anim: dance, straight: true, fast: 1.25 }); }, 'director');
+        return 6.4 + pen + 0.6 + an.times[an.times.length - 1] + 0.9 + 3.2; // (as the name fades: on a slow phone the two would share too few stars)
+      }
+      const end = (occ.show || SHOW_DEFAULT)[3] || 'peony';
+      fire(tt + 5.2 + pen, end, 0.5, band(0.3, 0.42), 0.9, '#ffcf6b', '#ff5fa2');
+      return 9 + pen;
+    };
+    // The Drone Show and the Flag Show: a great cracker climbs and breaks into one picture's lights (drone-show.js),
+    // alone in the sky so nothing crosses the figure. The fireworks fill the gaps, and the sky clears before the next one climbs.
+    const swarmList = (o.drones || o.flagshow) && window.LUTSDroneShow ? (o.flagshow ? flagStart() : droneStart(o.program)) : [];
+    const swarmLines = o.flagshow ? FLAG_LINES : o.story ? STORY_LINES : DRONE_LINES; // (Unseen Angles' figures carry the story's names and a 2)
+    if (o.searchlights && window.LUTSLaserShow && swarmList.length) { // the Sky Story: pale searchlights sweep slowly behind the swarm all show long
+      lasers = LUTSLaserShow.rig({ lite: laserLite() });
+      if (o.tricolour) { // India: Gift to the World: saffron, white and green beams and the landmark's LEDs washing through the tricolour
+        const TRI = ['#ff9933', '#ffffff', '#138808'];
+        for (let k = 0; k < Math.ceil(len / 12) + 6; k++) {
+          after(k * 12, () => { if (live.on && lasers) lasers.cue('fan', { dur: 12.5, n: 3, xs: [0.08, 0.5, 0.92], cols: [TRI[k % 3], TRI[(k + 1) % 3], TRI[(k + 2) % 3]], mode: k % 2 ? 'scissor' : 'sweep', spread: 0.28, speed: 0.4, amt: 0.55, wide: 0.05 }); }, 'director');
+          after(k * 12, () => { if (live.on && lasers) lasers.cue('wash', { dur: 12.5, mode: k % 3 === 2 ? 'chase' : 'solid', cols: [TRI[k % 3]], speed: 0.3, amt: k % 3 === 1 ? 0.45 : 0.6 }); }, 'director');
+        }
+      } else
+      for (let k = 0; k < Math.ceil(len / 20) + 4; k++) after(k * 20, () => { if (live.on && lasers) lasers.cue('fan', { dur: 21, n: 2, xs: [0.06, 0.32, 0.68, 0.94], cols: ['#8fa0bc', '#c0cadb'], mode: 'sweep', spread: 0.3, speed: 0.3 + (k % 3) * 0.06, amt: 0.45, wide: 0.07 }); }, 'director');
+    }
+    const swarmAt = (tt, id) => {
+      const line = swarmLines[id] || swarmLines[String(id).replace(/2$/, '')];
+      after(tt, () => { if (!live.on || !drones) return; const b = droneBox(id); launchShell({ tap: true, exact: true, straight: true, type: 'drawing', drone: id, x: b.x || W / 2, y: b.y, size: 1, c1: '#ffcf6b', lift: 'comet', fast: o.flagshow ? 1.7 : 1.15 }); }, 'director');
+      if (line) after(tt + (o.flagshow ? 0.15 : 1.1), () => { if (live.on) liveCaption(inLang(line), o.flagshow ? 12000 : 5000, 'place'); }, 'director');
+      // The temple bell belongs to the gods. Flags and the closing greeting stay quiet.
+      if (o.drones && !o.program && id !== 'greet') { after(tt + 1.6, droneBell, 'director'); after(tt + 4.2, droneBell, 'director'); }
+      return 1.3 + LUTSDroneShow.LIFE;
+    };
+    if (o.hook && swarmList.length) { // the hook: one line in the dark before the story's first light, a tricolour fan under it
+      after(0.4, () => { if (live.on) liveCaption(inLang(o.hook), 5200, 'big'); }, 'director');
+      ['#ff9933', '#ffffff', '#138808'].forEach((c, i) => fanFrom(2.2 + i * 0.5, 0.25 + i * 0.25, c, 0.6, 0.6, 0.8, 5));
+      t = 5.6;
+    }
+    while (t < len * 0.72 || swarmList.length) {
+      if (swarmList.length) { // one picture alone, then the gap: at least 5 s of set pieces, and a breath for their stars to go out
+        const id = swarmList.shift(), [c1, c2] = acts[a++ % acts.length];
+        t = beat(t + swarmAt(t, id));
+        if (swarmList.length) {
+          for (const end = t + 5; t < end;) t = beat(t + pieces[names.length ? pick(names) : 'fan'](t, c1, c2) + 0.5);
+          t += DRONE_BREATH;
+        }
+        continue;
+      }
+      if (wishI < wishes.length) { // a wish, then one set piece in the act's colours, and the next wish
+        const [c1, c2] = acts[a++ % acts.length];
+        t = beat(t + wishAt(t, wishes[wishI++]));
+        t = beat(t + pieces[names.length ? pick(names) : 'fan'](t, c1, c2) + 1);
+        continue;
+      }
+      if (moment && t >= len * 0.3) t = beat(t + momentAt(t));
+      if (o.safety && safeI < safeLines.length) { // one line an act, long enough to read; the act waits for it
+        const line = safeLines[safeI++];
+        after(t, () => { if (live.on) liveCaption(inLang(line), 9000, 'safety'); }, 'director');
+        t += 3;
+      }
+      const [c1, c2] = acts[a++ % acts.length];
+      if (builds.length && !o.wash) t = beat(t + pieces[pick(builds)](t, c1, c2)); // the quiet build (a wash flows on without one)
+      for (const n of [...names].sort(() => Math.random() - 0.5).slice(0, Math.min(2, names.length))) t = beat(t + pieces[n](t, c1, c2));
+      t = beat(t + (o.wash ? pieces[pick(['bloom', 'wash'])](t) : pieces[hits.length ? pick(hits) : 'fan'](t, c1, c2))); // the act's hit (a wash show's: a bloom or a full wash)
+      t += o.wash ? 0.5 : 2; // the dark breath between acts (a wash only a short one, colour into colour)
+    }
+    if (o.wash) { // a wash show ends in the whole sky filled twice over, then one slow willow
+      pieces.wash(t); pieces.curtain(t + 2.5);
+      t += 8;
+      t += thanks(t);
+      fire(t, 'kingwillow', 0.5, band(0, 0.08), 1.3, tint(0.5), tint(1));
+      directorUntil = gameTime + t + 2;
+      return t + 6;
+    }
+    if (Math.random() < 0.5) { // the Akagawa grand finale (24:50-26:05 of the 2025 show), half the time
+      spheresAt(t, X5, band(0.1, 0.25), 'peony', 0.75, '#4a7dff', '#9fc0ff'); pieces.belt(t + 0.3, '#b56bff');
+      t += 3;
+      X5.forEach((x, i) => fire(t + i * 0.1, 'kamuro', x, band(0.1, 0.25), 1, '#ffcf6b')); pieces.belt(t + 0.4, '#ffcf6b');
+      t += 3.5;
+      pieces.waterfall(t, '#33ff88'); pieces.fence(t + 0.5, '#ffffff');
+      t += 4.5;
+      [0.33, 0.67].forEach((x) => fire(t, 'kamuro', x, band(0.0, 0.12), 1.45, '#ffcf6b'));
+      t += 1.2;
+      t += thanks(t + 1.5);
+      fire(t, 'kingwillow', 0.5, band(0, 0.08), 1.3);
+      directorUntil = gameTime + t + 2;
+      return t + 6;
+    }
+    // The finale (5:40-6:08 of the Koga show): a violet pair over a row of spheres and a curtain of fans, a beat of dark,
+    // then huge overlapping gold chrysanthemums with blue centres over white fans, three times, and out.
+    spheresAt(t, [0.33, 0.67], band(0.0, 0.12), 'pistil', 1.2, '#b56bff', '#ff4fd8');
+    spheresAt(t + 0.3, X5, band(0.3, 0.45), 'peony', 0.6, '#ff8fd8', '#4a7dff');
+    pieces.domes(t + 0.3, '#ffffff');
+    t += 3.5; // and one beat of dark
+    for (let k = 0; k < 3; k++) {
+      pieces.fan(t + k * 2, '#ffffff');
+      [0.3, 0.7, 0.5].forEach((x, i) => fire(t + k * 2 + 0.3 + i * 0.25, 'pistil', x, band(0.02, 0.22), 1.35, '#ffcf6b', '#4a7dff'));
+    }
+    t += 6.5;
+    t += thanks(t);
     fire(t, 'kingwillow', 0.5, band(0, 0.08), 1.3);
     directorUntil = gameTime + t + 2;
     return t + 6;
@@ -9570,8 +13099,8 @@
     }
     if (want < 1 && fit.z === 1 && fit.target === 1) fit.py = py; // the pivot holds still while pulled back
     // Held while anything burns, so a seven shot doesn't pump in and out between its shots.
-    if (busy) { fit.target = Math.min(fit.target, want); fit.quiet = 0; } else if ((fit.quiet += dt) > 0.6) fit.target = 1;
-    fit.z += (fit.target - fit.z) * (1 - Math.exp(-dt * (fit.target < fit.z ? 3.2 : 2.2)));
+    if (busy) { fit.target = Math.min(fit.target, want); fit.quiet = 0; } else if ((fit.quiet += dt) > 0.3) fit.target = 1;
+    fit.z += (fit.target - fit.z) * (1 - Math.exp(-dt * (fit.target < fit.z ? 3.2 : 4)));
     if (Math.abs(fit.target - fit.z) < 0.001) fit.z = fit.target;
   }
   // A layer's transform: moved (x, y) and scaled s about the screen's middle (the canvases' transform-origin), then
@@ -9612,7 +13141,7 @@
   // For the browser tests: the fit, and how far each Sivakasi cracker on the street has got.
   window.LUTSFit = () => ({
     z: fit.z, target: fit.target, py: fit.py, byZoom: fitByZoom(), paper: confettis.length, W, H, U, top: fitTop(), t: gameTime,
-    particles: stars.length + sparks.length + smokes.length + confettis.length, budget: Q().maxStars, shells: shells.length,
+    particles: stars.length + sparks.length + smokes.length + confettis.length, budget: Q().maxStars, shells: shells.length, nets: drawingNets.map((n) => ({ stars: n.stars.length, cols: n.cols.length, joins: n.byCol.reduce((a, l) => a + (l ? l.length : 0), 0) })),
     items: groundItems.filter((it) => NEW_ITEMS.includes(it.type)).map((it) => ({ type: it.type, x: it.x, y: it.y, armed: it.armed, lit: it.lit, done: it.done,
       popped: it.popped, shots: it.shots, links: it.seen ? it.seen.length : 0, air: it.air ? [it.air.y, it.air.gone] : null, s: it.s, reach: it.armed && ITEMS[it.type].reach ? ITEMS[it.type].reach(it) : null, bursts: (it.plan || []).map((p) => [it.x + p.x, it.y + p.y, p.R]) })),
   });
@@ -9627,13 +13156,13 @@
   Object.assign(ITEMS.laddi, { label: 'Ladi' });
   // Grab area [half width, height] in sprite units, used to tap or drag a placed cracker.
   const HIT = {
-    flowerpot: [14, 30], chakri: [14, 14], rocket: [9, 70], bomb: [13, 32], laddi: [68, 14], roman: [7, 48], cake: [22, 30], smoke: [8, 24],
+    flowerpot: [14, 30], chakri: [14, 14], rocket: [9, 70], bomb: [13, 32], laddi: [68, 14], roman: [7, 48], cake: [22, 30], smoke: [8, 24], luckystar: [16, 38],
     sparkler: [7, 48], heli: [14, 16], mine: [12, 26], wheel: [14, 58], strobe: [12, 22], popper: [10, 30], snake: [9, 10], lantern: [12, 36],
     anar: [14, 34], fountain: [9, 40], basket: [16, 22], shell: [9, 58], multishot: [13, 40], firecracker: [18, 16], rocketcombo: [16, 66], finale: [26, 32],
     singleshot: [9, 26], doubleshot: [13, 26], sevenshot: [17, 28], saravedi: [92, 12], anilvedi: [14, 14], bijili: [9, 10], kuruvi: [9, 18], lakshmivedi: [12, 25],
     sutli: [15, 30], twosound: [9, 22], notes: [12, 16], pencil: [6, 50], hazaar: [22, 40],
   };
-  const ITEM_ORDER = [...PREMIUM_FIRST, ...HOOKS, 'flowerpot', 'anar', ...SIVAKASI.filter((t) => !PREMIUM_ITEMS.has(t)), 'fountain', 'chakri', 'heli', 'rocket', 'rocketcombo', 'mine', 'multishot', 'roman', 'shell', 'cake', 'finale',
+  const ITEM_ORDER = [...PREMIUM_FIRST, ...HOOKS, 'flowerpot', 'anar', ...SIVAKASI.filter((t) => !PREMIUM_ITEMS.has(t)), 'fountain', 'luckystar', 'chakri', 'heli', 'rocket', 'rocketcombo', 'mine', 'multishot', 'roman', 'shell', 'cake', 'finale',
     'fancake', 'minerow', 'cometchain', 'cometburst', 'chrysline', 'silvertower', 'starwheel', 'kingsalute',
     'basket', 'bomb', 'firecracker', 'laddi', 'sparkler', 'lantern', 'wheel', 'strobe', 'popper', 'smoke', 'snake'];
 
@@ -10415,6 +13944,55 @@
         g.beginPath(); g.moveTo(0, -h * S); g.quadraticCurveTo(tx * S, (-h - 2) * S, tx * S, ty * S); g.stroke();
         break;
       }
+      case 'luckystar': {
+        // Two round lobes, a sharp point and a short stem: a spade on a round base, gold star, fuse at the top.
+        // While it burns it yaws on that base, so the face goes from full to a thin edge and back.
+        const yaw = it && it.lit ? it.rot : 0, face = Math.cos(yaw);
+        g.fillStyle = '#1a1208';
+        g.beginPath(); g.ellipse(0, -1.5 * S, 14 * S, 3.6 * S, 0, 0, TAU); g.fill();
+        g.fillStyle = '#4a4034';
+        g.beginPath(); g.ellipse(0, -4.4 * S, 10 * S, 2.3 * S, 0, 0, TAU); g.fill();
+        if (it && it.lit) {
+          g.save();
+          g.translate(0, -3 * S);
+          g.scale(1, 0.32);
+          g.lineWidth = 2.4 * S;
+          g.strokeStyle = '#ffcf6b';
+          g.beginPath(); g.arc(0, 0, 12 * S, it.rot, it.rot + 1.6); g.stroke();
+          g.strokeStyle = '#fff6e0';
+          g.lineWidth = 1.5 * S;
+          g.beginPath(); g.arc(0, 0, 12 * S, it.rot + Math.PI, it.rot + Math.PI + 1.1); g.stroke();
+          g.restore();
+        }
+        g.save();
+        g.scale((face < 0 ? -1 : 1) * Math.max(0.14, Math.abs(face)), 1);
+        g.fillStyle = '#6a5038';
+        g.strokeStyle = '#e7c56a';
+        g.lineWidth = 1.15 * S;
+        g.beginPath(); g.arc(-6.2 * S, -24 * S, 8 * S, 0, TAU); g.fill(); g.stroke();
+        g.beginPath(); g.arc(6.2 * S, -24 * S, 8 * S, 0, TAU); g.fill(); g.stroke();
+        g.beginPath();
+        g.moveTo(-12 * S, -22 * S); g.lineTo(0, -6 * S); g.lineTo(12 * S, -22 * S);
+        g.closePath(); g.fill(); g.stroke();
+        g.fillRect(-1.7 * S, -7 * S, 3.4 * S, 3.6 * S);
+        g.strokeRect(-1.7 * S, -7 * S, 3.4 * S, 3.6 * S);
+        g.fillStyle = '#ffcf6b';
+        g.beginPath();
+        for (let k = 0; k < 10; k++) {
+          const r = (k % 2 ? 2.2 : 6.2) * S, ang = -Math.PI / 2 + (k * Math.PI) / 5;
+          const x = Math.cos(ang) * r, y = -22 * S + Math.sin(ang) * r;
+          if (k) g.lineTo(x, y); else g.moveTo(x, y);
+        }
+        g.closePath(); g.fill();
+        g.strokeStyle = '#c9a36b'; g.lineWidth = 1 * S;
+        g.beginPath(); g.moveTo(0, -32 * S); g.lineTo(1.2 * S, -35 * S); g.stroke();
+        g.restore();
+        if (it && it.lit && Math.abs(face) < 0.35) {
+          g.fillStyle = '#e7c56a';
+          g.fillRect(-1.2 * S, -34 * S, 2.4 * S, 28 * S);
+        }
+        break;
+      }
       case 'finale': {
         const gr = g.createLinearGradient(0, -24 * S, 0, 0);
         gr.addColorStop(0, '#6b2fbf'); gr.addColorStop(1, '#3a1470');
@@ -10435,7 +14013,7 @@
       }
     }
   }
-  const SHADOW_W = { hazaar: 26, saravedi: 90, sevenshot: 16, doubleshot: 12, anilvedi: 14, bijili: 8, kuruvi: 8, lakshmivedi: 12, sutli: 15, twosound: 9, notes: 13, pencil: 8, laddi: 68, cake: 22, finale: 26, basket: 15, firecracker: 18, rocketcombo: 16, anar: 13 };
+  const SHADOW_W = { hazaar: 26, saravedi: 90, sevenshot: 16, doubleshot: 12, anilvedi: 14, bijili: 8, kuruvi: 8, lakshmivedi: 12, sutli: 15, twosound: 9, notes: 13, pencil: 8, laddi: 68, cake: 22, finale: 26, basket: 15, firecracker: 18, rocketcombo: 16, anar: 13, luckystar: 16 };
   // Burning crackers light a flickering pool of street around them in their own colour, and every other cracker casts
   // a shadow away from that light. Both follow the street's perspective: flatter and smaller farther away. In AR they
   // fall on the camera picture.
@@ -10556,18 +14134,23 @@
     c.width = c.height = 34 * d;
     const g = c.getContext('2d');
     g.scale(d, d);
-    const S = { rocket: 0.42, roman: 0.62, laddi: 0.22, cake: 0.75, sparkler: 0.6, wheel: 0.52, lantern: 0.72, popper: 0.9, heli: 0.85,
+    const S = { rocket: 0.42, roman: 0.62, laddi: 0.22, cake: 0.75, sparkler: 0.6, wheel: 0.52, lantern: 0.72, popper: 0.9, heli: 0.85, luckystar: 0.72,
       anar: 0.82, fountain: 0.7, shell: 0.48, multishot: 0.7, firecracker: 0.9, rocketcombo: 0.48, finale: 0.6, saravedi: 0.17, sevenshot: 0.85, bijili: 1.3, lakshmivedi: 0.95, pencil: 0.58, sutli: 0.85, twosound: 1.05, hazaar: 0.135 }[LOOK[type] || type] || 0.95;
     g.translate(type === 'hazaar' ? 12 : 17, type === 'laddi' || type === 'saravedi' ? 19 : type === 'hazaar' ? 31 : type === 'firecracker' || type === 'anilvedi' ? 24 : type === 'bijili' ? 22 : 30);
     drawItemShape(g, type, S, null);
     return c.toDataURL();
   }
   const groundList = $('#groundList');
+  // A wide environment keeps the building in the middle. A cracker that would stand in that middle
+  // waits on the near side of the courtyard instead, so it does not cover the arch.
+  function courtyardFx(fx) {
+    return W > H && world.img?.fullScene && Math.abs(fx - 0.5) < 0.12 ? 1 : fx;
+  }
   function placeSelectedCracker() {
     if (launch.state !== 'READY') return;
     clearStreet();
     if (w3dShown()) placeInView3d(settings.item, 0.5, 0.5); // in 3D: the middle of the ground in view
-    else placeItem(settings.item, ...streetSpot(0.5, 0.8));
+    else placeItem(settings.item, ...streetSpot(courtyardFx(0.5), 0.8));
   }
   // 3D: a cracker placed without a tap (a chip, Burst all's next one, the Sky tube) stands on the forecourt the player
   // can see, at fractions across (fx) and down (fy, 0 far, 1 near) that visible ground. When they have looked away from
@@ -10617,8 +14200,63 @@
   }
   // Premium: each cracker picked joins the others on the street (spread out so they don't overlap), ready for Burst all.
   // A 3D world's forecourt is roomier, so it takes more where the phone has particles to spare.
-  const burstMax = () => (w3dShown() && Q().maxStars >= 300 ? 12 : 8);
-  // Premium from the store, or the Play reviewer code (Settings title tapped 7 times), so reviewers can try it too.
+  // Mega Burst (Premium or the Diwali Pass): up to 20, or 12 on a lower-end phone or a 3D show cut back for one,
+  // so a bigger row never costs smoothness.
+  const MEGA = 20;
+  const megaBurst = () => premium.active;
+  // A lower-end phone: 4 GB or less in the app, or one measured too slow for the middle tier. Measured from the device,
+  // not the Detail setting (which starts at Low for everyone). Free players line up 6 there.
+  const lowEndPhone = () => lowMemPhone || measuredTier === 0;
+  const burstMax = () => {
+    const free = lowEndPhone() ? 6 : w3dShown() && Q().maxStars >= 300 ? 12 : 8;
+    if (!megaBurst()) return free;
+    return !lowEndPhone() && !lite3d ? MEGA : 12;
+  };
+  // At the cap: a free player hears what Premium allows (no sheet opens over their show).
+  const burstFull = () => (megaBurst() ? toast(`Up to ${burstMax()} crackers at once. Tap Burst all!`, 3500)
+    : toast(`Up to ${burstMax()} crackers at once. 👑 Premium lights up to ${MEGA}! Tap to see`, 4000, 'premium'));
+  // Upsells for free players: a tappable toast (it opens Premium) at a natural break, never a sheet over play. At most one
+  // a minute and 8 a session, none while recording, in Live Sky or a card show, so a family's evening isn't nagged.
+  const UPSELL_GAP = 60000, UPSELL_MAX = 8;
+  let upsellAt = -1e9, upsells = 0;
+  function upsell(msg) {
+    if (premium.active || nativeRecording === 'recording' || live.on || mode !== 'play' || upsells >= UPSELL_MAX) return false;
+    const now = performance.now();
+    if (now - upsellAt < UPSELL_GAP) return false;
+    upsellAt = now; upsells++;
+    toast(`👑 ${msg} · Tap to see`, 4500, 'premium');
+    return true;
+  }
+  // After a free player's show: what Premium adds to what they just did, then the other perks in turn.
+  const UPSELL_PERKS = ['Premium: every cracker and shell, any time', 'Premium: clean videos without our mark',
+    'Premium: 3D landmarks and AR crackers on your street', 'Premium: all 36 Live Sky shows, all night'];
+  let perkAt = 0;
+  function upsellAfterShow(s) {
+    const pass = passOnSale(), showPass = !!pass && !s.multi && !!(perkAt % 2);
+    const msg = s.multi ? `Premium bursts up to ${MEGA} crackers at once`
+      : showPass ? `Diwali Pass ${pass.price}: all of Premium until 15 Nov` : UPSELL_PERKS[perkAt % UPSELL_PERKS.length];
+    if (upsell(msg)) perkAt++;
+  }
+  // A free player's 6th cracker on the street: what Premium allows (the limit itself stays 8, 6 on a smaller phone).
+  const UPSELL_AT = 6;
+  function megaNudge() {
+    if (megaBurst() || waitingItems().length !== UPSELL_AT) return;
+    upsell(`Nice row! Premium lights up to ${MEGA} at once and fills the street in one tap`);
+  }
+  // Fill the street (Mega Burst): every free slot gets a cracker from a mix the player can light (no gems, no tries).
+  const FILL_MIX = ['flowerpot', 'anar', 'chakri', 'fountain', 'starwheel', 'silvertower'];
+  function fillStreet() {
+    if (!megaBurst()) { openPremium(); return; }
+    if (launch.state !== 'READY' || mode !== 'play' || playMode !== 'ground' || rush.on || chor.on) return;
+    const mix = FILL_MIX.filter((t) => ITEMS[t] && !itemLocked(t) && !GEM_COST[t]);
+    if (!mix.length) return;
+    const was = settings.item;
+    for (let i = 0, n = waitingItems().length; n < burstMax(); i++, n++) { settings.item = mix[i % mix.length]; addSelectedCracker(); }
+    settings.item = was;
+    syncLaunchUi();
+    toast(`${waitingItems().length} crackers ready. Tap Burst all!`, 3000);
+  }
+  // Premium from the store, or a device that entered the old reviewer code.
   const burstEntitled = () => true; // Burst all, AR and multi-place are free for everyone
   const tapSkyEntitled = () => premium.active; // Tap Sky is Premium
   const waitingItems = () => groundItems.filter((it) => !it.armed && !it.done);
@@ -10628,17 +14266,33 @@
     if (launch.state !== 'READY') return;
     if (longWaiting(settings.item)) { toast('One long cracker at a time. Light it first'); return; }
     const n = waitingItems().length;
-    if (n >= burstMax()) { toast(`Up to ${burstMax()} crackers at once. Tap Burst all!`); return; }
+    if (n >= burstMax()) { burstFull(); return; }
     if (w3dShown()) {
       // The first in the middle of the ground in view, the rest round it in a widening spiral.
       const r = 0.16 * Math.sqrt(n), a = n * 2.4;
       placeInView3d(settings.item, clamp(0.5 + r * Math.cos(a), 0, 1), clamp(0.5 + r * 0.8 * Math.sin(a), 0, 1));
+      megaNudge();
       return;
     }
-    placeItem(settings.item, W * (0.14 + 0.72 * ((n * 0.618 + 0.5) % 1)), floorTop() + floorH() * (0.64 + 0.26 * ((n * 0.37) % 1)));
+    const fx = courtyardFx((n * 0.618 + 0.5) % 1);
+    placeItem(settings.item, W * (0.14 + 0.72 * fx), floorTop() + floorH() * (0.64 + 0.26 * ((n * 0.37) % 1)));
+    megaNudge();
   }
   // The dock under the street grows and shrinks (Burst all appears, the list wraps): the street follows its edge, so the
   // waiting crackers keep their places on it and the landmark stays at its far side.
+  function refitWaitingItems() {
+    if (mode !== 'play' || arOn || w3dShown() || launch.state !== 'READY' || sweepBusy()) return;
+    if (playMode !== 'ground' && playMode !== 'sky') return;
+    for (const it of waitingItems()) {
+      if (it.fx == null) continue;
+      // The auto tube parks in the centre on a tall phone and on the near side of a wide environment,
+      // so a rotation does not leave it standing in the arch.
+      if (it.standAside && !w3dShown()) it.fx = (W > H && world.img?.fullScene) ? 1 : 0.5;
+      const [x, y] = streetSpot(it.fx, it.fy);
+      it.x = inStreet(it.type, x, y); it.y = y; it.s = itemScale(y); it.z = itemDepth(y);
+    }
+    sortItems();
+  }
   let dockH = 0;
   if (window.ResizeObserver) new ResizeObserver(() => {
     // The dock hides during a show: its height then means nothing, and the street keeps its place until it returns.
@@ -10649,21 +14303,15 @@
     // In 3D the horizon sits a band above the controls, so the camera follows their edge: the world chip leaves with 2D
     // a frame after the switch, and the scene was framed for the taller dock
     if (w3dShown()) { sizeWorld3d(); return; }
-    if (playMode === 'ground') {
-      for (const it of waitingItems()) {
-        if (it.fx == null) continue;
-        const [x, y] = streetSpot(it.fx, it.fy);
-        it.x = x; it.y = y; it.s = itemScale(y); it.z = itemDepth(y);
-      }
-      sortItems(); drawFloor();
-    }
+    refitWaitingItems();
+    if (playMode === 'ground') drawFloor();
     refitScene(playMode === 'ground'); // the dock appeared or changed: the landmark, city or ghat stands just above it
   }).observe($('.bottom-ui'));
   // Drag a cracker from the list onto the street: Premium players add it there (up to burstMax(), for Burst all);
   // free players move their one cracker to the drop spot. A short tap still works as before.
   // In Sky mode a shell chip dragged onto the ground stands another tube there, for the sparkler to light.
   function startChipDrag(e, chip, id, sky) {
-    if (launch.state !== 'READY' || mode !== 'play' || playMode !== (sky ? 'sky' : 'ground') || rush.on || itemLocked(sky ? shellKey(id) : id)) return;
+    if (launch.state !== 'READY' || mode !== 'play' || playMode !== (sky ? 'sky' : 'ground') || rush.on || itemLocked(sky ? shellKey(id) : id) || shotEmpty(sky ? 'sky' : 'ground', id)) return;
     const sx = e.clientX, sy = e.clientY, pid = e.pointerId;
     let dragging = false;
     const move = (ev) => {
@@ -10687,17 +14335,18 @@
       if (!dragging || !drop || ev.type === 'pointercancel' || launch.state !== 'READY') return;
       if (ev.clientY > chip.getBoundingClientRect().top - 8) return; // released back over the list: nothing placed
       if (sky) {
-        if (groundItems.filter((it) => (it.launcher || it.skyTube) && !it.done).length >= burstMax()) { toast(`Up to ${burstMax()} crackers at once. Tap Burst all!`); return; }
+        if (groundItems.filter((it) => (it.launcher || it.skyTube) && !it.done).length >= burstMax()) { burstFull(); return; }
         const tube = placeItem('shell', drop.x, drop.y);
         tube.skyTube = true; tube.shellId = id;
         return;
       }
       settings.item = id; saveSettings(); syncModeUi();
       if (burstEntitled()) {
-        if (waitingItems().length >= burstMax()) { toast(`Up to ${burstMax()} crackers at once. Tap Burst all!`); return; }
+        if (waitingItems().length >= burstMax()) { burstFull(); return; }
         if (longWaiting(id)) { toast('One long cracker at a time. Light it first'); return; }
       } else clearStreet();
       placeItem(id, drop.x, drop.y);
+      megaNudge();
       sivakasiHint(id);
       syncLaunchUi();
     };
@@ -10714,6 +14363,7 @@
     // Each tap is a launch of the chosen shell, so it costs that shell's gems like Fire does.
     const sel = selection(), cost = gemCost(sel);
     if (cost > gems()) { openGems({ cost, label: sel.label }); return; }
+    if (!useShot('sky', settings.shell)) return;
     spendGems(cost);
     festLaunched([settings.shell]);
     el.hint.classList.add('gone');
@@ -10732,7 +14382,7 @@
     toast(tapSky ? 'Tap anywhere in the sky to fire' : 'Tap sky off');
     syncBurstAll();
   });
-  const burstAllBtn = $('#btnBurstAll');
+  const burstAllBtn = $('#btnBurstAll'), fillBtn = $('#btnFillStreet');
   function syncBurstAll() {
     const n = waitingItems().length, busy = launch.state !== 'READY';
     burstAllBtn.hidden = mode !== 'play' || playMode !== 'ground' || rush.on;
@@ -10748,7 +14398,13 @@
     tapSkyBtn.hidden = mode !== 'play' || rush.on || playMode !== 'sky';
     tapSkyBtn.disabled = launch.state !== 'READY';
     burstAllBtn.title = paid ? 'Light every cracker on the street together' : 'Premium: light many crackers together';
+    // Fill: shown to everyone in Ground (a crown on it for free players, who get the Premium sheet), not on Fireworks Street.
+    fillBtn.hidden = burstAllBtn.hidden || chor.on;
+    fillBtn.classList.toggle('locked', !megaBurst());
+    fillBtn.disabled = busy || (megaBurst() && n >= burstMax());
+    fillBtn.title = megaBurst() ? `Fill the street: up to ${burstMax()} crackers` : `Premium: fill the street with up to ${MEGA} crackers`;
   }
+  fillBtn.addEventListener('click', fillStreet);
   burstAllBtn.addEventListener('click', () => {
     if (!burstEntitled()) { openPremium(); return; }
     if (waitingItems().length < 2) { toast('Pick a few crackers first, then Burst all'); return; }
@@ -10767,8 +14423,12 @@
     if (out) { offerTry(out); return false; }
     const cost = gemCost(s);
     if (cost > gems()) { openGems({ cost, label: s.label, s }); return false; }
+    // One shot for each cracker this launch lights (a Burst all takes what is left of each).
+    const shot = s.writing ? [] : s.multi ? waitingItems().slice(0, burstMax()).map((it) => ['ground', it.type]) : s.id && s.id.startsWith('shell:') ? [['sky', s.id.slice(6)]] : s.id && s.id.startsWith('item:') ? [['ground', s.type]] : [];
+    if (!s.multi && shot.length && !useShot(...shot[0])) return false;
+    if (s.multi) shot.forEach((x) => useShot(...x));
     spendGems(cost);
-    const refund = () => { if (cost) { wallet.b += cost; saveWallet(); syncGems(); } };
+    const refund = () => { if (cost) { wallet.b += cost; saveWallet(); syncGems(); } shot.forEach((x) => giveShot(...x)); };
     const types = s.writing ? [] : s.multi ? waitingItems().slice(0, burstMax()).map((it) => it.type) : [s.type];
     return Promise.resolve(launch.request(s)).then((ok) => { if (ok === false) refund(); else { festLaunched(types); items.forEach(useTry); } return ok; }, (e) => { refund(); throw e; });
   }
@@ -10784,12 +14444,13 @@
     b.classList.toggle('premium-item', PREMIUM_ITEMS.has(id)); // a crown for free players (style.css)
     gemBadge(b, GEM_COST[id]);
     if (PREMIUM_ITEMS.has(id)) { const e = document.createElement('em'); e.className = 'chip-try'; e.textContent = 'Free try'; b.append(e); }
-    if (id === 'hazaar' && dayKey() <= '2026-11-15') { const e = document.createElement('em'); e.className = 'chip-new'; e.textContent = 'New'; b.append(e); }
+    if ((id === 'hazaar' && dayKey() <= '2026-11-15') || (id === 'luckystar' && dayKey() <= '2026-11-22')) { const e = document.createElement('em'); e.className = 'chip-new'; e.textContent = 'New'; b.append(e); }
     b.addEventListener('pointerdown', (e) => startChipDrag(e, b, id));
     b.addEventListener('click', () => {
       if (b.dataset.dragged) { delete b.dataset.dragged; return; } // a drag already placed it
       if (launch.state !== 'READY') return;
       if (itemLocked(id)) { offerTry(id); return; }
+      if (shotEmpty('ground', id)) { shotsOut(); return; }
       pickItem(id);
     });
     groundList.append(b);
@@ -10813,38 +14474,20 @@
     for (const e of shellList.querySelectorAll('.chip-try')) e.hidden = !tryLeft(shellKey(e.parentElement.dataset.shell));
   }
   syncTries();
-  // A Premium cracker with no light left: one more today for a short video (once a day, when a video is ready), else
-  // straight to Premium. Saying no just closes the sheet.
+  // A Premium cracker with no free light left: offer gem packs or Premium.
   let tryFor = null;
   function offerTry(type) {
-    if (tries.vday !== dayKey() && videoOk(rewardsProvider())) {
-      tryFor = type;
-      $('#tryLine').textContent = `You have lit your free ${crackerName(type)}. Watch a short video to light it once more today.`;
-      // The picture: the Hazaar ladi going off for a ground cracker, the palace finale for a sky shell.
-      const art = type.startsWith('shell:') ? 'assets/premium/hero-finale' : 'assets/premium/hero-hazaar';
-      $('#tryModal .try-art source').srcset = `${art}.webp`; $('#tryModal .try-art img').src = `${art}.jpg`;
-      $('#btnTryVideo').disabled = rewardBusy;
-      openSheet($('#tryModal'));
-    } else openPremium({ sivakasi: type });
+    tryFor = type;
+    $('#tryLine').textContent = `You have used the free ${crackerName(type)} try. Buy gems for special launches or unlock every cracker with Premium.`;
+    const art = type.startsWith('shell:') ? 'assets/premium/hero-finale' : 'assets/premium/hero-hazaar';
+    $('#tryModal .try-art source').srcset = `${art}.webp`; $('#tryModal .try-art img').src = `${art}.webp`;
+    openSheet($('#tryModal'));
   }
-  async function watchTryVideo() {
-    const type = tryFor, provider = rewardsProvider();
-    if (!type || rewardBusy || !provider || tries.vday === dayKey()) return;
-    rewardBusy = true; $('#btnTryVideo').disabled = true;
-    try {
-      const receipt = await rewardTimeout(() => provider.watchAd({ cracker: type }));
-      if (receipt && receipt.kind === 'ad' && await provider.verifyReceipt(receipt) === true && !wallet.tx.includes(`ad:${receipt.id}`)) {
-        wallet.tx.push(`ad:${receipt.id}`); saveWallet();
-        if (provider.acknowledgeReceipt) { try { await provider.acknowledgeReceipt(receipt); } catch (_) { /* deduplicated by id */ } }
-        tries.vday = dayKey(); tries.vfor = type; saveTries(); syncTries();
-        closeSheet($('#tryModal'));
-        if (launch.state === 'READY') { if (type.startsWith('shell:')) setShell(type.slice(6)); else pickItem(type); }
-        toast(`${crackerName(type)} is yours to light once more today`, 3000);
-      }
-    } catch (error) { toast((error && error.message) || 'No video is available. Try again later.'); }
-    finally { rewardBusy = false; $('#btnTryVideo').disabled = false; }
-  }
-  $('#btnTryVideo').addEventListener('click', watchTryVideo);
+  $('#btnTryGems').addEventListener('click', () => {
+    const type = tryFor, shell = type && type.startsWith('shell:') ? type.slice(6) : '';
+    closeSheet($('#tryModal'));
+    openGems({ cost: GEM_COST[type] || SHELL_GEM_COST[shell] || 10, label: crackerName(type) });
+  });
   $('#btnTryPremium').addEventListener('click', () => { closeSheet($('#tryModal')); openPremium({ sivakasi: tryFor }); });
   $('#tryBack').addEventListener('click', () => closeSheet($('#tryModal')));
   $('#btnClearStreet').addEventListener('click', () => { clearStreet(); clearWriting(); });
@@ -10855,9 +14498,362 @@
     el.hint.classList.remove('gone');
   }
 
+  // ---------- Cracker loader ----------
+  // The bar under the street shows the crackers the player loaded, not all of them; one screen (#loadModal) lists every
+  // sky and ground cracker as thumbnails. Sky and Ground are a bar each, with slots of their own:
+  //  - slots 1 and 2 are free for everyone;
+  //  - slots 3 to 8 open once and for good with gems (SLOT_GEMS, by bar);
+  //  - Premium (the Diwali Pass too) opens every slot. Its crackers rest past the open slots when it lapses, and come back
+  //    with it; the slots bought with gems stay.
+  // A slot holds any cracker: loading one costs nothing, and a cracker's own rule (free, gems a launch, a free try or
+  // Premium) still applies when it is lit. A player from before the loader keeps the whole bar and every slot.
+  // luts:rack = { sky: [ids], ground: [ids], bought: { sky: n, ground: n }, classic, full (classic, never changed: new
+  // crackers join), crowned (Premium's crackers were loaded for them once) }
+  const RACK_KEY = 'luts:rack', FREE_SLOTS = 2, MAX_SLOTS = 8, SLOT_GEMS = [10, 15, 20, 30, 40, 60];
+  const RACK_ORDER = { sky: DOCK_ORDER, ground: ITEM_ORDER };
+  const RACK_STARTER = { sky: ['random', 'peony'], ground: ['flowerpot', 'anar'] };
+  const SIDES = ['sky', 'ground'];
+  rack = (() => {
+    let r = null;
+    try { r = JSON.parse(localStorage.getItem(RACK_KEY) || 'null'); } catch (e) { /* storage unavailable */ }
+    if (!r || typeof r !== 'object') r = returning ? { classic: true, full: true } : {};
+    r.bought = r.bought && typeof r.bought === 'object' ? r.bought : {};
+    for (const side of SIDES) {
+      r[side] = r.full ? [...RACK_ORDER[side]] : [...new Set(Array.isArray(r[side]) ? r[side] : [])].filter((id) => RACK_ORDER[side].includes(id));
+      if (!r[side].length) r[side] = [...RACK_STARTER[side]];
+      r.bought[side] = Math.min(Math.max(0, Math.floor(+r.bought[side]) || 0), SLOT_GEMS.length);
+    }
+    return r;
+  })();
+  // (full: the lists aren't kept, so a build's new crackers join a whole bar.)
+  const saveRack = () => { try { localStorage.setItem(RACK_KEY, JSON.stringify(rack.full ? { classic: true, full: true, bought: rack.bought, crowned: rack.crowned } : rack)); } catch (e) { /* storage unavailable */ } };
+  saveRack(); // written now, so the next launch knows this player's rack from one from before the loader
+  const rackOpen = (side) => (rack.classic || premium.active ? Infinity : FREE_SLOTS + rack.bought[side]);
+  const rackShown = (side) => rack[side].slice(0, rackOpen(side));
+  const barShells = () => rackShown('sky');
+  const slotPrice = (side) => (rack.classic || premium.active ? 0 : SLOT_GEMS[rack.bought[side]] || 0);
+  const rackActive = (side) => (side === 'sky' ? settings.shell : settings.item);
+  const rackList = (side) => (side === 'sky' ? shellList : groundList);
+  const rackChip = (side, id) => rackList(side).querySelector(side === 'sky' ? `[data-shell="${id}"]` : `[data-item="${id}"]`);
+  // Bought Premium: what it's for is in the bar at once, after whatever the player loaded.
+  function crownRack() {
+    if (!premium.active || rack.crowned) return;
+    rack.crowned = true;
+    if (!rack.full) { rack.sky.push(...[...PREMIUM_SHELLS].filter((id) => !rack.sky.includes(id))); rack.ground.push(...PREMIUM_FIRST.filter((id) => !rack.ground.includes(id))); }
+    saveRack();
+  }
+  // The tiles at the bar's ends: Load opens the screen, an empty slot too, and the next slot to buy shows what it costs.
+  const rackTiles = {};
+  for (const side of SIDES) {
+    const tile = (cls, html) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = `rack-tile ${cls}`; b.innerHTML = html;
+      b.addEventListener('click', () => openLoader(side));
+      return b;
+    };
+    const reload = document.createElement('button'), ends = document.createElement('div');
+    reload.type = 'button'; reload.className = 'rack-tile rack-reload'; reload.title = 'Reload all'; reload.setAttribute('aria-label', 'Reload all');
+    reload.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8a8 8 0 1 0 1 6M19 3v5h-5"/></svg>';
+    reload.addEventListener('click', reloadAll);
+    ends.className = 'rack-ends';
+    rackTiles[side] = {
+      ends,
+      load: tile('rack-load', '<span class="ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 8h16v11H4zM4 8l2.5-4h11L20 8M12 11v5M9.5 13.5h5"/></svg></span><span>Load</span>'),
+      add: tile('rack-add', '<span class="ico" aria-hidden="true">+</span><span>Add</span>'),
+      lock: tile('rack-lock', '<span class="ico" aria-hidden="true">🔒</span><span></span><em class="chip-gem"></em>'),
+    };
+    ends.append(rackTiles[side].load, reload);
+    rackList(side).prepend(ends);
+  }
+  // Only the loaded crackers show. One the game chose itself (a Live Sky show's own, a Settings pick) stands in front
+  // for as long as it's the chosen one, so the bar always shows what Fire will light.
+  const barKeys = {};
+  function syncBar() {
+    if (!rack) return;
+    crownRack();
+    for (const side of SIDES) {
+      const list = rackList(side), active = rackActive(side), loaded = rackShown(side), shown = loaded.includes(active) || !rackChip(side, active) ? loaded : [active, ...loaded];
+      const room = loaded.length < Math.min(rackOpen(side), RACK_ORDER[side].length), price = slotPrice(side), t = rackTiles[side];
+      const key = [shown.join(), room, price].join('|');
+      if (key === barKeys[side]) continue;
+      barKeys[side] = key;
+      for (const c of list.querySelectorAll('.shell-chip')) c.hidden = true;
+      const row = [t.ends];
+      for (const id of shown) { const c = rackChip(side, id); c.hidden = false; c.classList.toggle('rack-guest', !loaded.includes(id)); row.push(c); }
+      if (room) row.push(t.add);
+      if (price) {
+        t.lock.children[1].textContent = inLang('Slot {0}').replace('{0}', FREE_SLOTS + rack.bought[side] + 1);
+        t.lock.children[2].textContent = `💎${price}`;
+        row.push(t.lock);
+      } else t.lock.remove();
+      if (!room) t.add.remove();
+      list.prepend(...row); // the hidden chips stay after them
+    }
+    syncShots();
+  }
+  // ---------- Shots ----------
+  // A free cracker holds SHOTS_FULL shots a free player's way. Each one lit takes a shot; putting it down takes none, so
+  // a drag costs one at most. An empty tile stays where it is, grey, with a ring filling for REFILL_SECONDS, then it is
+  // full again; Reload all fills every tile at once. Gem crackers pay by the launch and Premium's own use their free tries,
+  // so neither has shots. Premium has no count (nothing is kept against it, so a lapse loses nothing), and Live Sky, any
+  // show the game plays itself, Fireworks Street, a Rush and a recording never use shots. Kept for this launch of the app.
+  const SHOTS_FULL = 10, REFILL_SECONDS = 3;
+  const shotsUsed = { sky: {}, ground: {} }, shotTimers = {};
+  document.documentElement.style.setProperty('--refill', `${REFILL_SECONDS}s`);
+  const shotsOn = () => mode === 'play' && !premium.active && !chor.on && !rush.on && !live.on && !rec && !['recording', 'requesting'].includes(nativeRecording);
+  const shotCounted = (side, id) => shotsOn() && rackTier(side, id) === 'free';
+  const shotEmpty = (side, id) => shotCounted(side, id) && (shotsUsed[side][id] || 0) >= SHOTS_FULL;
+  function useShot(side, id) {
+    if (!shotCounted(side, id)) return true;
+    if (shotEmpty(side, id)) { shotsOut(); return false; }
+    shotsUsed[side][id] = (shotsUsed[side][id] || 0) + 1;
+    if (shotsUsed[side][id] >= SHOTS_FULL) shotTimers[`${side}:${id}`] = setTimeout(() => { delete shotsUsed[side][id]; delete shotTimers[`${side}:${id}`]; syncShots(); }, REFILL_SECONDS * 1000);
+    syncShots();
+    return true;
+  }
+  function giveShot(side, id) { // the launch never happened
+    if (!shotsUsed[side][id]) return;
+    clearTimeout(shotTimers[`${side}:${id}`]); delete shotTimers[`${side}:${id}`];
+    shotsUsed[side][id]--;
+    syncShots();
+  }
+  function reloadAll() {
+    if (!Object.keys(shotsUsed.sky).length && !Object.keys(shotsUsed.ground).length) return;
+    for (const k in shotTimers) { clearTimeout(shotTimers[k]); delete shotTimers[k]; }
+    shotsUsed.sky = {}; shotsUsed.ground = {};
+    track('reload_all');
+    buzz(10); syncShots();
+    toast('Every cracker reloaded');
+  }
+  let shotsOutAt = 0;
+  function shotsOut() { if (Date.now() - shotsOutAt > 2500) { shotsOutAt = Date.now(); toast('Reloading. Tap the reload button to fill every cracker now'); } }
+  function syncShots() {
+    let spent = false;
+    for (const side of SIDES) {
+      for (const e of rackList(side).querySelectorAll('.chip-shots')) {
+        const chip = e.parentElement, left = SHOTS_FULL - (shotsUsed[side][chip.dataset.shell || chip.dataset.item] || 0);
+        if (left < SHOTS_FULL) spent = true;
+        e.textContent = left; e.setAttribute('aria-label', `${left} shots left`);
+        chip.classList.toggle('shots-empty', left <= 0);
+      }
+    }
+    document.body.classList.toggle('shots-spent', spent);
+  }
+  const loadModal = $('#loadModal'), loadGrid = $('#loadGrid');
+  const FILTERS = [['all', 'All'], ['sky', 'Sky'], ['ground', 'Ground'], ['free', 'Free'], ['gems', 'Gems'], ['premium', 'Premium']];
+  for (const [id, label] of FILTERS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'chip'; b.dataset.filter = id; b.textContent = label;
+    b.addEventListener('click', () => setLoadFilter(id));
+    $('#loadFilters').append(b);
+  }
+  function setLoadFilter(id) {
+    loadGrid.dataset.filter = id; loadGrid.scrollTop = 0;
+    for (const b of $('#loadFilters').children) { b.classList.toggle('active', b.dataset.filter === id); b.setAttribute('aria-pressed', String(b.dataset.filter === id)); }
+  }
+  const rackTier = (side, id) => ((side === 'sky' ? PREMIUM_SHELLS : PREMIUM_ITEMS).has(id) ? 'premium' : (side === 'sky' ? SHELL_GEM_COST : GEM_COST)[id] ? 'gems' : 'free');
+  const rackTryKey = (side, id) => (side === 'sky' ? shellKey(id) : id);
+  const rackName = (side, id) => (side === 'sky' ? shellLabel(id) : ITEMS[id].label);
+  const rackThumb = (img, side, id) => {
+    const chip = rackChip(side, id), drawn = () => (side === 'sky' ? shellIcon(id) : chip.dataset.sprite);
+    img.alt = ''; img.loading = 'lazy'; img.decoding = 'async'; img.draggable = false; img.width = img.height = 72;
+    img.addEventListener('error', () => { img.src = drawn(); }, { once: true });
+    img.src = chip.querySelector('img').src || drawn();
+  };
+  let loadBack = false; // the screen waits under the gem or free-try sheet it opened
+  let loadWant = null; // the cracker tapped into a full bar: it goes in once a slot opens
+  let loadPicked = {}; // the last cracker loaded on this visit, by bar (it's the one chosen on the way out)
+  let loadDropped = new Set();
+  function openLoader(side) {
+    if (launch.state !== 'READY') return;
+    loadWant = null; loadPicked = {}; loadDropped = new Set();
+    buildLoader();
+    setLoadFilter('all');
+    showOffer();
+    track('loader_open', { bar: side });
+    openSheet(loadModal);
+    const sec = loadGrid.querySelector(`[data-side="${side}"]`);
+    if (sec) loadGrid.scrollTop = sec.offsetTop;
+  }
+  // Built as it opens and let go as it closes: all those thumbnails stay out of a small phone's memory while it plays.
+  function buildLoader() {
+    loadGrid.textContent = '';
+    for (const side of SIDES) {
+      const sec = document.createElement('section');
+      sec.className = 'load-sec'; sec.dataset.side = side;
+      const h = document.createElement('h3');
+      h.textContent = side === 'sky' ? 'Sky crackers' : 'Ground crackers';
+      sec.append(h);
+      const grid = document.createElement('div');
+      grid.className = 'load-tiles';
+      for (const id of RACK_ORDER[side]) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'load-tile'; b.dataset.id = id; b.dataset.tier = rackTier(side, id);
+        b.innerHTML = '<span class="load-pic"><img></span><span class="load-name"></span><em class="load-tag"></em>';
+        rackThumb(b.querySelector('img'), side, id);
+        b.querySelector('.load-name').textContent = rackName(side, id);
+        b.addEventListener('click', () => tapTile(side, id));
+        grid.append(b);
+      }
+      sec.append(grid);
+      loadGrid.append(sec);
+    }
+    paintLoader();
+  }
+  function paintLoader() {
+    const prem = premium.active;
+    $('#loadLine').textContent = prem ? 'Every slot is open and every cracker is free.'
+      : rack.classic ? 'All your crackers stay. Take out any you don’t want in your bar.'
+        : 'Two slots are free in each bar. 💎 is the price of a launch, 👑 is Premium.';
+    for (const sec of loadGrid.children) {
+      const side = sec.dataset.side, loaded = new Set(rackShown(side));
+      for (const b of sec.querySelectorAll('.load-tile')) {
+        const id = b.dataset.id, on = loaded.has(id), tier = b.dataset.tier, key = rackTryKey(side, id), tag = b.lastChild;
+        const locked = tier === 'premium' && itemLocked(key);
+        b.classList.toggle('on', on); b.classList.toggle('locked', locked); b.setAttribute('aria-pressed', String(on));
+        tag.className = `load-tag ${tier}`;
+        tag.textContent = prem ? '' : tier === 'gems' ? `💎${(side === 'sky' ? SHELL_GEM_COST : GEM_COST)[id]}` : tier === 'premium' ? (locked ? '🔒' : 'Free try') : 'Free';
+      }
+    }
+    const tray = $('#loadTray'), scrolled = [...tray.querySelectorAll('.load-slots')].map((s) => s.scrollLeft);
+    tray.textContent = '';
+    for (const side of SIDES) {
+      const row = document.createElement('div');
+      row.className = 'load-row';
+      const open = rackOpen(side), shown = rackShown(side), head = document.createElement('div');
+      head.className = 'load-row-head';
+      head.innerHTML = '<b></b><small></small>';
+      head.firstChild.textContent = side === 'sky' ? 'Sky' : 'Ground';
+      head.lastChild.textContent = open === Infinity ? inLang('{0} loaded').replace('{0}', shown.length) : `${shown.length} / ${open}`;
+      const slots = document.createElement('div');
+      slots.className = 'load-slots';
+      for (const id of shown) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'load-slot'; b.title = `Take out ${rackName(side, id)}`; b.setAttribute('aria-label', b.title);
+        b.innerHTML = '<img><i aria-hidden="true">×</i>';
+        rackThumb(b.firstChild, side, id);
+        b.addEventListener('click', () => dropCracker(side, id));
+        slots.append(b);
+      }
+      if (open !== Infinity) {
+        for (let n = shown.length; n < open; n++) { const e = document.createElement('span'); e.className = 'load-slot empty'; e.textContent = '+'; slots.append(e); }
+        for (let n = open; n < MAX_SLOTS; n++) {
+          const b = document.createElement('button');
+          b.type = 'button'; b.className = 'load-slot shut';
+          const cost = n === open ? slotPrice(side) : 0;
+          b.disabled = !cost;
+          b.innerHTML = '<span aria-hidden="true">🔒</span><small></small>';
+          b.lastChild.textContent = cost ? `💎${cost}` : '';
+          b.setAttribute('aria-label', inLang('Slot {0}').replace('{0}', n + 1));
+          if (cost) b.addEventListener('click', () => showOffer(side));
+          slots.append(b);
+        }
+      }
+      row.append(head, slots);
+      tray.append(row);
+      slots.scrollLeft = scrolled[SIDES.indexOf(side)] || 0;
+    }
+  }
+  // The offer under the tray: a slot's price and Premium, when the player tapped a shut slot or filled a bar.
+  let offerSide = null;
+  function showOffer(side, full) {
+    offerSide = side || null;
+    const box = $('#loadOffer');
+    box.hidden = !side;
+    if (!side) return;
+    const cost = slotPrice(side), n = FREE_SLOTS + rack.bought[side] + 1, bar = side === 'sky' ? 'Sky' : 'Ground';
+    $('#loadOfferLine').textContent = inLang(full ? '{0} bar is full. Take one out or open a slot.' : 'Open a slot in your {0} bar for good?').replace('{0}', inLang(bar));
+    if (full && !cost) $('#loadOfferLine').textContent = inLang('{0} bar is full. Take one out, or go Premium for every slot.').replace('{0}', inLang(bar));
+    const buy = $('#btnLoadSlot');
+    buy.hidden = !cost;
+    buy.textContent = cost ? `${inLang('Slot {0}').replace('{0}', n)} · 💎${cost}` : '';
+  }
+  function openSlot() {
+    const side = offerSide, cost = side && slotPrice(side);
+    if (!cost) return;
+    const n = FREE_SLOTS + rack.bought[side] + 1;
+    if (cost > gems()) { loadBack = true; openGems({ cost, label: inLang('Slot {0}').replace('{0}', n) }); return; }
+    spendGems(cost, 'slot');
+    rack.bought[side]++;
+    track('slot_open', { bar: side, slot: n, gems: cost });
+    if (loadWant && loadWant.side === side) { insertCracker(side, loadWant.id); loadWant = null; }
+    saveRack(); syncBar(); showOffer(); paintLoader();
+    toast(inLang('Slot {0} is open').replace('{0}', n));
+  }
+  function insertCracker(side, id) {
+    if (rack.full) rack.full = false;
+    const at = rackShown(side).length, was = rack[side].indexOf(id);
+    if (was >= 0) rack[side].splice(was, 1); // resting past the open slots
+    rack[side].splice(Math.min(at, rack[side].length), 0, id);
+    loadPicked[side] = id; loadDropped.delete(id);
+  }
+  function dropCracker(side, id) {
+    if (rackShown(side).length <= 1) { toast('Keep at least one cracker in each bar'); return; }
+    rack.full = false;
+    rack[side] = rack[side].filter((x) => x !== id);
+    loadDropped.add(id);
+    if (loadPicked[side] === id) delete loadPicked[side];
+    saveRack(); syncBar(); showOffer(); paintLoader();
+  }
+  function tapTile(side, id) {
+    if (rackShown(side).includes(id)) { dropCracker(side, id); return; }
+    const key = rackTryKey(side, id);
+    if (rackTier(side, id) === 'premium' && itemLocked(key)) { loadBack = true; offerTry(key); return; }
+    if (rackShown(side).length >= rackOpen(side)) { loadWant = { side, id }; showOffer(side, true); return; }
+    loadWant = null;
+    insertCracker(side, id);
+    saveRack(); syncBar(); showOffer(); paintLoader();
+  }
+  function clearRack() {
+    rack.full = false;
+    for (const side of SIDES) {
+      const keep = rackShown(side).includes(rackActive(side)) ? rackActive(side) : rackShown(side)[0];
+      for (const id of rackShown(side)) if (id !== keep) loadDropped.add(id);
+      rack[side] = [keep]; delete loadPicked[side];
+    }
+    saveRack(); syncBar(); showOffer(); paintLoader();
+  }
+  // Called by closeSheet. Leaving the screen lets go of its thumbnails and settles the chosen crackers: the one just
+  // loaded for the bar in play, or the first loaded in place of one taken out. The sheets it opened lead back to it.
+  function loaderSheetClosed(el) {
+    if (el !== loadModal) {
+      if (loadBack && (el.id === 'gemModal' || el.id === 'tryModal')) { loadBack = false; if (mode === 'play' && !document.body.classList.contains('home')) { paintLoader(); openSheet(loadModal); } else releaseLoader(); }
+      return;
+    }
+    releaseLoader();
+    for (const side of SIDES) {
+      const now = rackActive(side), next = (playMode === side && loadPicked[side]) || (loadDropped.has(now) ? rackShown(side)[0] : null);
+      if (!next || next === now) continue;
+      if (playMode === side && mode === 'play') { if (side === 'sky') setShell(next); else pickItem(next); continue; }
+      if (side === 'sky') settings.shell = next; else settings.item = next;
+      saveSettings(); syncSettingsUi(); syncModeUi(); syncLaunchUi();
+    }
+    syncBar();
+  }
+  function releaseLoader() { loadBack = false; loadWant = null; loadGrid.textContent = ''; $('#loadTray').textContent = ''; showOffer(); }
+  $('#loadBack').addEventListener('click', () => closeSheet(loadModal));
+  $('#btnLoadDone').addEventListener('click', () => closeSheet(loadModal));
+  $('#btnLoadClear').addEventListener('click', clearRack);
+  $('#btnLoadSlot').addEventListener('click', openSlot);
+  $('#btnLoadPremium').addEventListener('click', () => openPremium({ slots: true }));
+  window.addEventListener('luts:premium-changed', () => { syncBar(); if (!loadModal.hidden) { showOffer(); paintLoader(); } });
+  for (const side of SIDES) {
+    for (const c of rackList(side).querySelectorAll('.shell-chip')) {
+      if (rackTier(side, c.dataset.shell || c.dataset.item) !== 'free') continue;
+      const e = document.createElement('em'), ring = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      e.className = 'chip-shots';
+      ring.setAttribute('class', 'chip-ring'); ring.setAttribute('viewBox', '0 0 36 36'); ring.setAttribute('aria-hidden', 'true');
+      ring.innerHTML = '<circle cx="18" cy="18" r="15" pathLength="100"/>';
+      c.append(e); c.querySelector('.ico').append(ring);
+    }
+  }
+  syncBar();
+
+
   // ---------- Sparkler writing ----------
   let pen = null;
   const strokes = []; // {x, y, c, id}
+  scaleStrokes = (sx, sy) => { for (const p of strokes) { p.x *= sx; p.y *= sy; } };
   let strokeId = 0;
   const SPARK_COLORS = { gold: '#ffcf6b', white: '#fff4dc', pink: '#ff6ec7', cyan: '#6ff3ff', rainbow: '' };
   function penColor() {
@@ -10896,21 +14892,49 @@
   function penDown(x, y) {
     strokeId++;
     pen = { x, y, hue: rand(0, 360) };
+    if (window.LUTSCoach) LUTSCoach.act('spark');
     strokes.push({ x, y, c: penColor(), id: strokeId });
     penSparks(x, y, 8);
     Sound.sparklerStart();
   }
+  // A phone sends 120 to 240 touch moves a second (more with coalesced events): painting and sparking on each one put
+  // dozens of full-layer glow strokes and up to 10 new sparks per move on the GPU while the finger moved, and the line
+  // fell behind it. Moves are kept as points and painted once a frame as one path (three strokes), with a spark budget.
+  let penPts = null, penSparkDue = 0, penRaf = 0, penC = '', penC0 = '';
   function penMove(x, y) {
     if (!pen) return;
     const d = Math.hypot(x - pen.x, y - pen.y);
     if (d < 1.5) return;
     const c = penColor();
-    paintSegment(pen.x, pen.y, x, y, c);
     if (strokes.length < 8000) strokes.push({ x, y, c, id: strokeId });
-    penSparks(x, y, Math.min(10, 1 + d / 6));
+    if (!penPts) { penPts = [pen.x, pen.y]; penC0 = c; }
+    penPts.push(x, y); penC = c;
+    penSparkDue += Math.min(10, 1 + d / 6);
     pen.x = x; pen.y = y;
+    if (!penRaf) penRaf = requestAnimationFrame(flushPen);
   }
-  function penUp() { pen = null; Sound.sparklerStop(); syncDrawingAction(); }
+  function flushPen() {
+    penRaf = 0;
+    const pts = penPts; penPts = null;
+    if (!pts || pts.length < 4) return;
+    const g = pctx, n = pts.length;
+    const path = () => { g.beginPath(); g.moveTo(pts[0], pts[1]); for (let i = 2; i < n; i += 2) g.lineTo(pts[i], pts[i + 1]); g.stroke(); };
+    g.globalCompositeOperation = 'lighter';
+    // Rainbow: the hue moves along the batch, so it runs as a gradient from the batch's first colour to its last.
+    if (penC0 && penC0 !== penC) { const gr = g.createLinearGradient(pts[0], pts[1], pts[n - 2], pts[n - 1]); gr.addColorStop(0, penC0); gr.addColorStop(1, penC); g.strokeStyle = gr; }
+    else g.strokeStyle = penC || SPARK_COLORS.gold;
+    g.globalAlpha = 0.09; g.lineWidth = 18 * U; path();
+    g.globalAlpha = 0.4; g.lineWidth = 6.5 * U; path();
+    g.globalCompositeOperation = 'source-over';
+    g.globalAlpha = 0.95; g.strokeStyle = '#fffaf0'; g.lineWidth = Math.max(1.5, 2.4 * U); path();
+    g.globalAlpha = 1;
+    penSparks(pts[n - 2], pts[n - 1], Math.min(5, penSparkDue)); penSparkDue = 0;
+  }
+  function penUp() {
+    if (penRaf) { cancelAnimationFrame(penRaf); flushPen(); }
+    penPts = null; penSparkDue = 0;
+    pen = null; Sound.sparklerStop(); syncDrawingAction();
+  }
   let sparkTool = 'pen', eraser = null, strokesDirty = false;
   function sparkDown(x, y) {
     if (sparkTool === 'erase') { eraser = { x, y }; eraseAt(x, y); return; }
@@ -11163,6 +15187,26 @@
     }
     syncDrawingAction();
   }
+  // The written strokes as a small square picture: each stroke a glowing line of its own colour, fitted and centred.
+  function writingThumb(list, px) {
+    const c = document.createElement('canvas'); c.width = c.height = px;
+    const g = c.getContext('2d');
+    g.fillStyle = '#0b0a22'; g.fillRect(0, 0, px, px);
+    if (list.length < 2) return c;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of list) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+    const k = (px * 0.84) / Math.max(1, x1 - x0, y1 - y0), ox = (px - (x1 - x0) * k) / 2, oy = (px - (y1 - y0) * k) / 2;
+    g.lineCap = g.lineJoin = 'round'; g.globalCompositeOperation = 'lighter';
+    for (const [w, a] of [[5, 0.25], [2, 0.95]]) {
+      g.lineWidth = w; g.globalAlpha = a;
+      for (let i = 1; i < list.length; i++) {
+        const p = list[i - 1], q = list[i];
+        if (p.id !== q.id) continue;
+        g.strokeStyle = q.c || '#ffd98a'; g.beginPath(); g.moveTo(ox + (p.x - x0) * k, oy + (p.y - y0) * k); g.lineTo(ox + (q.x - x0) * k, oy + (q.y - y0) * k); g.stroke();
+      }
+    }
+    return c;
+  }
   // Turns the written light into a burst of fireworks.
   function startTrace() {
     pctx.clearRect(0, 0, W, H);
@@ -11204,6 +15248,10 @@
     addLight('#ffe6b8', 2.5);
     buzz(40);
     achieve('signed');
+    // My sky's picture: the strokes drawn again small from their points (reading the full-screen canvas back from the
+    // GPU froze the burst on a Samsung M11), kept a moment after the burst so encoding and saving miss its frames.
+    const pic = writingThumb(strokes, 112);
+    setTimeout(() => moment({ kind: 'spark', icon: '🎇', line: 'Wrote in sparkler light', thumb: pic }), 1800);
     clearWriting();
   }
   const sparkColors = $('#sparkColors');
@@ -11223,6 +15271,7 @@
   function syncModeUi() {
     groundList.querySelectorAll('[data-item]').forEach((c) => c.classList.toggle('active', c.dataset.item === settings.item));
     sparkColors.querySelectorAll('[data-spark]').forEach((c) => c.classList.toggle('active', c.dataset.spark === settings.spark));
+    syncBar();
   }
   syncModeUi();
   setPlayMode('sky');
@@ -11253,8 +15302,8 @@
   let achieved = {};
   try { achieved = JSON.parse(localStorage.getItem('luts:ach') || '{}') || {}; } catch (e) { achieved = {}; }
   // The Android app mirrors badges to Google Play Games (see GameAchievements.kt); elsewhere this does nothing.
-  const playGames = (action, arg) => (ANDROID_WEBVIEW && typeof window.LUTSNative.ads === 'function'
-    ? window.LUTSNative.ads(action, arg) : Promise.reject(Error('No Play Games here')));
+  const playGames = (action, arg) => (ANDROID_WEBVIEW && typeof window.LUTSNative.service === 'function'
+    ? window.LUTSNative.service(action, arg) : Promise.reject(Error('No Play Games here')));
   playGames('games-sync', Object.keys(achieved).join(',')).catch(() => {});
   // Leaderboards (Play Games keeps each player's best): people lit up, longest streak, today's Daily Sky, best combo.
   function postScores(list) { playGames('games-score', list).catch(() => {}); }
@@ -11314,12 +15363,16 @@
     playGames('games-unlock', id).catch(() => {});
     const a = ACH.find((x) => x[0] === id);
     if (a) {
-      toast(`🏅 Achievement unlocked: ${a[2]} · tap to share`, 4200);
-      el.toast.dataset.badge = id; // the toast is tappable while it shows
+      toast(`🏅 Achievement unlocked: ${a[2]} · tap to share`, 4200, id); // (tappable while it shows)
+      moment({ kind: 'ach', icon: a[1], line: 'Achievement: {0}', args: [a[2]], thumb: `assets/menu/badges/${id}.webp`, ref: id, key: `ach:${id}` });
     }
     renderAch();
   }
-  el.toast.addEventListener('click', () => { if (el.toast.dataset.badge && el.toast.classList.contains('show')) shareBadge(el.toast.dataset.badge); });
+  el.toast.addEventListener('click', () => {
+    if (!el.toast.dataset.badge || !el.toast.classList.contains('show')) return;
+    if (el.toast.dataset.badge === 'premium') { el.toast.classList.remove('show'); openPremium({ toast: true }); return; } // an upsell: tap to see Premium
+    shareBadge(el.toast.dataset.badge);
+  });
   function renderAch() {
     const list = $('#achList');
     list.innerHTML = '';
@@ -11454,15 +15507,37 @@
   $('#boardGo').addEventListener('click', boardGo);
 
   // Rating, reviews and updates go through Google Play in the Android app, and to the Play page elsewhere.
-  const PLAY_PAGE = 'https://play.google.com/store/apps/details?id=com.stalinpusparaj.lightuptheskies';
-  const playStore = (action) => (window.LUTSNative && typeof window.LUTSNative.ads === 'function'
-    ? window.LUTSNative.ads(action) : Promise.reject(Error('No store here')));
+  const PLAY_PAGE = playLink('rate');
+  const playStore = (action) => (window.LUTSNative && typeof window.LUTSNative.service === 'function'
+    ? window.LUTSNative.service(action) : Promise.reject(Error('No store here')));
   const openPlayPage = () => playStore('store').catch(() => { window.open(PLAY_PAGE, '_blank', 'noopener'); });
   // Play's review sheet; when Play declines to show it (it allows about one a month), the flow ends at once and the
   // Play page opens instead, so the button always does something.
   $('#setRate').addEventListener('click', () => {
     const asked = Date.now();
     playStore('review').then((done) => { if (!done || Date.now() - asked < 1200) openPlayPage(); }).catch(openPlayPage);
+  });
+  // Send feedback: separate from rating, on purpose. Whatever someone writes, it never opens or holds back Play's review
+  // sheet (Google Play forbids choosing who is asked to rate by what they think). It opens the phone's email app,
+  // addressed to us, with the message, its kind and the version and phone; nothing is sent until they send it there.
+  let fbKind = 'idea';
+  const FB_KINDS = { idea: 'Idea', bug: 'Bug', hard: 'Too hard or confusing', other: 'Feedback' };
+  $('#setFeedback').addEventListener('click', () => openSheet($('#feedbackModal')));
+  $('#fbKinds').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-kind]');
+    if (!b) return;
+    fbKind = b.dataset.kind;
+    for (const x of $('#fbKinds').children) x.setAttribute('aria-pressed', String(x === b));
+  });
+  $('#fbSend').addEventListener('click', () => {
+    const text = $('#fbText').value.trim();
+    if (!text) { $('#fbText').focus(); toast('Write a few words first'); return; }
+    const v = (window.LUTSNative && window.LUTSNative.version) || 'web';
+    const body = `${text}\n\n—\nLight Up the Skies ${v} · ${navigator.userAgent.replace(/^.*?\(([^)]*)\).*$/, '$1')} · ${document.documentElement.lang || 'en'}`;
+    location.href = `mailto:gemmyapps@gmail.com?subject=${encodeURIComponent(`${FB_KINDS[fbKind]}: Light Up the Skies`)}&body=${encodeURIComponent(body)}`;
+    $('#fbText').value = '';
+    closeSheet($('#feedbackModal'));
+    toast('Thank you! Your email app has the message ready to send');
   });
   // A newer build on Play: the home screen shows a card (hidden for a day after Later) and Settings keeps an Update row.
   // Update starts Google Play's own in-app update (download, install, restart), or opens the Play page.
@@ -11564,7 +15639,7 @@
     if (!premium.active) { openPremium({ ar: true }); return; } // AR is Premium
     // With ARCore the crackers stand on the real floor (room AR); without it the camera AR opens instead, where they stay
     // put as you turn the phone.
-    adBreak('ar').then(arSafety).then((ok) => {
+    arSafety().then((ok) => {
       if (!ok || launch.state !== 'READY' || roomAr || arOn) return;
       if (roomArBridge && (roomArSupport === 'supported' || roomArSupport === 'install')) startRoomAr(); else startAR();
     });
@@ -11576,7 +15651,6 @@
   const CFG_KEY = 'luts:config', CFG_URL = 'https://stalinpusparaj.github.io/light-up-the-skies/config.json';
   const CFG_DEFAULTS = {
     premiumAfterShows: 3, premiumMax: 10, // the first automatic Premium sheet, and how many in all
-    adGraceShows: 5, adEvery: 3, // no interstitial before show 6, then one every 3rd show
     notifyAsk: true,
     promptsPerSession: 1, promptsPerDay: 2, promptQuietSecs: 90,
   };
@@ -11612,7 +15686,7 @@
 
   // ---------- Rating: Google Play's own review sheet (stars, then Submit or Not now) ----------
   // First asked after the app has been used on 2 days and 8 shows have ended, then at most every 30 days, right after a
-  // show ends and never during a video, AR, a card or Lantern Rush. Play itself shows the sheet about once a month at most.
+  // show ends and never during AR, a card or Lantern Rush. Play itself shows the sheet about once a month at most.
   const RATE_KEY = 'luts:rate', DAY = 24 * 60 * 60 * 1000;
   let ratePending = false, premiumShownThisSession = false; // a festival challenge just done: a good moment to ask
   function showEndedForRating() {
@@ -11623,16 +15697,16 @@
     st.shows = (st.shows || 0) + 1;
     // A day-2 return (or a finished festival challenge) after a few shows; never in the session Premium was shown.
     const due = st.shows >= 3 && (now - st.first >= DAY || ratePending) && now - (st.asked || 0) >= 30 * DAY && !premiumShownThisSession && mayPrompt();
-    const calm = mode === 'play' && launch.state === 'READY' && !adOpen && !arOn && !roomAr && !rush.on && !document.hidden && nativeRecording === 'idle';
+    const calm = mode === 'play' && launch.state === 'READY' && !arOn && !roomAr && !rush.on && !document.hidden && nativeRecording === 'idle';
     const native = window.LUTSNative;
-    if (due && calm && native && typeof native.ads === 'function') {
+    if (due && calm && native && typeof native.service === 'function') {
       st.asked = now; ratePending = false; countPrompt();
-      native.ads('review').catch(() => { /* Play declined to show it: try again next month */ });
+      native.service('review').catch(() => { /* Play declined to show it: try again next month */ });
     }
     try { localStorage.setItem(RATE_KEY, JSON.stringify(st)); } catch (e) { /* storage unavailable */ }
   }
   // A free player's happy moment, a show just ended: Premium, after the 3rd show ever (config.json), then at most every other day
-  // (daily in Diwali week) on the 3rd show of a day, 10 times in all. Never over a video, a sheet or the rating ask.
+  // (daily in Diwali week) on the 3rd show of a day, 10 times in all. Never over a sheet or the rating ask.
   const PM_KEY = 'luts:pmoment';
   function showEndedForPremium() {
     if (premium.active || !nativeApp) return;
@@ -11644,62 +15718,10 @@
     let rated = 0;
     try { rated = (JSON.parse(localStorage.getItem(RATE_KEY) || '{}') || {}).asked || 0; } catch (e) { /* ignore */ }
     const due = (st.n || 0) < CFG.premiumMax && (st.last ? now - st.last >= (festToday() ? DAY : 2 * DAY) - 36e5 && st.today >= 3 : st.shows >= CFG.premiumAfterShows) && mayPrompt();
-    const calm = mode === 'play' && launch.state === 'READY' && !adOpen && !adShowing && now - adClosedAt > 20000 && now - rated > 60000 && nativeRecording === 'idle'
+    const calm = mode === 'play' && launch.state === 'READY' && now - rated > 60000 && nativeRecording === 'idle'
       && !arOn && !roomAr && !rush.on && !document.hidden && premiumPanel.hidden && sheets.every((s) => s.hidden);
     if (due && calm) { st.last = now; st.n = (st.n || 0) + 1; countPrompt(); premiumShownThisSession = true; openPremium({ moment: true, auto: true }); }
     try { localStorage.setItem(PM_KEY, JSON.stringify(st)); } catch (e) { /* storage unavailable */ }
-  }
-
-  // ---------- Video ads at natural breaks (free players only; Premium is ad-free) ----------
-  // A short video every time AR opens, after every 3rd show, and at the other natural breaks (a Daily Sky or
-  // challenge ends, a greeting card's show ends, a recording is saved, back to the home screen), but never within
-  // 2 minutes of the last video.
-  // A video that isn't loaded yet never holds up play: the native side answers false at once.
-  const AD_GAP = 2 * 60 * 1000;
-  let adLaunches = 0, adShownAt = 0, adOpen = false;
-  // While a video loads or plays (the native side reports both), and for a while after, the game shares the phone's
-  // memory and GPU with the ad's page: a slow or frozen frame then is the ad's doing, so the rules that send a weak
-  // phone's 3D to rest (crawl, stall, lost GPU) let it be, and 3D eases back in for a moment after a video closes.
-  const AD_SETTLE = 8000, AD_REST = 2000;
-  let adActive = false, adShowing = false, adQuietAt = 0, adClosedAt = 0;
-  function adBusy() { return adOpen || adActive || Date.now() - adQuietAt < AD_SETTLE; }
-  window.addEventListener('luts:ads', (e) => {
-    const d = e.detail || {}, active = !!(d.loading || d.showing);
-    if (adActive && !active) adQuietAt = Date.now();
-    if (adShowing && !d.showing) adClosedAt = Date.now();
-    adActive = active; adShowing = !!d.showing;
-    if (!$('#giftModal').hidden) renderGift(); // a reward video just loaded (or was used): Double it follows
-    if (!$('#gemModal').hidden) renderGemSheet();
-  });
-  // A new player's first shows are ad-free: interstitials start after show 6 (a count kept across visits).
-  const AD_SHOWS_KEY = 'luts:adshows';
-  const showsEver = () => { try { return +localStorage.getItem(AD_SHOWS_KEY) || 0; } catch (e) { return 0; } };
-  async function adBreak(placement) {
-    const native = window.LUTSNative;
-    if (placement === 'launch') { try { localStorage.setItem(AD_SHOWS_KEY, String(showsEver() + 1)); } catch (e) { /* storage unavailable */ } }
-    if (placement !== 'ar' && showsEver() <= CFG.adGraceShows) return false;
-    if (premium.active || adOpen || !native || typeof native.ads !== 'function' || !(native.lastAds && native.lastAds.available)) return false;
-    // Never while the screen records (it would end up in the shared video, over the closing card); the video's own
-    // break comes once it is saved.
-    if (nativeRecording === 'recording' || nativeRecording === 'requesting') return false;
-    if (placement === 'launch' && (++adLaunches < CFG.adEvery || Date.now() - adShownAt < AD_GAP)) return false;
-    if (placement === 'break' && Date.now() - adShownAt < AD_GAP) return false;
-    adOpen = true;
-    let shown = false;
-    try { shown = (await Promise.race([native.ads('interstitial', placement), new Promise((r) => setTimeout(() => r(false), 90000))])) === true; }
-    catch (e) { shown = false; }
-    adOpen = false;
-    if (shown) { adQuietAt = adClosedAt = adShownAt = Date.now(); adLaunches = 0; Sound.resume(); if (++adsThisVisit === 3) premiumNudge(); }
-    return shown;
-  }
-  // After the third video of a visit: a small card above the banner for a few seconds (never a pop-up).
-  let adsThisVisit = 0, premiumNudgeTimer = 0;
-  function premiumNudge() {
-    const n = $('#premiumNudge');
-    if (!n || premium.active) return;
-    n.hidden = false;
-    clearTimeout(premiumNudgeTimer);
-    premiumNudgeTimer = setTimeout(() => { n.hidden = true; }, 9000);
   }
 
   // ---------- Room AR (ARCore on Android): crackers stand on the real floor ----------
@@ -11742,10 +15764,11 @@
     },
   };
   function startRoomAr() {
+    track.enter('room_ar');
     if (roomArSupport === 'install') toast('Room AR needs Google Play Services for AR. Opening Play…', 4000);
     window.LUTSAndroid.arcore('start', '');
   }
-  function stopRoomAr() { window.LUTSAndroid.arcore('stop', ''); }
+  function stopRoomAr() { track.home(); window.LUTSAndroid.arcore('stop', ''); }
   function enterRoomAr() {
     if (roomAr) return;
     stopStream(); cam.srcObject = null;
@@ -11783,9 +15806,26 @@
   let worldStripH = 0, worldGroundCache = 0;
   // Where the landmark stands: just above the bottom controls (and, on wide screens, the Choose Your World strip, whose
   // space is kept in every play mode, so switching between Sky, Ground and Sparkler never moves the scene).
+  // The sky canvas is often a different pixel size from the screen, so a control's screen top is not a canvas y.
+  function canvasY(cssY) {
+    const r = skyC.getBoundingClientRect();
+    return r.height ? (cssY - r.top) * (H / r.height) : cssY;
+  }
   function worldGround(portrait) {
     const fallback = H * (portrait ? 0.8 : 0.86), tabs = $('#modeTabs');
+    // Choosing a landmark: the sheet covers the crackers, so the picture stops just above it.
+    const box = !$('#worldPanel').hidden && $('#worldPanel .world-box');
+    if (box) {
+      const top = box.getBoundingClientRect();
+      if (top.height) return clamp(canvasY(top.top) - H * 0.05, H * 0.28, fallback);
+    }
     if (document.body.classList.contains('ui-hidden')) return fallback;
+    // A short landscape dock must not shrink a whole environment into a tiny tile.
+    if (!portrait && world.img?.fullScene) return fallback;
+    // Live Sky hides the controls and never moves the landmark: the last measure stands, so starting a show doesn't make
+    // the page lay itself out again (210 ms on a slow phone, read from the layout right after the show's classes change).
+    // A landscape phone's measure is halfway up, so there a show stands it on the bottom, with no layout read either.
+    if (document.body.classList.contains('live-sky')) return portrait ? worldGroundCache || fallback : fallback;
     // Ground mode: the landmark stands at the far edge of the street, so the paving never covers it.
     if (mode === 'play' && playMode === 'ground' && !arOn && tabs.offsetParent) return clamp(floorTop() + 6, H * 0.35, fallback);
     if (!tabs.offsetParent) return worldGroundCache || fallback; // tabs hidden during a card show
@@ -11793,12 +15833,18 @@
     if (strip.offsetHeight) worldStripH = strip.offsetHeight + 8;
     // Wide screens let the strip overlap the reflection a little, so the landmark keeps its size.
     // Phones name the world on the top bar (no strip at the bottom), so nothing is kept for it there.
-    const noStrip = window.matchMedia && (matchMedia('(max-height: 560px)').matches || matchMedia('(max-width: 760px)').matches);
+    const noStrip = SHORT_MQ.matches || NARROW_MQ.matches;
     const reserve = noStrip ? 0 : worldStripH * (portrait ? 1 : 0.5);
-    return (worldGroundCache = clamp(tabs.getBoundingClientRect().top - reserve - 4, H * 0.5, fallback));
+    const line = clamp(canvasY(tabs.getBoundingClientRect().top - reserve - 4), H * 0.5, fallback);
+    // On a phone the shell stands in front of the plinth. Leave it that forecourt, or the tube covers the building.
+    const fore = portrait ? H * 0.17 : 0;
+    return (worldGroundCache = Math.max(H * 0.46, line - fore));
   }
   const worldImages = new Map(); // decoded landmark images, most recently used last
-  const reduceMotion = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  // MediaQueryList objects made once: .matches stays live, and a new matchMedia() per frame costs a style lookup.
+  const mq = (q) => (window.matchMedia ? matchMedia(q) : { matches: false });
+  const RM_MQ = mq('(prefers-reduced-motion: reduce)'), SHORT_MQ = mq('(max-height: 560px)'), NARROW_MQ = mq('(max-width: 760px)');
+  const reduceMotion = () => RM_MQ.matches;
   const thumbSrc = (cfg, ext) => `${WORLD_DIR}thumb/${cfg.thumb || cfg.image}.${ext}`;
 
   function loadImage(src) {
@@ -11815,129 +15861,128 @@
     });
   }
 
-  // WebP first; JPEG covers browsers without WebP. Rejects when neither loads, so the caller keeps the current sky.
+  // One portrait night scene for every landmark. A wide screen uses that same picture.
   function loadWorldBackground(id) {
-    const cfg = WORLD_BY_ID[id];
+    const cfg = WORLD_BY_ID[id], viewport = W > H ? 'wide' : 'portrait';
     if (!cfg || !cfg.image) return Promise.reject(new Error(`No image for world ${id}`));
-    if (worldImages.has(id)) {
-      const im = worldImages.get(id);
-      worldImages.delete(id); worldImages.set(id, im);
+    const key = `${id}:${viewport}`;
+    if (worldImages.has(key)) {
+      const im = worldImages.get(key);
+      worldImages.delete(key); worldImages.set(key, im);
       return Promise.resolve(im);
     }
-    const base = `${WORLD_DIR}bg/${cfg.image}`;
-    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error(`Timed out loading ${base}`)), 20000));
-    return Promise.race([loadImage(`${base}.webp`).catch(() => loadImage(`${base}.jpg`)), timeout]).then((im) => {
-      worldImages.set(id, im);
+    const base = `${WORLD_DIR}scenes/${cfg.image}`;
+    const source = loadImage(`${base}.jpg`).then(im => { im.fullScene = true; im.sceneKind = 'portrait'; return im; });
+    let timer;
+    const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`Timed out loading ${base}`)), 20000); });
+    return Promise.race([source, timeout]).then((im) => {
+      im.viewportKind = viewport;
+      worldImages.set(key, im);
       while (worldImages.size > 3) worldImages.delete(worldImages.keys().next().value);
       return im;
-    });
+    }).finally(() => clearTimeout(timer));
+  }
+  let worldViewportPending = null;
+  function refreshWorldViewport() {
+    if (!world.img || !world.cfg.scene || world.pending) return;
+    const id = world.id, viewport = W > H ? 'wide' : 'portrait', key = `${id}:${viewport}`;
+    if (world.img.viewportKind === viewport || worldViewportPending === key) return;
+    worldViewportPending = key;
+    loadWorldBackground(id).then(im => {
+      if (world.id !== id || world.pending || (W > H ? 'wide' : 'portrait') !== viewport) return;
+      world.img = im; drawSky(); drawFloor(); refitWaitingItems();
+      // Artwork changes never clear or replace the player's placed crackers.
+    }).catch(() => { /* The current image stays available if a variant cannot load. */ })
+      .finally(() => { if (worldViewportPending === key) worldViewportPending = null; });
   }
 
-  // Fades the image's edges to transparent where it meets the blurred backdrop (only when it doesn't fill the screen).
-  function featherImage(img, sides, top) {
-    if (!sides && !top) return img;
-    const c = document.createElement('canvas');
-    c.width = img.naturalWidth; c.height = img.naturalHeight;
-    const m = c.getContext('2d');
-    m.drawImage(img, 0, 0);
-    m.globalCompositeOperation = 'destination-in';
-    if (sides) {
-      const gr = m.createLinearGradient(0, 0, c.width, 0);
-      gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.1, '#000'); gr.addColorStop(0.9, '#000'); gr.addColorStop(1, 'rgba(0,0,0,0)');
-      m.fillStyle = gr; m.fillRect(0, 0, c.width, c.height);
-    }
-    if (top) {
-      const gr = m.createLinearGradient(0, 0, 0, c.height);
-      gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(0.18, '#000');
-      m.fillStyle = gr; m.fillRect(0, 0, c.width, c.height);
-    }
-    return c;
+  function wideScenePlate(img) {
+    if (img.widePlate) return img.widePlate;
+    const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+    // Blend the portrait plate into the extended sky/courtyard on wide displays.
+    // The building keeps its original proportions; only the outer environment fades.
+    g.globalCompositeOperation = 'destination-in';
+    const edge = g.createLinearGradient(0, 0, c.width, 0);
+    edge.addColorStop(0, 'transparent'); edge.addColorStop(.13, '#000');
+    edge.addColorStop(.87, '#000'); edge.addColorStop(1, 'transparent');
+    g.fillStyle = edge; g.fillRect(0, 0, c.width, c.height);
+    img.widePlate = c; return c;
   }
 
   function drawWorldSky(g) {
     world.waterY = 0;
-    const c = world.cfg, img = world.img, iw = img.naturalWidth, ih = img.naturalHeight, [fx, fy] = c.focus;
+    const img = world.img, iw = img.naturalWidth, ih = img.naturalHeight;
     g.save();
     g.imageSmoothingEnabled = true;
     g.imageSmoothingQuality = 'high';
-    g.fillStyle = '#04050d';
+    g.fillStyle = '#000'; // the sky is black, so fireworks are the only light in it
     g.fillRect(0, 0, W, H);
-    // A heavily blurred copy (a 24px thumbnail scaled up) fills any area the sharp image doesn't reach.
-    if (!world.blur) {
-      const b = document.createElement('canvas');
-      b.width = 24; b.height = Math.max(2, Math.round((24 * ih) / iw));
-      b.getContext('2d').drawImage(img, 0, 0, b.width, b.height);
-      world.blur = b;
-    }
-    const sCover = Math.max(W / iw, H / ih);
-    g.globalAlpha = 0.6;
-    g.drawImage(world.blur, (W - iw * sCover) * fx, (H - ih * sCover) * fy, iw * sCover, ih * sCover);
-    g.globalAlpha = 1;
     // Place the landmark in the lower part of the scene: about 85% of the screen wide (at least full width on phones),
-    // its base just above the bottom controls, capped in height so its roofline leaves MIN_SKY of open sky above.
+    // its base on the ground line (above the shell on a phone), capped so its roofline leaves MIN_SKY of open sky.
     const portrait = H > W, ground = worldGround(portrait);
-    const span = c.keep[1] - c.keep[0];
-    const sWide = Math.max((W * 0.85) / (span * iw), portrait ? W / iw : 0);
-    const sTall = (H * (portrait ? 0.62 : 0.86)) / ih;
-    const sSky = fy > c.skyline ? (ground * fy - H * MIN_SKY) / (ih * (fy - c.skyline)) : sTall;
-    // A landscape screen (a TV, a tablet on its side): the whole picture stands from the top of the screen down to the
-    // ground line, so nothing of the landmark is cut off and no band of empty night sits above it; the blurred copy
-    // fills the sides.
+    if (img.fullScene) {
+      // Anchor the courtyard at the actual play surface. On a wide screen fit the whole
+      // building, extending only its dark sky and foreground instead of cropping its roof.
+      const wide = img.sceneKind === 'wide';
+      const rect = window.LUTSSceneLayout(W, H, iw, ih, ground, wide ? (world.cfg.wideRoof || .40) : world.cfg.sceneRoof, wide);
+      if (wide) {
+        g.drawImage(img, rect.dx, rect.dy, rect.dw, rect.dh);
+        g.restore(); world.rect = rect; return;
+      }
+      const { dx, dy, dw, dh } = rect;
+      const courtTop = Math.max(0, portrait ? dy + dh * .68 : Math.min(dy + dh * .68, floorTop()));
+      const paving = g.createLinearGradient(0, courtTop, 0, H);
+      paving.addColorStop(0, '#080b10'); paving.addColorStop(.45, '#32251f'); paving.addColorStop(1, '#191311');
+      g.fillStyle = paving; g.fillRect(0, courtTop, W, H);
+      if (!portrait) {
+        const top = courtTop, depth = H - top;
+        g.strokeStyle = 'rgba(224,184,140,.09)'; g.lineWidth = 1;
+        g.beginPath();
+        for (let i = -12; i <= 12; i++) {
+          g.moveTo(W / 2 + i * W / 30, top); g.lineTo(W / 2 + i * W / 8, H);
+        }
+        for (let i = 1; i < 8; i++) { const y = top + depth * (i / 8) ** 1.7; g.moveTo(0, y); g.lineTo(W, y); }
+        g.stroke();
+      }
+      g.drawImage(portrait ? img : wideScenePlate(img), dx, dy, dw, dh);
+      g.restore();
+      world.rect = rect; world.courtY = courtTop; // (the Drone Show's beasts shine back on the court)
+      return;
+    }
+    const sWide = Math.max((W * 0.85) / ((WORLD_SPAN[1] - WORLD_SPAN[0]) * iw), portrait ? W / iw : 0);
+    const sTall = (H * (portrait ? 0.78 : 0.86)) / ih;
+    const sSky = (ground - H * MIN_SKY) / (ih * (1 - WORLD_ROOF));
+    // A landscape screen (a TV, a tablet on its side): the picture, its empty top included, stands from the top of the
+    // screen down to the ground line.
     const fill = !portrait;
     const s = fill ? Math.min(ground / ih, W / iw) : Math.min(sWide, sTall, sSky);
-    const dw = iw * s, dh = ih * s;
-    // (filled, its bottom sits on the ground line, so its own street shows above the controls as the ground)
-    const dx = fill ? (W - dw) / 2 : (W - dw) * fx, dy = fill ? ground - dh : (ground - dh) * fy;
-    const sides = dw < W - 1, top = dy > 1, key = `${sides}|${top}`;
-    if (world.maskKey !== key) { world.masked = featherImage(img, sides, top); world.maskKey = key; }
-    g.drawImage(world.masked, dx, dy, dw, dh);
+    const dw = iw * s, dh = ih * s, dx = (W - dw) / 2, dy = ground - dh;
+    g.drawImage(img, dx, dy, dw, dh);
     // Below the landmark, a dimmed mirror image reads as water or a wet street under the controls.
     const base = dy + dh;
     if (base < H - 0.5) {
       world.waterY = base; // burst lights mirror here (drawLights)
       g.save();
-      g.beginPath(); g.rect(0, base, W, H - base); g.clip();
+      g.beginPath(); g.rect(0, base, W, Math.min(H - base, dh * (1 - WORLD_ROOF))); g.clip();
       g.translate(0, base * 2); g.scale(1, -1);
       g.globalAlpha = 0.5;
-      g.drawImage(world.masked, dx, dy, dw, dh);
+      g.drawImage(img, dx, dy, dw, dh);
       g.restore();
       const water = g.createLinearGradient(0, base, 0, H);
-      water.addColorStop(0, 'rgba(3,4,14,0.3)');
-      water.addColorStop(1, 'rgba(3,4,14,0.85)');
+      water.addColorStop(0, 'rgba(0,0,0,0.3)');
+      water.addColorStop(1, 'rgba(0,0,0,0.85)');
       g.fillStyle = water;
       g.fillRect(0, base, W, H - base);
     }
-
-    // Darken the sky above the roofline so real fireworks out-shine the painted ones, then dim slightly overall.
-    const roof = dy + dh * c.skyline, k = c.overlay, skyH = Math.max(roof, H * 0.2);
-    const shade = g.createLinearGradient(0, 0, 0, skyH);
-    shade.addColorStop(0, `rgba(3,4,14,${0.35 + 0.5 * k})`);
-    shade.addColorStop(0.7, `rgba(3,4,14,${0.42 * k})`);
-    shade.addColorStop(1, 'rgba(3,4,14,0)');
-    g.fillStyle = shade;
-    g.fillRect(0, 0, W, skyH);
-    g.fillStyle = `rgba(2,3,10,${0.08 + 0.14 * k})`;
-    g.fillRect(0, 0, W, H);
-    const foot = g.createLinearGradient(0, H * 0.75, 0, H);
-    foot.addColorStop(0, 'rgba(3,4,12,0)');
-    foot.addColorStop(1, 'rgba(3,4,12,0.5)');
-    g.fillStyle = foot;
-    g.fillRect(0, H * 0.75, W, H * 0.25);
-    const rnd = mulberry(7), n = Math.round((W * skyH) / 4200);
-    for (let i = 0; i < n; i++) {
-      const x = rnd() * W, y = rnd() * skyH * 0.9;
-      const r = rnd() < 0.06 ? 0.9 + rnd() * 0.7 : 0.3 + rnd() * 0.5;
-      g.fillStyle = `rgba(255,248,235,${(0.2 + rnd() * 0.6) * (1 - y / skyH)})`;
-      g.beginPath(); g.arc(x, y, r, 0, TAU); g.fill();
-    }
     g.restore();
-    world.rect = { dx, dy, dw, dh, roof, fill };
+    world.rect = { dx, dy, dw, dh, roof: dy + dh * WORLD_ROOF, fill };
   }
 
   // Sacred sites: bursts aimed over the structure are lifted proportionally into the open sky above its roofline,
   // so the show frames the building rather than appearing to happen on it.
   function worldSkyY(x, y) {
-    const r = world.rect, [k0, k1] = world.cfg.keep, pad = 30 * U;
+    const r = world.rect, [k0, k1] = WORLD_SPAN, pad = 30 * U;
     if (x < r.dx + r.dw * k0 - pad || x > r.dx + r.dw * k1 + pad) return y;
     const top = H * 0.06, ceil = r.roof - H * 0.07;
     if (ceil <= top) return top;
@@ -11973,7 +16018,7 @@
     document.querySelectorAll('.scene-fade').forEach((f) => f.remove()); // rapid switching: one fade at a time
     const fades = arOn || reduceMotion() || w3dWanted() ? [] : [snapshotLayer(skyC), snapshotLayer(moonC), snapshotLayer(cityC)];
     world.id = cfg.id; world.cfg = cfg; world.img = img;
-    world.blur = world.masked = null; world.maskKey = ''; world.waterY = 0;
+    world.waterY = 0;
     drawSky(); drawCity(); drawFloor();
     syncLiveSky();
     if (mode !== 'card' && mode !== 'envelope') palette = basePalette();
@@ -11982,6 +16027,7 @@
       setTimeout(() => fades.forEach((f) => f.remove()), 900);
     }
     syncWorldUi();
+    refreshWorldViewport();
   }
 
   // Switches scene without restarting anything. A landmark only replaces the sky once its image has loaded;
@@ -12050,7 +16096,7 @@
       webp.srcset = thumbSrc(cfg, 'webp');
       const im = document.createElement('img');
       im.alt = ''; im.loading = 'lazy'; im.decoding = 'async'; im.width = 300; im.height = 270;
-      im.src = thumbSrc(cfg, 'jpg');
+      im.src = thumbSrc(cfg, 'webp');
       pic.append(webp, im);
       // A few animated bursts in the landmark's colours preview how the show looks against it.
       const preview = document.createElement('span');
@@ -12111,7 +16157,7 @@
       webp.srcset = thumbSrc(cfg, 'webp');
       const im = document.createElement('img');
       im.alt = ''; im.loading = 'lazy'; im.decoding = 'async'; im.width = 84; im.height = 52;
-      im.src = thumbSrc(cfg, 'jpg');
+      im.src = thumbSrc(cfg, 'webp');
       pic.append(webp, im);
       const spin = document.createElement('span');
       spin.className = 'world-spinner';
@@ -12132,6 +16178,14 @@
   }
   buildWorldMinis(worldStripList);
   buildWorldMinis(cardWorldList);
+  // A free player's countdown card: a crowned landmark opens Premium (showing that landmark) instead of the sky behind.
+  // Caught on the way down, before the tile's own selectWorld.
+  cardWorldList.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('.world-mini');
+    if (!b || !cdLocked(b.dataset.world)) return;
+    e.preventDefault(); e.stopPropagation();
+    openPremium({ countdown: true, world: b.dataset.world });
+  }, true);
   function setCardLoading(id, on) {
     document.querySelectorAll(`.world-card[data-world="${id}"], .world-mini[data-world="${id}"]`).forEach((b) => {
       b.classList.toggle('loading', on);
@@ -12145,7 +16199,7 @@
     $('#worldEntryName').textContent = cfg.image ? `${cfg.name} · ${cfg.place}` : cfg.name;
     $('#worldStripName').textContent = cfg.image || cfg.live ? cfg.name : 'Night Sky';
     $('#sceneName').textContent = cfg.image || cfg.live ? cfg.name : 'Night Sky';
-    $('#worldEntryThumb').src = thumbSrc(cfg, 'jpg');
+    $('#worldEntryThumb').src = thumbSrc(cfg, 'webp');
     $('#skylineNote').hidden = !world.img;
     worldGrid.querySelectorAll('.world-card').forEach((b) => {
       const on = b.dataset.world === world.id;
@@ -12169,7 +16223,7 @@
       const on = b.dataset.world === world.id;
       b.classList.toggle('selected', on);
       b.setAttribute('aria-pressed', String(on));
-      b.classList.toggle('locked', worldLocked(WORLD_BY_ID[b.dataset.world]));
+      b.classList.toggle('locked', worldLocked(WORLD_BY_ID[b.dataset.world]) || cdLocked(b.dataset.world)); // (a free countdown: see syncCountdown)
     });
     if (!modal.hidden) updatePreview(); // the card preview shows the background too
     worldPresetInput.checked = world.preset;
@@ -12180,6 +16234,7 @@
 
   let worldReturnFocus = null;
   function openWorldSelector(e) {
+    track.screen('world_selector');
     buildWorldGrid();
     syncWorldUi();
     // The drawer covers phones edge to edge; close it so the new scene is visible behind the sheet.
@@ -12188,11 +16243,16 @@
     worldReturnFocus = from && !from.closest('#settings') ? from : $('#btnWorldStrip');
     worldPanel.hidden = false;
     const sel = worldGrid.querySelector('.world-card.selected') || worldGrid.firstElementChild;
-    requestAnimationFrame(() => { sel.scrollIntoView({ block: 'nearest', inline: 'center' }); sel.focus({ preventScroll: true }); });
+    requestAnimationFrame(() => {
+      if (world.img) drawSky(); // the picture lifts clear of the sheet once the sheet has its height
+      sel.scrollIntoView({ block: 'nearest', inline: 'center' }); sel.focus({ preventScroll: true });
+    });
   }
   function closeWorldSelector() {
     if (worldPanel.hidden) return;
     worldPanel.hidden = true;
+    track.back();
+    if (world.img) drawSky();
     if (worldReturnFocus) worldReturnFocus.focus({ preventScroll: true });
   }
   $('#btnWorlds').addEventListener('click', openWorldSelector);
@@ -12226,13 +16286,14 @@
   // In the apps, the KMP shell talks to the stores through RevenueCat and sends its state via window.LUTSNative.
   // The web version has no store, so its paywall points to the apps instead.
   const PREMIUM_LINKS = {
-    play: 'https://play.google.com/store/apps/details?id=com.stalinpusparaj.lightuptheskies',
+    play: playLink('paywall'),
     appStore: '', // https://apps.apple.com/app/id… once the iOS app is live
     terms: 'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/', // iOS: Apple's standard licence
     termsAndroid: 'https://stalinpusparaj.github.io/light-up-the-skies/terms.html',
     privacy: 'https://stalinpusparaj.github.io/light-up-the-skies/privacy.html',
     manage: { android: 'https://play.google.com/store/account/subscriptions?package=com.stalinpusparaj.lightuptheskies', ios: 'https://apps.apple.com/account/subscriptions' },
   };
+  $('#premiumPlay').addEventListener('click', () => webFunnel('get_app')); // (the website's paywall: Get it on Google Play)
   const PLAN_NAMES = { annual: 'Yearly', monthly: 'Monthly', lifetime: 'Lifetime', other: 'Premium' };
   const premiumPanel = $('#premiumPanel'), premiumPlans = $('#premiumPlans');
   const nativeApp = window.LUTSNative;
@@ -12247,9 +16308,9 @@
     // A cracker reached for (a free try, its locked chip): the Hazaar ladi going off; gems or a show they loved: the
     // palace finale (both made in Google Flow for this sheet).
     const want = it.tried || it.sivakasi;
-    const src = cfg ? `${WORLD_DIR}bg/${cfg.image}` : want ? (String(want).startsWith('shell:') ? 'assets/premium/hero-finale' : 'assets/premium/hero-hazaar')
+    const src = cfg ? `${WORLD_DIR}thumb/${cfg.thumb || cfg.image}` : want ? (String(want).startsWith('shell:') ? 'assets/premium/hero-finale' : 'assets/premium/hero-hazaar')
       : it.gems || it.moment || it.diwali ? 'assets/premium/hero-finale' : 'assets/premium/hero';
-    $('#premiumHero').innerHTML = `<picture><source type="image/webp" srcset="${src}.webp"><img src="${src}.jpg" alt="" decoding="async"></picture>`;
+    $('#premiumHero').innerHTML = `<img src="${src}.webp" alt="" decoding="async">`;
   }
 
   function fineprint(p) {
@@ -12266,31 +16327,38 @@
     if (premiumPanel.hidden) return;
     const web = premium.status === 'web', busy = ['loading', 'purchasing', 'restoring'].includes(premium.status);
     const intent = premium.intent || {}, intentWorld = intent.world && WORLD_BY_ID[intent.world];
-    // Android TV shows no ads (AdMob doesn't serve TV apps), so its sheet never offers to remove them.
     const tv = document.documentElement.classList.contains('tv');
     // The headline speaks to what the player reached for; the rest of the sheet lists everything Premium adds.
     const tried = intent.tried && crackerName(intent.tried); // the Premium cracker or shell the player just lit for free
     const wanted = intent.sivakasi && crackerName(intent.sivakasi); // the one whose chip they tapped with no light left
-    let pitch = tried ? [`You just lit ${tried}`, 'Keep it, and every other cracker, free with Premium. No ads, and 1,000 levels each in Diya Path and Rocket Rush.']
-      : intent.diwali || (intent.moment && festToday()) ? ['Celebrate Diwali with Premium', 'No ads, every cracker free and 1,000 levels each in Diya Path and Rocket Rush, all through the festival.']
-      : intent.moment ? ['Loved that show?', 'Premium makes every cracker free and removes every ad. Every puzzle level and unlimited hints too.']
-      : intent.hints ? ['Unlimited hints with Premium', 'Never get stuck in Diya Path or Rocket Rush. Plus no ads and every cracker free.']
-      : intent.levels ? ['Unlock 1,000 levels each in Diya Path and Rocket Rush', 'Every chapter of Diya Path and Rocket Rush, open now. Plus no ads and every cracker free.']
-        : intent.ar ? ['Fireworks in your room with AR', 'Point your camera and light crackers on your own floor and sky. Plus no ads and every cracker free.']
-        : intent.view3d ? ['India’s landmarks in 3D', 'Walk the forecourt of all 15 landmarks in 3D and look around as the fireworks burst. Plus no ads and every cracker free.']
-        : intent.reasons ? ['Ten reasons on every card', 'Premium cards hold up to 10 reasons they turn through after the show. Plus no ads and every cracker free.']
-        : intent.scenes ? ['Sacred backgrounds for Diya Path', 'Play before Lakshmi, Ganesha, Balaji, the Golden Temple and more. Plus no ads and every cracker free.']
-        : intent.styles ? ['Golden diyas and royal boards', 'Premium dresses Diya Path in gold, with palace, river ghat and temple boards. Plus no ads and every cracker free.']
-        : intent.archive ? ['Play every past daily puzzle', 'Missed a day? Premium opens every past Daily Diya and Daily Rocket. Plus no ads and every cracker free.']
-          : wanted ? [`Light the ${wanted} with Premium`, intent.sivakasi.startsWith('shell:') ? 'Peacock, butterfly and magic wand shells, lit with your sparkler. Plus no ads and every cracker free.'
-            : 'Hazaar ladi, saravedi, seven shot, double shot and Lakshmi vedi, lit with your sparkler. Plus no ads and every cracker free.']
-          : intent.gems ? ['Every cracker free with Premium', 'Finales, cakes and rocket combos with no gems, plus no ads and unlimited puzzle hints.']
-            : intentWorld || intent.ads ? ['Celebrate with no ads', 'No banners or videos, every cracker free, and unlimited puzzle hints.']
-              : ['No ads · every cracker free with Premium', 'Grand finales, 3D skylines, AR, and 1,000 levels each in Diya Path and Rocket Rush with unlimited hints.'];
+    let pitch = tried ? [`You just lit ${tried}`, 'Keep it, and every other cracker, free with Premium, with 1,000 levels in each puzzle game.']
+      : intent.diwali || (intent.moment && festToday()) ? ['Celebrate Diwali with Premium', 'Every cracker free and 1,000 levels in each puzzle game, all through the festival.']
+      : intent.live ? ['Every light show, all night', 'All 36 Live Sky shows with no time limit, 23 star-mine crackers free, and no mark on wallpapers.']
+      : intent.wishes ? ['Light up more names tonight', 'Publish up to 10 wishes a day in Wishes of India, with every cracker free.']
+      : intent.moment ? ['Loved that show?', 'Premium makes every cracker free and opens every puzzle level with unlimited hints.']
+      : intent.hints ? ['Unlimited hints with Premium', 'Never get stuck in Diya Path or Rocket Rush, with every cracker free.']
+      : intent.levels ? ['Unlock 1,000 levels each in Diya Path and Rocket Rush', 'Every chapter of both puzzle games opens now, with every cracker free.']
+        : intent.ar ? ['Fireworks in your room with AR', 'Point your camera and light crackers on your own floor and sky.']
+        : intent.view3d ? ['India’s landmarks in 3D', 'Walk the forecourt of all 15 landmarks in 3D and look around as the fireworks burst.']
+        : intent.countdown ? ['Every landmark and a drone finale with both names', 'Every cracker free, clean photos and videos, 3D landmarks, AR and 1,000 levels in each puzzle game.']
+        : intent.reasons ? ['Ten reasons on every card', 'Premium cards hold up to 10 reasons that turn through after the show.']
+        : intent.scenes ? ['Sacred backgrounds for Diya Path', 'Play before Lakshmi, Ganesha, Balaji, the Golden Temple and more.']
+        : intent.styles ? ['Golden diyas and royal boards', 'Premium dresses Diya Path in gold, with palace, river ghat and temple boards.']
+        : intent.archive ? ['Play every past daily puzzle', 'Missed a day? Premium opens every past Daily Diya and Daily Rocket.']
+          : wanted ? [`Light the ${wanted} with Premium`, 'Unlock this cracker and every other Premium cracker whenever you like.']
+          : intent.gems ? ['Every cracker free with Premium', 'Finales, cakes and rocket combos need no gems, with unlimited puzzle hints.']
+            : ['Make this Diwali unforgettable', 'Every cracker free, clean photos and videos, 3D landmarks, AR and 1,000 levels in each puzzle game.'];
     if (tv) pitch = ['Every cracker. Every level.', 'Premium makes every cracker free and opens 1,000 levels each in Diya Path and Rocket Rush with unlimited hints.'];
+    const passLive = passOnSale();
+    $('#premiumPass').hidden = !passLive;
+    $('#premiumPass').disabled = gemStore.status === 'purchasing';
+    if (passLive) { $('#premiumPassPrice').textContent = passLive.price; funnelOnce('paywall_pass_seen'); }
+    // What the store offered this player: the free trial and the first-period discount are Play's to give.
+    if (premium.plans.length) { const yr = premium.plans.find((x) => x.kind === 'annual') || premium.plans[0]; funnelOnce(yr.trial ? 'paywall_trial' : yr.intro ? 'paywall_intro' : 'paywall_no_offer'); }
     $('#premiumTitle').textContent = pitch[0];
     $('#premiumSub').textContent = pitch[1];
     renderValue(intent, tv, web);
+    renderVs($('#premiumVs'), tv);
     document.querySelectorAll('#premiumPanel .premium-store').forEach((n) => { n.textContent = storeAccount(); });
     $('#premiumGet').hidden = !web;
     for (const node of [premiumPlans, $('#btnPremiumBuy'), $('#premiumTrust'), $('#premiumFine'), $('#btnPremiumRestore')]) node.hidden = web;
@@ -12320,14 +16388,15 @@
       const price = document.createElement('span');
       price.className = 'premium-plan-price';
       price.textContent = p.kind === 'annual' ? `${p.price} / year` : p.kind === 'monthly' ? `${p.price} / month` : p.kind === 'lifetime' ? `${p.price} once` : p.price;
+      if (p.kind === 'lifetime' && salePrice(price, 'lifetime', p.price)) b.classList.add('on-sale');
       const sub = document.createElement('small');
       // The store price stays the biggest number; an offer always says what it renews at.
       sub.textContent = [p.trial ? `${p.trial} free trial` : '',
         p.intro ? `Diwali offer: ${p.intro} for your ${p.introFor}, then ${p.price}/${p.kind === 'annual' ? 'year' : 'month'}. Renews automatically. Cancel any time in ${nativeApp && nativeApp.platform === 'ios' ? 'the App Store' : 'Google Play'}.` : '',
-        p.perMonth && !p.intro ? `about ${p.perMonth} a month` : '', p.kind === 'lifetime' ? 'Pay once, keep forever' : ''].filter(Boolean).join(' · ');
+        p.perMonth && !p.intro ? `about ${p.perMonth} a month` : '', p.kind === 'lifetime' ? (b.classList.contains('on-sale') ? '🪔 Diwali sale · pay once, keep forever' : 'Pay once, keep forever') : ''].filter(Boolean).join(' · ');
       if (p.intro) b.classList.add('has-offer');
       b.append(name, price, sub);
-      b.addEventListener('click', () => { premium.pick = p.kind; renderPaywall(); });
+      b.addEventListener('click', () => { premium.pick = p.kind; funnel(`plan_${p.kind}`); renderPaywall(); });
       premiumPlans.append(b);
     }
     // The store answered but sent no plans (Play not signed in, or the app not installed from Play): say so, offer a retry.
@@ -12349,8 +16418,8 @@
     const lines = chosen && chosen.trial
       ? [`Nothing to pay today · ${trialWords(chosen.trial)} free`, 'Cancel before the trial ends and you pay nothing', `Cancel anytime in your ${storeAccount()}`]
       : chosen && chosen.kind === 'lifetime' ? ['One payment, no subscription', 'Every future update included', 'Restore on a new phone with the same account']
-        : [`Cancel anytime in your ${storeAccount()}`, 'No ads while you’re Premium', 'Restore on a new phone with the same account'];
-    for (const text of lines.filter((t) => !(tv && /ads/i.test(t)))) { const li = document.createElement('li'); li.textContent = text; trust.append(li); }
+        : [`Cancel anytime in your ${storeAccount()}`, 'Always ad-free for everyone', 'Restore on a new phone with the same account'];
+    for (const text of lines) { const li = document.createElement('li'); li.textContent = text; trust.append(li); }
   }
   // ----- The offer as a value stack (Alex Hormozi, $100M Offers) -----
   // Value = dream outcome × how sure it is ÷ (time to it × effort). So, in that order: what Premium gives, each with what
@@ -12366,13 +16435,17 @@
       { id: 'premium5', ico: '🧨', b: 'Five Premium crackers', s: 'The thousand-cracker Hazaar ladi, saravedi, seven shot, double shot and Lakshmi vedi. One free try each.' },
       { id: 'premiumSky', ico: '🦚', b: 'Three Premium sky shells', s: 'Peacock, butterfly and magic wand bursts. One free try each.' },
       { id: 'crackers', ico: '🎆', b: 'Every cracker, free, every night', s: `Grand finales, wedding cakes, sutli bombs and more. One of each costs ${gem(sum)} without Premium.` },
-      { id: 'ads', ico: '🚫', b: 'No ads', s: 'No banners, and no videos between shows and levels.', tv: false },
+      { id: 'live', ico: '📺', b: 'All 36 light shows, all night', s: 'All 36 shows with no time limit: leave it on the TV all Diwali night.' },
+      { id: 'starmine', ico: '🎇', b: '23 star-mine crackers', s: 'Star mine, Niagara, Rainbow comb, Petal storm and every Live Sky set piece, yours to fire for free.' },
+      { id: 'clean', ico: '✨', b: 'No mark, anywhere', s: 'Your photos, videos, Live Sky and live wallpapers stay clean, without our mark.' },
       { id: 'levels', ico: '🧩', b: '1,000 levels each, all open', s: `Diya Path and Rocket Rush: 300 more levels each, every chapter now, and unlimited hints (${gem(PUZZLE_HINT_GEMS)} each without Premium).` },
       { id: 'worlds', ico: '🏛️', b: 'India in 3D, and in your room', s: tv ? 'All 15 landmarks in 3D, and the sacred Diya Path backgrounds.' : 'All 15 landmarks in 3D, AR fireworks, and the sacred Diya Path backgrounds.' },
+      { id: 'wishes', ico: '🎆', b: '10 Public Wishes a day', s: 'Wishes of India writes your loved ones’ names over the whole country: 2 a day free, up to 10 with Premium.' },
+      { id: 'spirals', ico: '🌀', b: 'Magic Spirals, every gear and pen', s: 'Every ring, bar and big rolling gear, the rainbow pen and 5 signature slots. Without Premium they cost gems.' },
       { id: 'streak', ico: '🔥', b: 'A safer streak', s: 'Miss a day twice a week and keep your streak and its bigger gifts.' },
     ].filter((r) => !(tv && r.tv === false));
     // The Premium crackers lead; after a free try (or a tap on a locked chip), the row it is in leads, lit up.
-    const want = intent && (intent.tried || intent.sivakasi), lead = want ? (String(want).startsWith('shell:') ? 'premiumSky' : 'premium5') : '';
+    const want = intent && (intent.tried || intent.sivakasi), lead = want ? (String(want).startsWith('shell:') ? 'premiumSky' : 'premium5') : intent && intent.live ? 'live' : '';
     rows.sort((a, b) => (b.id === lead) - (a.id === lead));
     const list = $('#premiumStack');
     list.innerHTML = '';
@@ -12386,7 +16459,7 @@
       list.append(li);
     }
     // The total: in gems always; in rupees only from real store prices (the cheapest per gem), never the web's guesses.
-    const packs = !web && gemStore.packs.filter((k) => k.gems > 0 && k.price);
+    const packs = !web && gemStore.packs.filter((k) => k.gems > 0 && k.price && k.id !== PASS.id); // (the Pass carries 1 gem to be credited: not a price per gem)
     const per = packs && packs.length ? packs.map((k) => [moneyOf(k.price), k.gems]).filter(([m]) => m).map(([m, g]) => ({ rate: m.n / g, sym: m.sym })).sort((a, b) => a.rate - b.rate)[0] : null;
     $('#premiumTotal').textContent = per
       ? `A grand finale and a wedding cake every evening for a month: ${gem(month)} (about ${per.sym}${Math.round(per.rate * month).toLocaleString('en-IN')} at gem-pack prices). With Premium they’re free, with everything above.`
@@ -12402,6 +16475,29 @@
     soon.textContent = festToday() ? 'It’s Diwali week. Light the whole street.' : days === 1 ? 'Diwali is tomorrow. Light the whole street.' : `Diwali is in ${days} days. Light the whole street.`;
     // The safety net: Google Play's own refund window (Android app only).
     $('#premiumRefund').hidden = !(nativeApp && nativeApp.platform === 'android') || tv;
+  }
+  // Free vs Premium at a glance: nine rows, each cell its own text so the page's translation finds it. 👑 is Premium only.
+  function renderVs(list, tv) {
+    if (!list) return;
+    const rows = [['', 'Free', '👑 Premium'],
+      ['Light shows (Live Sky)', '4 + 1 a day', 'All 36, no videos'],
+      ['Premium crackers & shells', '1 try each', 'Always'],
+      ['Big crackers (finale, cake…)', '💎 Gems', 'Free'],
+      ['Ground crackers at once', '8 (6 on smaller phones)', 'Up to 20 · Fill street'],
+      ['Ads', 'Shown', 'None', 'ads'],
+      ['Photos, videos, wallpapers', 'With our mark', 'Clean'],
+      ['3D landmarks & AR', '2D', '✓'],
+      ['Puzzle levels / hints', '700 · 3 a day', '1,000 · unlimited'],
+      ['Magic Spirals gears & pens', 'Some · 💎 Gems', 'All'],
+      ['Everyday crackers, 15 landmarks, Character Festival, Stickman Show, Pataka Chor, Nataraja Rescue, Duels', '✓', '✓']];
+    list.innerHTML = '';
+    for (const [k, f, p, tag] of rows) {
+      if (tv && tag === 'ads') continue;
+      const li = document.createElement('li');
+      if (!k) li.className = 'vs-head';
+      for (const [cls, t] of [['vs-k', k], ['vs-f', f], ['vs-p', p]]) { const c = document.createElement('span'); c.className = cls; c.textContent = t; li.append(c); }
+      list.append(li);
+    }
   }
   // "₹29.00" or "Rs. 29" or "$0.99": the number and the symbol in front of it.
   function moneyOf(price) {
@@ -12419,10 +16515,20 @@
 
   function openPremium(intent) {
     premium.intent = intent || null;
+    const from = typeof intent === 'string' ? intent : Object.keys(intent || {}).find((k) => intent[k]) || 'menu';
+    funnel('paywall_open');
+    funnelOnce(`open_${String(from).toLowerCase().replace(/[^a-z_]/g, '')}`.slice(0, 24)); // where this player came from
+    track.screen('premium');
+    track('paywall_view', { from, kind: 'premium', pass: passOnSale() ? 1 : 0 });
+    if (nativeGems() && gemStore.status !== 'purchasing' && Date.now() < PASS.sellUntil && !gemStore.packs.some((x) => x.id === PASS.id)) window.LUTSNative.premium('gems'); // the Pass's price, if it hasn't come yet
     premium.message = '';
     premiumReturnFocus = document.activeElement;
     closeDrawer();
     premiumPanel.hidden = false;
+    const benefits = premiumPanel.querySelector('.premium-details');
+    if (benefits) benefits.open = false;
+    premiumPanel.querySelector('.premium-box').scrollTop = 0;
+    premiumPictures(true);
     renderPremiumHero();
     renderPaywall();
     if (nativeApp && (!premium.plans.length || premium.status === 'unavailable' || premium.status === 'error')) nativeApp.premium('plans');
@@ -12430,10 +16536,22 @@
     if (nativeApp && nativeApp.platform === 'android') nativeApp.premium('paywall', Object.keys(intent || {}).find((k) => intent[k]) || 'menu');
     requestAnimationFrame(() => $('#btnClosePremium').focus({ preventScroll: true }));
   }
+  // The sheet's pictures (the hero and the screenshots) are let go as it closes and come back as it opens: kept decoded
+  // behind it, on a Samsung M11 (under 100 MB free) the next Magic Spirals launch froze for over 6 s.
+  function premiumPictures(on) {
+    for (const im of premiumPanel.querySelectorAll('.premium-shot img, .premium-shot source')) {
+      const attr = im.tagName === 'SOURCE' ? 'srcset' : 'src';
+      if (on && im.dataset.src) { im.setAttribute(attr, im.dataset.src); delete im.dataset.src; }
+      else if (!on && im.getAttribute(attr)) { im.dataset.src = im.getAttribute(attr); im.removeAttribute(attr); }
+    }
+    if (!on) $('#premiumHero').innerHTML = '';
+  }
   function closePremium() {
     if (premiumPanel.hidden) return;
     premiumPanel.hidden = true;
+    premiumPictures(false);
     premium.intent = null;
+    track.back();
     if (premiumReturnFocus && premiumReturnFocus.focus) premiumReturnFocus.focus({ preventScroll: true });
   }
   function celebrate() {
@@ -12442,9 +16560,7 @@
   function syncPremiumRow() {
     const on = premium.active, manage = $('#premiumManage');
     $('#premiumRow').classList.toggle('on', on);
-    const tv = document.documentElement.classList.contains('tv'); // no ads on TV to remove
-    $('#premiumRowNote').textContent = tv ? (on ? 'Active · every cracker free' : 'Free crackers, every puzzle level')
-      : on ? 'Active · no ads, every cracker free' : 'No ads, free crackers, every puzzle level';
+    $('#premiumRowNote').textContent = on ? 'Active · every cracker and level unlocked' : 'Every cracker, every puzzle level';
     document.body.classList.toggle('premium', on); // hides the gem prices on crackers
     $('#btnPremiumRow').hidden = on;
     manage.hidden = !on || !nativeApp;
@@ -12453,9 +16569,11 @@
 
   // Subscription started or ended: apply what the player was trying to unlock, or step back to the free tier.
   function premiumChanged(was) {
+    syncPassOffer();
+    syncWallMark();
     window.dispatchEvent(new CustomEvent('luts:premium-changed', { detail: { active: premium.active } })); // the puzzles re-open their locks
     document.body.classList.toggle('premium', premium.active);
-    if ($('#premiumNudge')) $('#premiumNudge').hidden = true;
+    syncBar();
     renderGemSheet();
     if (!premium.active && itemLocked(settings.item)) { // lapsed: the Sivakasi Premium crackers leave the street
       settings.item = 'flowerpot'; saveSettings(); syncModeUi();
@@ -12489,7 +16607,7 @@
     if (Array.isArray(s.plans) && s.plans.length) premium.plans = s.plans;
     if (s.known) {
       crackerEntitled = !!(nativeApp && nativeApp.lastPremium === s && s.active);
-      premium.active = !!s.active || reviewerAccess;
+      premium.active = !!s.active || reviewerAccess || passActive();
       try { localStorage.setItem('luts:premium', s.active ? '1' : '0'); } catch (e) { /* ignore */ }
     }
     premium.message = s.status === 'unavailable'
@@ -12504,11 +16622,14 @@
         : s.event === 'pending' ? 'Your payment is processing. Premium unlocks as soon as it completes.'
           : s.event === 'nothing-to-restore' ? 'No active subscription was found for this account.' : '';
     if (premium.active !== was) premiumChanged(was);
+    syncGems();
+    track.user('is_premium', premium.active ? 'yes' : 'no');
+    if (s.event === 'purchased') { funnel('purchased'); track('purchase_done', { sku: premium.sku || 'premium' }); }
     if (s.event === 'purchased' || s.event === 'restored') {
       closePremium();
       const tv = document.documentElement.classList.contains('tv');
-      toast(s.event === 'purchased' ? (tv ? 'Welcome to Premium ✨ Every cracker free, every level open' : 'Welcome to Premium ✨ No ads, every cracker free, every level open')
-        : tv ? 'Premium restored ✨ Every cracker free, every level open' : 'Premium restored ✨ No ads, every cracker free, every level open', 3200);
+      toast(s.event === 'purchased' ? 'Welcome to Premium ✨ Every cracker free, every level open'
+        : 'Premium restored ✨ Every cracker free, every level open', 3200);
       celebrate();
     }
     renderPaywall();
@@ -12525,45 +16646,11 @@
     const plan = selectedPlan();
     if (premium.status === 'unavailable' || !plan) { nativeApp.premium('plans'); return; }
     premium.message = '';
+    funnel('buy_tap'); premium.sku = plan.id; track('purchase_start', { sku: plan.id });
     nativeApp.premium('purchase', plan.id);
   });
   $('#btnPremiumRestore').addEventListener('click', () => { if (nativeApp) nativeApp.premium('restore'); });
 
-  // Reviewer code (see REVIEWER_HASH): seven quick taps on the Settings title show the field.
-  let reviewerTaps = 0, reviewerTapAt = 0;
-  $('#settings .drawer-head h2').addEventListener('click', () => {
-    const now = performance.now();
-    reviewerTaps = now - reviewerTapAt < 900 ? reviewerTaps + 1 : 1;
-    reviewerTapAt = now;
-    if (reviewerTaps >= 7 && !reviewerAccess) { $('#reviewerBox').hidden = false; $('#reviewerCode').focus(); }
-  });
-  $('#reviewerCode').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#btnReviewer').click(); } });
-  $('#btnReviewer').addEventListener('click', async () => {
-    const code = $('#reviewerCode').value.trim().toUpperCase();
-    if (!code || !(window.crypto && crypto.subtle)) return;
-    const sum = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(code));
-    const hex = [...new Uint8Array(sum)].map((b) => b.toString(16).padStart(2, '0')).join('');
-    if (hex !== REVIEWER_HASH) { toast('That code isn’t valid'); return; }
-    reviewerAccess = true;
-    try { localStorage.setItem('luts:reviewer', '1'); } catch (err) { /* ignore */ }
-    reviewerAdsOff();
-    const was = premium.active;
-    premium.active = true;
-    if (!was) premiumChanged(was);
-    $('#reviewerCode').value = '';
-    $('#reviewerBox').hidden = true;
-    renderPaywall();
-    syncWorldUi();
-    queueBurstSync();
-    syncPremiumRow();
-    toast('Premium unlocked for review ✨ Every landmark is open', 3200);
-  });
-  // The store's Premium turns the app's ads off by itself; a reviewer's Premium tells the app here. (Older apps answer
-  // an unknown action harmlessly.)
-  function reviewerAdsOff() {
-    if (window.LUTSNative && window.LUTSNative.ads) window.LUTSNative.ads('reviewer').catch(() => { /* ads stay as they were */ });
-  }
-  if (reviewerAccess) reviewerAdsOff();
   if (window.LUTSNative && window.LUTSNative.version) { $('#appVersion').textContent = `Version ${window.LUTSNative.version}`; $('#appVersion').hidden = false; }
   window.addEventListener('luts:premium', (e) => onPremiumState(e.detail));
   if (nativeApp && nativeApp.lastPremium) onPremiumState(nativeApp.lastPremium);
@@ -12598,20 +16685,17 @@
   function syncLaunchUi() {
     // A show that ran to the end (not one that was blocked while igniting) is a happy moment to ask for a rating.
     if (launch.state === 'READY' && lastLaunchState !== 'READY' && lastLaunchState !== 'IGNITING') {
-      // A show has ended: the natural break for the video (every 3rd show), not the moment Fire is pressed, so the
-      // fireworks start at once and a weak phone isn't loading a video as the show begins.
       if (triedNow) afterTry(); // a free try's show ends on Premium alone
       else {
-        if (mode === 'play') setTimeout(() => { if (launch.state === 'READY') adBreak('launch'); }, 600);
         setTimeout(showEndedForRating, 1500);
-        setTimeout(showEndedForPremium, 4000);
+        afterShow(showEndedForPremium, 4000);
       }
     }
     lastLaunchState = launch.state;
     const busy = launch.state !== 'READY', fire = $('#btnFire');
     document.body.classList.toggle('launch-active', busy);
     document.body.dataset.launchState = launch.state;
-    const labels = { READY: '', IGNITING: 'Igniting…', ASCENDING: 'Flying…', BURSTING: 'Enjoy the burst', FADING: 'Enjoy the sparks', RETURNING: 'Returning…' };
+    const labels = { READY: '', IGNITING: 'Igniting…', ASCENDING: 'Flying…', BURSTING: 'Enjoy the burst', FADING: 'Enjoy the sparks', RETURNING: playMode === 'ground' ? 'Enjoy the sparks' : 'Returning…' }; // (Ground's camera never left, so nothing returns)
     $('#launchStatus').textContent = labels[launch.state];
     syncRewardsUi();
     if (!fire || !$('#groundList').children.length) return;
@@ -12624,7 +16708,7 @@
     fire.hidden = playMode === 'spark' || (sparklerFires() && !chor.on); // Fireworks Street keeps Fire beside the sparkler
     // Fireworks Street lights only what you found and put down: say how many are ready, not the shop's chosen cracker.
     if (chor.on && !busy) { const n = waitingItems().length; fire.textContent = n ? `Fire · ${n}` : 'Find a cracker'; fire.classList.toggle('chor-idle', !n); }
-    for (const b of document.querySelectorAll('#shellList button, #groundList button')) {
+    for (const b of document.querySelectorAll('#shellList .shell-chip, #groundList .shell-chip')) {
       const id = b.dataset.shell ? `shell:${b.dataset.shell}` : `item:${b.dataset.item}`;
       let status = b.querySelector('.trial-status');
       if (!status) { status = document.createElement('small'); status.className = 'trial-status'; b.append(status); }
@@ -12637,7 +16721,7 @@
       b.classList.toggle('active', id === s.id);
       b.disabled = busy;
     }
-    for (const b of document.querySelectorAll('#modeTabs button, #viewToggle button, #sparkFloat button, #sparkColors button, #settings input, #settings select, #setReset, #btnSparkBurst, #btnClearStreet, #btnFlip')) b.disabled = busy;
+    for (const b of document.querySelectorAll('#modeTabs button, #viewToggle button, #sparkFloat button, #sparkColors button, #settings input, #settings select, #setReset, #btnSparkBurst, #btnClearStreet, #btnFlip, .rack-tile')) b.disabled = busy;
     if (!model3d()) $('#viewToggle [data-view="3d"]').disabled = true; // a night-sky world is 2D only
     syncDrawingAction();
     syncBurstAll();
@@ -12665,6 +16749,7 @@
     if (sweepBusy()) return; // what the sparkler lit is still going: Fire would clear it and fire it again
     const s = fireAll() ? allSelection() : selection();
     if (s.writing && !strokes.length) { toast('Write something first, then light it up'); return; }
+    if (s.writing) track('feature_complete', { feature: 'spark_name' });
     if (roomAr && !s.writing && !s.ground && !(arSpot && arSpot.seen)) { toast(arSpot ? 'Point your phone at your cracker spot' : 'Tap the floor to place your cracker first'); return; }
     return launchWithGems(s);
   }
@@ -12709,9 +16794,12 @@
     pointer = null; if (pen) penUp();
     if (seq.multi) {
       // One launch, every cracker: lit in a quick left-to-right cascade so the street erupts rather than going off at once.
-      seq.items = seq.batch.sort((a, b) => a.x - b.x).map((p, i) => {
+      // A lower-end phone chains them instead: each lights as the one before fades, so no more than two burn together.
+      let at = 0;
+      seq.items = seq.batch.sort((a, b) => a.x - b.x).map((p) => {
         const it = placeItem(p.type, p.x, p.y);
-        it.dur = showDur(it); it.armed = true; it.t = -i * 0.22;
+        it.dur = showDur(it); it.armed = true; it.t = -at;
+        at += lowEndPhone() ? Math.max(0.22, (ITEMS[it.type].fuse || 0) + it.dur - 1.5) : 0.22;
         if (!tried.has(it.type)) tried.add(it.type);
         return it;
       });
@@ -12733,15 +16821,138 @@
     if (w3dShown()) startleFolk(seq);
     buzz(15);
   }
+  // The Drone Show: its figures are unpacked when it starts, under the veil, a lighter swarm where the game runs lighter.
+  // One figure flies at a time, on its own clock from the cracker's break, centred in the sky over the landmark.
+  const DRONE_LINES = { tiger: 'Tiger: India’s national animal', elephant: 'Elephant: India’s heritage animal', peacock: 'Peacock: India’s national bird', diya: 'Diwali: The festival of lights', ganesha: 'Ganesha: Remover of obstacles', lakshmi: 'Lakshmi: Goddess of wealth', shiva: 'Shiva: The great lord', krishna: 'Krishna: The flute player', hanuman: 'Hanuman: Strength and devotion', durga: 'Durga: The mother who protects', saraswati: 'Saraswati: Goddess of learning', balaji: 'Balaji: Lord of the seven hills', nataraja: 'Nataraja: Lord of the dance', rama: 'Rama: The ideal king', murugan: 'Murugan: Lord of the spear', vishnu: 'Vishnu: Preserver of the world', ayyappa: 'Ayyappa: Lord of Sabarimala', buddha: 'Buddha: The awakened one' };
+  // The Sky Story: one figure a chapter, its chapter's line under it (tools/drone-story).
+  const STORY_LINES = { jelly: 'The magic of flight: jellyfish drift into the night', puppy: 'Small moments of joy: a puppy and its ball', pianist: 'Technology meets art: music in a thousand lights', honeybear: 'Imagination and dreams: a bear and its honey', family: 'Love as a legacy: hand in hand, always', drummer: 'History and rhythm: the first drumbeat', warrior: 'Forging an empire: courage and a shield', airliner: 'Reaching for the sky: we learned to fly', worldhand: 'Global connection: the whole world in our hands', tajlight: 'A monument of love: the Taj Mahal', skydragon: 'Legends in the sky: a dragon takes wing', galloper: 'Power and grace: a horse at full gallop', parachute: 'Endless imagination: floating down on a dream', roadster: 'Style and strength: the open road', elephants: 'Future built with care: every future begins with care' };
+  Object.assign(STORY_LINES, { // India: Gift to the World
+    indiya: 'Every story begins with a light', inzero: 'Zero: India taught the world to count from nothing to infinity', inyoga: 'Yoga: a breath the whole world now takes',
+    inchess: 'Chaturanga: the game of kings, born in India', inayur: 'Ayurveda: healing with herbs, for five thousand years', innalanda: 'Nalanda: the world once came here to learn',
+    inkonark: 'The Konark wheel: a stone sundial that still tells the time', incharkha: 'The charkha: cotton that clothed the world, and won freedom', indance: 'Classical dance: stories told by hands and feet',
+    intaj: 'The Taj Mahal: a love the whole world travels to see', inrocket: 'Mangalyaan: India reached Mars on its very first try', inmoon: 'Chandrayaan-3: the first to land near the Moon’s south pole',
+    incricket: 'Cricket: one bat, a billion hearts', indigital: 'Digital India: a whole nation pays with a tap', inflag: 'The tricolour: flying for every Indian, everywhere',
+    innamaste: 'Vasudhaiva Kutumbakam: the whole world is one family' });
+  Object.assign(STORY_LINES, { bear: STORY_LINES.honeybear, globe: STORY_LINES.worldhand, taj: STORY_LINES.tajlight, dragon: STORY_LINES.skydragon, horse: STORY_LINES.galloper, car: STORY_LINES.roadster }); // (Unseen Angles' names)
+  const DRONE_BREATH = 3.5; // seconds from a gap's last shell to the next god's launch: a willow's gold is gone by its break
+  const droneBox = (id) => { // (id: the figure about to fly, before it is the swarm's)
+    const top = safeTop() + 12, roof = world.rect ? world.rect.roof : H * 0.62;
+    if (live.show && live.show.story) { // the Sky Story and Unseen Angles: the figure in the clear sky above the roofline, never over the landmark
+      if (W > H * 1.15) { // a phone on its side: the clear sky is beside the landmark, so the figure stands to one side of it, the side changing each chapter (under the Home button's row)
+        const prog = live.show.program || [], k = Math.max(0, prog.indexOf(id || (drones && drones.id))), t2 = Math.max(top, 64), unit = Math.min(W * 0.13, (H * 0.72 - t2) / 2.2);
+        return { x: W * (k % 2 ? 0.84 : 0.16), y: t2 + 1.1 * unit, unit };
+      }
+      const bottom = roof - H * 0.015, unit = Math.max(Math.min(W, H) * 0.22, Math.min(W * 0.475, (bottom - top) / 2.2)); // (a picture is 2.2 units square)
+      return { x: W / 2, y: Math.max(top + 1.1 * unit, Math.min((top + bottom) / 2, bottom - 1.1 * unit)), unit }; // (centred in the clear sky; on a very tall landmark it keeps a readable size and its top on screen)
+    }
+    const bottom = Math.max(roof + H * 0.05, top + H * 0.46), unit = Math.min(W * 0.475, (bottom - top) / 2.14);
+    return { y: top + 1.07 * unit, unit };
+  };
+  // Laser Light Gala: beams rise from the fountains' line; the LED wash reads the scene off the sky canvas.
+  const laserLite = () => lowEndPhone() || measuredTier === 0; // (not the Low quality setting, every phone's default: beams are cheap)
+  function laserDraw() {
+    const r = world.rect, roof = r ? r.roof : H * 0.62, ground = r ? Math.min(H - 6, r.roof + (H - r.roof) * 0.75) : H - 6;
+    lasers.draw(ictx, { W, H, U, top: safeTop() + 12, roof, ground, water: droneWater(), sky: world.img && r && !w3dShown() ? skyC : null, rect: r, dpr: DPR });
+  }
+  function droneDraw() { const b = droneBox(); drones.draw(ictx, W, H, b.x || W / 2, b.y, b.unit, measuredTier === 0, !droneWeak() && measuredTier > 1, live.show && live.show.reflect ? droneWater() : 0); }
+  // Where a beast's lights shine back: the landmark's water, or the stone court it stands on.
+  const droneWater = () => { const r = world.rect, y = world.waterY || (r && world.courtY) || 0; return y > 0 && y < H - 4 ? y : 0; };
+  function droneBell() { // (high enough for a phone's speaker, which loses a low bell)
+    const c = Sound.ctx;
+    if (live.on && live.show && live.show.drones && drones && settings.sound && c && c.state === 'running' && Sound.out) LUTSDroneShow.bell(c, Sound.out, c.currentTime + 0.02, 587.33);
+  }
+  // The gods' points are 400 KB: fetched only for this show, under its veil.
+  const droneFile = (src, have) => new Promise((done) => {
+    if (have()) { done(); return; }
+    const s = document.createElement('script'); s.src = src; s.onload = s.onerror = done; document.head.append(s);
+  });
+  // The Sky Story's figures (326 KB) come after the gods' file, which they add to, and only for their show.
+  // Unseen Angles' traced figures (514 KB, drone-unseen-data.js) the same way, only for theirs.
+  // Its pictures (assets/drones, 668 KB) come too: each glows in over its formed lights (drone-show.js opts.pictures).
+  let dronePics = {};
+  // A picture's black made clear (its light as alpha): the lights layer is transparent over the scene, where black would
+  // paint an opaque square. Once a picture, under the show's veil.
+  const droneGlass = (im) => {
+    const c = document.createElement('canvas'); c.width = im.naturalWidth; c.height = im.naturalHeight; const g = c.getContext('2d', { willReadFrequently: true });
+    g.drawImage(im, 0, 0); const d = g.getImageData(0, 0, c.width, c.height), p = d.data;
+    for (let i = 0; i < p.length; i += 4) { const m = Math.max(p[i], p[i + 1], p[i + 2]); if (m) { const k = 255 / m; p[i] *= k; p[i + 1] *= k; p[i + 2] *= k; } p[i + 3] = m; }
+    g.putImageData(d, 0, 0); return c;
+  };
+  const dronePictures = (show) => Promise.all(show.program.map((id) => new Promise((done) => { if (dronePics[id]) { done(); return; } const im = new Image(); im.onload = () => { dronePics[id] = droneGlass(im); done(); }; im.onerror = () => done(); im.src = `assets/drones/${id}.jpg`; })));
+  const droneData = (show) => droneFile('drone-gods-data.js', () => !!window.LUTSDroneData).then(() => (show && show.data ? droneFile(show.data, () => !!(window.LUTSDroneData || {})[show.program[0]]) : 0)).then(() => (show && show.pictures ? dronePictures(show) : 0));
+  const droneWeak = () => lowEndPhone() || settings.quality === 'low' || measuredTier <= 1;
+  // The Flag Show: the same swarm as the gods, in each flag's own colours. Built when the show starts, not with the gods' file.
+  const FLAG_ORDER = ['india', 'japan', 'usa', 'uk', 'china', 'brazil', 'bangladesh'];
+  const FLAG_LINES = { india: 'India: The tricolour', japan: 'Japan: The rising sun', usa: 'United States: The stars and stripes', uk: 'United Kingdom: The Union Jack', china: 'China: The five stars', brazil: 'Brazil: The southern cross', bangladesh: 'Bangladesh: The red disc' };
+  function flagCloud(id) {
+    const cols = droneWeak() ? 34 : 48, pts = [], wave = (u, h) => Math.sin(u * Math.PI * 1.6) * h * 0.05;
+    if (id === 'india') {
+      const w = 1, h = 2 / 3, rows = Math.max(6, Math.round(cols * h / 3)), bands = ['#ff7a00', '#fff4e6', '#0fb23a'], cr = h * 0.46;
+      for (let b = 0; b < 3; b++) for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        const u = (c + 0.5) / cols, v = (b + (r + 0.5) / rows) / 3, px = -w + u * 2 * w, py = -h + v * 2 * h;
+        if (b === 1 && px * px + py * py < cr * cr * 0.92) continue;
+        pts.push([px, py + wave(u, h), bands[b]]);
+      }
+      const lift = wave(0.5, h);
+      // Spokes only in the outer half: closer in, the glow of twenty-four of them joins into rings.
+      for (let i = 0; i < 24; i++) {
+        const a = (i / 24) * TAU - Math.PI / 2;
+        for (let k = 0; k < 4; k++) {
+          const f = 0.58 + k * 0.09;
+          pts.push([Math.cos(a) * cr * f, Math.sin(a) * cr * f + lift, '#5b7bff']);
+        }
+      }
+      for (let i = 0; i < 32; i++) { const a = (i / 32) * TAU; pts.push([Math.cos(a) * cr, Math.sin(a) * cr + lift, '#5b7bff']); }
+      for (let i = 0; i < 6; i++) { const a = (i / 6) * TAU; pts.push([Math.cos(a) * cr * 0.1, Math.sin(a) * cr * 0.1 + lift, '#5b7bff']); }
+      return pts;
+    }
+    const F = FLAGS[id], w = 1, h = F.ar, rows = Math.max(8, Math.round(cols * F.ar));
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const u = (c + 0.5) / cols, v = (r + 0.5) / rows, px = -w + u * 2 * w, py = -h + v * 2 * h;
+      pts.push([px, py + wave(u, h), F.at(u, v)]);
+    }
+    const extra = F.extra ? F.extra() : [];
+    if (id === 'usa') { // the canton is blue cloth; each star is a small white cross so it reads at this distance
+      for (const [u, v] of extra) {
+        const px = -w + u * 2 * w, py = -h + v * 2 * h, s = 0.04;
+        pts.push([px, py, '#ffffff'], [px + s, py, '#ffffff'], [px - s, py, '#ffffff'], [px, py + s, '#ffffff'], [px, py - s, '#ffffff']);
+      }
+    } else for (const [u, v, c] of extra) { const px = -w + u * 2 * w; pts.push([px, -h + v * 2 * h + wave(u, h), c]); }
+    return pts;
+  }
+  function flagStart() {
+    const figures = {};
+    for (const id of FLAG_ORDER) figures[id] = LUTSDroneShow.fromPoints(flagCloud(id));
+    const n = Math.max(...FLAG_ORDER.map((id) => figures[id].x.length));
+    drones = LUTSDroneShow.player({ count: n, dpr: Math.min(DPR, 2), figures });
+    drones.prepare(droneBox().unit);
+    $('#liveCaption').classList.add('low');
+    last = performance.now(); frameMean = 16.7; slowFor = fastFor = 0;
+    return FLAG_ORDER.slice();
+  }
+  function droneStart(program) {
+    const words = inLang((live.show && live.show.greet) || 'Happy Diwali').trim().split(/\s+/), end = words.pop(), list = (program || LUTSDroneShow.PROGRAM).filter((id) => (window.LUTSDroneData || {})[id]);
+    drones = LUTSDroneShow.player({ count: live.show && live.show.dense ? (droneWeak() ? 1300 : 2400) : droneWeak() ? 900 : 1300, dpr: Math.min(DPR, 2), ids: list, white: !!(live.show && live.show.white), outline: !!(live.show && live.show.white && !live.show.dense), pictures: live.show && live.show.pictures ? dronePics : null, motion: !!(live.show && live.show.story), greeting: words.length ? [words.join(' '), end] : [end] });
+    drones.prepare(droneBox().unit); // every sprite sheet now, none in a frame
+    if (Sound.ctx && Sound.out) LUTSDroneShow.hall(Sound.ctx, Sound.out);
+    $('#liveCaption').classList.add('low'); // the gods' lines sit under the figure, never over it
+    last = performance.now(); frameMean = 16.7; slowFor = fastFor = 0; // the unpacking is no slow frame
+    return [...list, 'greet'];
+  }
+  function droneStop() { drones = null; $('#liveCaption').classList.remove('low'); }
   function clearScene() {
+    droneStop();
+    lasers = null;
     safeSound(() => Sound.hush()); // strings of snaps (saravedi, walas) stop with their crackers
+    safeSound(() => Sound.sparklerStop()); // a wish written in sparkler light stops with the show
+    sparklerSig = null;
     shells.length = 0;
     while (stars.length) release(starPool, stars.pop());
     while (sparks.length) release(sparkPool, sparks.pop());
     while (smokes.length) release(smokePool, smokes.pop());
     confettis.length = 0; groundItems.length = 0; hazes.length = 0;
-    timers.length = 0; directorUntil = 0; portrait = null; shake = shakeX = shakeY = 0;
-    for (const g of [ctx, glx, gctx, ictx, flightCtx]) g.clearRect(0, 0, W, H);
+    timers.length = 0; directorUntil = 0; portrait = null; drawingNets.length = 0; shake = shakeX = shakeY = 0;
+    for (const g of [ctx, gctx, ictx, flightCtx]) g.clearRect(0, 0, W, H);
     fxLights.length = glowQ.length = 0;
   }
   const diwaliReveal = $('#diwaliReveal');
@@ -12783,7 +16994,7 @@
     resetLaunchCamera();
   }
   function resetLaunchCamera() {
-    for (const c of [skyC, moonC, cityC, floorC, itemsC, paintC, gfxC, fxC, glowC, atmoC]) { c.style.transform = ''; c.style.opacity = ''; }
+    for (const c of [skyC, moonC, cityC, floorC, itemsC, paintC, gfxC, fxC, atmoC]) { c.style.transform = ''; c.style.opacity = ''; }
     flightCtx.clearRect(0, 0, W, H);
     if (w3d) w3d.setTilt(0);
     view.key = '';
@@ -12820,14 +17031,15 @@
       // 3D: the trail rises out of the tube, wherever the tilting camera puts it on screen.
       if (s.launcher && s.item && groundItems.includes(s.item)) [s.sx, s.sy] = tipPos(s.item);
       const t = clamp(s.since / 3, 0, 1), p = 1 - (1 - t) ** 1.65;
-      s.x = s.sx + Math.sin(t * Math.PI) * W * 0.065;
+      // A gentle sway on the way up, sized by the screen's short side: by its width a landscape rocket swerved sideways.
+      s.x = s.sx + Math.sin(t * Math.PI) * Math.min(W, H) * 0.065;
       // Bursts at a fifth of the way down, or lower if its top ring would reach under the status bar.
       s.y = s.sy + (Math.min(H * 0.4, Math.max(H * 0.20, safeTop() + R0() * s.size + 8 * U)) - s.sy) * p;
       const reveal = ease((t - 0.72) / 0.28);
       const still = reduceMotion() || roomAr;
       camera.travel = still ? 0 : ease(t);
       camera.y = still ? 0 : H * 0.12 * ease(t);
-      camera.x = still ? 0 : -W * 0.02 * Math.sin(t * Math.PI);
+      camera.x = still ? 0 : -Math.min(W, H) * 0.02 * Math.sin(t * Math.PI);
       camera.zoom = still ? 1 : 1 + 0.16 * Math.sin(t * Math.PI) - 0.06 * reveal;
       s.emission += dt * 24;
       while (s.emission >= 1) { s.emission--; spark(s.x, s.y, rand(-9, 9), rand(30, 80), '#ffd27a', 0.24); }
@@ -12845,23 +17057,32 @@
         if (it && (it.done || (it.lit && it.t >= it.dur))) change('FADING'); // not during its fuse (the Sutli's stalls)
       } else if (s.since >= 0.65) change('FADING');
     }
-    if (launch.state === 'FADING' && !stars.length && !sparks.length && !smokes.length && !confettis.length && !shells.length && s.since >= 0.8 && gameTime >= directorUntil) {
+    // Back as soon as the show has mostly gone (a willow's last embers and drifting smoke don't hold it), or at once on a tap.
+    // A country picture (pictureUntil) stays up for the flag and the whole animal, then comes back down.
+    const picture = s.pictureUntil && gameTime < s.pictureUntil;
+    const spent = !picture && !shells.length && gameTime >= directorUntil && (stars.length + sparks.length < 25 || s.since >= 1.6);
+    if (launch.state === 'FADING' && (s.skip || (spent && s.since >= 0.3))) {
       s.returnFrom = { ...camera };
-      // Sky crackers end on Happy Diwali; the camera holds until it has faded, then glides back down.
-      if (!s.ground && !s.writing && mode === 'play' && !rush.on) s.hold = showDiwaliReveal();
-      // 8-bit destination-out stalls at 1-2/255 and leaves a ghost of the show: wipe it now the sky is empty.
-      ctx.clearRect(0, 0, W, H);
-      if (!groundItems.length && !pen) gctx.clearRect(0, 0, W, H);
+      // Sky crackers end on Happy Diwali; the camera holds a moment while it shows, then glides back down.
+      // A country picture skips that card: it sits in the same sky as the bird and hides the wings.
+      if (!s.ground && !s.writing && mode === 'play' && !rush.on) {
+        if (s.pictureUntil) s.hold = s.skip ? 0 : 0.45;
+        else { showDiwaliReveal(); s.hold = s.skip ? 0 : 0.8; }
+      }
+      // 8-bit destination-out stalls at 1-2/255 and leaves a ghost of the show: wipe it once the sky is empty.
+      if (!stars.length && !sparks.length) ctx.clearRect(0, 0, W, H);
+      if (!groundItems.length && !pen && !stars.length && !sparks.length) gctx.clearRect(0, 0, W, H);
       // A three-star show (Burst all with three or more, or a cake, rocket combo or finale): the 3D forecourt's old man claps.
       if (w3dShown() && (s.multi ? s.items.length >= 3 : ['cake', 'rocketcombo', 'finale'].includes(s.type))) w3d.cheer();
       change('RETURNING');
     }
     if (launch.state === 'RETURNING') {
-      const p = 1 - ease(Math.max(0, s.since - (s.hold || 0)) / 1.15), from = s.returnFrom;
+      if (s.skip && !s.skipped) { s.skipped = true; hideDiwaliReveal(); if (s.hold) { s.hold = 0; s.since = 0; s.returnFrom = { ...camera }; } }
+      const p = 1 - ease(Math.max(0, s.since - (s.hold || 0)) / (s.skip ? 0.35 : 0.65)), from = s.returnFrom;
       camera.x = from.x * p; camera.y = from.y * p; camera.zoom = 1 + (from.zoom - 1) * p; camera.travel = from.travel * p;
       if (!p && !s.completing) {
         // Launches are unlimited now (gems pay for the big crackers), so the old launch points are kept quietly.
-        launch.complete().then(() => { if (launch.sequence === s) abortLaunch(); })
+        launch.complete().then(() => { if (launch.sequence === s) abortLaunch(); if (!s.writing) setTimeout(() => upsellAfterShow(s), 900); })
           .catch(() => { if (launch.sequence === s) abortLaunch(); });
         return;
       }
@@ -12899,20 +17120,14 @@
       if (camera.travel > 0) {
         g.save(); g.beginPath(); g.rect(0, 0, W, camera.travel * H * 0.42 + 3 + H * 0.08); g.clip();
         {
-          // The night carries on above the descending picture: deep blue at the top deepening into the colour of the
-          // picture's top edge, then the stars over it (added, so their black ground vanishes) and a few that twinkle.
+          // The night carries on above the descending picture: deep blue at the top deepening into the picture's black
+          // sky, then the stars over it (added, so their black ground vanishes) and a few that twinkle.
           // An animated world (a live sky) carries on in its own colour at its top edge, starry as far as its hour is
           // (none by day); it used to be one flat fill with a hard edge, black at night.
-          const r0 = world.rect, top = camera.travel * H * 0.42 + 3, live = liveShown();
+          const top = camera.travel * H * 0.42 + 3, live = liveShown();
           let c = live ? liveSky.skyTopRgb : '20,22,58';
           const starry = live ? clamp(liveSky.stars, 0, 1) : 1;
-          if (!live && world.blur && r0 && !document.body.classList.contains('home')) {
-            const bh = world.blur.height, row = clamp(Math.floor((-r0.dy / r0.dh) * bh), 0, bh - 1);
-            const b = world.blur.getContext('2d').getImageData(0, row, world.blur.width, 1).data;
-            let r = 0, gg = 0, bl = 0; const n = b.length / 4;
-            for (let i = 0; i < b.length; i += 4) { r += b[i]; gg += b[i + 1]; bl += b[i + 2]; }
-            c = `${(r / n) | 0},${(gg / n) | 0},${(bl / n) | 0}`;
-          }
+          if (!live && world.img) c = '0,0,0';
           const sky = g.createLinearGradient(0, 0, 0, top);
           if (live) { // its own top colour, deepening upward into night as far as its hour is night
             const [r, gg, b] = c.split(',').map(Number), k = 0.85 - 0.25 * starry;
@@ -12953,48 +17168,82 @@
     }
     if (s.ground || s.writing || !['IGNITING', 'ASCENDING'].includes(launch.state)) return;
     // Only a thin core line goes on the fading #fx; the soft orange line and smoke stacked up there into a column.
-    // The glowing head is drawn fresh on #glow.
+    // The glowing head is drawn fresh each frame in 'lighter', at litA().
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
     const y = s.y, x = s.x, ascent = launch.state === 'ASCENDING';
     ctx.strokeStyle = '#ffe9b0'; ctx.lineCap = 'round'; ctx.lineWidth = Math.max(1.4, 2 * U); ctx.globalAlpha = 0.95;
     ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 1, y + (ascent ? 30 : 4) * U); ctx.stroke();
     ctx.restore();
-    glx.globalCompositeOperation = 'lighter';
-    glx.globalAlpha = 0.5; SPR.draw(glx, SPR.id('#ff9a3c'), SPR.SOFT, x, y, 26 * UV());
-    glx.globalAlpha = 1; SPR.draw(glx, SPR.id('#ffe9b0'), SPR.HEAD, x, y, 11 * UV());
-    glx.globalCompositeOperation = 'source-over';
-    glowUsed = true;
+    const fa = litA();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.5 * fa; SPR.draw(ctx, SPR.id('#ff9a3c'), SPR.SOFT, x, y, 26 * UV());
+    ctx.globalAlpha = fa; SPR.draw(ctx, SPR.id('#ffe9b0'), SPR.HEAD, x, y, 11 * UV());
+    ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
   }
   $('#btnFire').addEventListener('click', requestFire);
+  // The floating fire button (left of the sky, under the eye): fires the chosen cracker, like the big Fire button.
+  // Drag it anywhere: let go and it settles on the nearer side, at that height (kept between visits). A tap still fires;
+  // a drag doesn't.
+  {
+    const fab = $('#btnFireFab'), wrap = fab.parentElement, KEY = 'luts:firefab';
+    const place = (side, y) => {
+      const h = wrap.offsetHeight || 64, top = clamp(y, H * 0.14, H * 0.74 - h);
+      wrap.style.top = `${Math.round(top)}px`; wrap.style.left = wrap.style.right = '';
+      wrap.classList.toggle('left', side === 'left');
+    };
+    // Its spot is kept as a fraction of the height and set again whenever the screen turns or resizes: a top in pixels
+    // from portrait put it below the bottom of a phone on its side.
+    const restore = () => {
+      let s = null; try { s = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { /* ignore */ }
+      if (s) place(s.side, s.f * innerHeight);
+      else if (wrap.style.top) { wrap.style.top = ''; wrap.style.left = wrap.style.right = ''; }
+    };
+    requestAnimationFrame(restore);
+    let restoreRaf = 0;
+    addEventListener('resize', () => { cancelAnimationFrame(restoreRaf); restoreRaf = requestAnimationFrame(restore); });
+    let drag = null, dragged = false;
+    fab.addEventListener('pointerdown', (e) => {
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, r: wrap.getBoundingClientRect() }; dragged = false;
+      try { fab.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ } // the moves come here, not to the sky's handlers
+    });
+    fab.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (!dragged && Math.hypot(dx, dy) < 10) return;
+      if (!dragged) { dragged = true; wrap.classList.add('dragging'); }
+      e.preventDefault();
+      wrap.style.left = `${Math.round(drag.r.left + dx)}px`; wrap.style.right = 'auto'; wrap.style.top = `${Math.round(drag.r.top + dy)}px`;
+    });
+    const drop = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      if (dragged) {
+        const r = wrap.getBoundingClientRect(), side = r.left + r.width / 2 < innerWidth / 2 ? 'left' : 'right';
+        wrap.classList.remove('dragging');
+        place(side, r.top);
+        try { localStorage.setItem(KEY, JSON.stringify({ side, f: +(wrap.offsetTop / innerHeight).toFixed(3) })); } catch (err) { /* ignore */ }
+      }
+      drag = null;
+    };
+    fab.addEventListener('pointerup', drop); fab.addEventListener('pointercancel', drop);
+    fab.addEventListener('click', (e) => { if (dragged) { dragged = false; e.preventDefault(); return; } requestFire(); });
+  }
   $('#btnTrialAnother').addEventListener('click', () => { $('#crackerTrial').hidden = true; $('#btnFire').focus(); });
   $('#btnTrialPremium').addEventListener('click', () => { $('#crackerTrial').hidden = true; openPremium({ cracker: selection().id }); });
   window.addEventListener('storage', (e) => { if (e.key === 'luts:cracker-trials:v1') syncLaunchUi(); });
 
-  // ---------- Points, verified reward receipts and invitations ----------
+  // ---------- Points and invitations ----------
   function rewardsProvider() { return window.LUTSRewardProvider || null; }
-  // A reward video can be offered: on a phone that preloads (5 GB+), only once one has loaded.
-  function videoOk(p) {
-    const st = window.LUTSNative && window.LUTSNative.lastAds;
-    return !!(p && p.watchAd && p.verifyReceipt && p.adsAvailable !== false) && !(st && st.rewardReady === false && st.lowRam === false);
-  }
-  const videoMiss = (error) => (window.LUTSNative && window.LUTSNative.lastAds && window.LUTSNative.lastAds.lowRam
-    ? 'No video right now. Come back tonight to double it.' : (error && error.message) || 'No video is available. Try again later.');
   function syncRewardsUi() {
     const balance = launch.balance(), provider = rewardsProvider();
-    const ads = videoOk(provider);
     const referrals = !!(provider && provider.createInvite && provider.fetchRewards && provider.verifyReceipt);
     $('#pointsBalance').textContent = balance.points;
     $('#rewardPoints').textContent = balance.points;
     $('#btnRewards').disabled = launch.state !== 'READY' || rewardBusy;
-    $('#btnRewardVideo').disabled = !ads || rewardBusy;
     $('#btnInviteFriends').disabled = $('#btnInviteFacebook').disabled = rewardBusy;
     $('#btnCheckInvites').hidden = !(provider && provider.fetchRewards && provider.verifyReceipt);
     $('#btnCheckInvites').disabled = rewardBusy;
-    $('#adAvailability').textContent = ads ? 'Reward is added after the video is completed.' : 'Reward videos are not available yet.';
     $('#referralOffer').textContent = referrals ? '100 points when a new friend joins · 2 extra launches' : 'Invite a friend to join your sky.';
     $('#inviteAvailability').textContent = referrals ? 'Rewards are confirmed when your friend joins, once per new friend.' : 'Invite rewards are not available yet.';
-    const privacy = !!(window.LUTSNative && window.LUTSNative.lastAds && window.LUTSNative.lastAds.privacyRequired);
-    $('#btnAdPrivacy').hidden = $('#setAdPrivacy').hidden = !privacy;
   }
   function openRewards() {
     if (launch.state !== 'READY') return;
@@ -13009,27 +17258,13 @@
     } finally { clearTimeout(timer); }
   }
   async function acceptReward(provider, receipt, kind) {
-    if (!receipt || (kind && receipt.kind !== kind) || !['ad', 'referral'].includes(receipt.kind)) return 0;
+    if (!receipt || (kind && receipt.kind !== kind) || receipt.kind !== 'referral') return 0;
     if (await provider.verifyReceipt(receipt) !== true) throw Error('Reward could not be confirmed yet.');
     const amount = await launch.grantReceipt({ id: receipt.id, kind: receipt.kind, verified: true });
     if (provider.acknowledgeReceipt) {
       try { await provider.acknowledgeReceipt(receipt); } catch (_) { /* Recover and deduplicate on the next check. */ }
     }
     return amount;
-  }
-  async function watchRewardVideo() {
-    if (rewardBusy || launch.state !== 'READY') return;
-    const provider = rewardsProvider();
-    if (!provider || !provider.watchAd || !provider.verifyReceipt) return;
-    rewardBusy = true; syncLaunchUi();
-    $('#rewardStatus').textContent = 'Loading your reward video…';
-    const wasPaused = paused;
-    if (!wasPaused) togglePause(true);
-    try {
-      const amount = await rewardTimeout(async () => acceptReward(provider, await provider.watchAd({ points: 150, launches: 3 }), 'ad'));
-      $('#rewardStatus').textContent = amount ? '+150 points · 3 extra launches are yours.' : 'No new reward. You can watch another available video.';
-    } catch (error) { $('#rewardStatus').textContent = error.message || 'No video is available. Try again later.'; }
-    finally { rewardBusy = false; if (!wasPaused) togglePause(false); syncLaunchUi(); }
   }
   async function checkInviteRewards() {
     const provider = rewardsProvider();
@@ -13060,7 +17295,7 @@
       if (typeof url !== 'string' || new URL(url).protocol !== 'https:') throw Error('Invite link is not available.');
       if (channel === 'facebook' && popup) popup.location.href = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(url)}`;
       else if (!(await shareThing({ title: 'Light Up the Skies', text: 'Come celebrate with me. Choose a cracker and light up the sky!', url,
-        blob: shareCard({ art: 'assets/menu/welcome.jpg', kicker: 'You’re invited', title: 'Light up the sky', line: 'Fireworks for every celebration, free to play' }), name: 'light-up-the-skies.png', src: 'invite' }))) throw Object.assign(Error('cancelled'), { name: 'AbortError' });
+        blob: shareCard({ art: 'assets/menu/welcome.webp', kicker: 'You’re invited', title: 'Light up the sky', line: 'Fireworks for every celebration, free to play' }), name: 'light-up-the-skies.png', src: 'invite' }))) throw Object.assign(Error('cancelled'), { name: 'AbortError' });
       $('#rewardStatus').textContent = provider && provider.fetchRewards ? 'Invite ready. Rewards arrive when a new friend joins.' : 'Invite ready. Invite rewards are not available yet.';
     } catch (error) {
       if (popup) popup.close();
@@ -13071,18 +17306,9 @@
   $('#btnTrialRewards').addEventListener('click', openRewards);
   $('#btnCloseRewards').addEventListener('click', closeRewards);
   $('#rewardsPanel').addEventListener('click', e => { if (e.target === $('#rewardsPanel')) closeRewards(); });
-  $('#btnRewardVideo').addEventListener('click', watchRewardVideo);
   $('#btnCheckInvites').addEventListener('click', checkInviteRewards);
   $('#btnInviteFriends').addEventListener('click', () => inviteFriends('share'));
   $('#btnInviteFacebook').addEventListener('click', () => inviteFriends('facebook'));
-  async function showAdPrivacy() {
-    if (!window.LUTSNative || !window.LUTSNative.ads) return;
-    try { await window.LUTSNative.ads('privacy'); }
-    catch (_) { toast('Privacy choices are not available right now.'); }
-  }
-  $('#btnAdPrivacy').addEventListener('click', showAdPrivacy);
-  $('#setAdPrivacy').addEventListener('click', showAdPrivacy);
-  window.addEventListener('luts:ads', syncRewardsUi);
 
   // ---------- The 3D background ----------
   // world3d.js draws the scene with Three.js; the fireworks and crackers stay the game's own 2D effects, pinned to
@@ -13144,7 +17370,7 @@
     else { if (w3d) { try { w3d.dispose(); } catch (e) { /* already gone */ } } w3d = null; freshW3dCanvas(); }
     const now = performance.now();
     w3dLosses = w3dLosses.filter((t) => now - t < 60000).concat(now);
-    if (w3dLosses.length >= 2 && !adBusy()) give3dUp('3D paused: this device needs a rest. The 2D background stays for now.');
+    if (w3dLosses.length >= 2) give3dUp('3D paused: this device needs a rest. The 2D background stays for now.');
     syncWorld3d();
   }
   function sizeWorld3d() {
@@ -13157,24 +17383,31 @@
   }
   // Sky mode: the chosen shell stands on the ground in its tube, ready for Fire or the sparkler (not in Lantern Rush or room AR, which places its own).
   function placeSkyLauncher() {
-    if (mode !== 'play' || playMode !== 'sky' || rush.on || roomAr || launch.state !== 'READY') return;
+    if (mode !== 'play' || playMode !== 'sky' || rush.on || roomAr || launch.state !== 'READY' || document.body.classList.contains('live-sky')) return; // Live Sky fires on its own
     clearStreet();
     // at the bottom of the ground, nearest you (in 3D, on the forecourt in view)
     const tube = w3dShown() ? placeInView3d('shell', 0.5, 1) : placeItem('shell', W * 0.5, groundBottom() - 4);
     if (!tube) return; // (the 3D view not ready to place it yet: the next ready state does)
     tube.launcher = true; tube.shellId = settings.shell;
+    if (w3dShown()) return;
     // On the flat picture the bottom of the ground is the controls' edge: the tube stands lower still, just above
     // the world chip, in front of the hint, nearest you.
     const chip = $('#worldStrip').getBoundingClientRect(), bar = $('.bottom-ui').getBoundingClientRect();
-    if (!w3dShown() && chip.height) standAt(tube, Math.max(tube.y, chip.top - 6));
+    const beside = world.rect && W > H && !world.rect.fill && world.rect.dw < W - 1;
+    if (chip.height) standAt(tube, Math.max(tube.y, chip.top - 6));
     // A phone without the strip: its base just clear of the mode tabs, a little nearer than the street's usual edge.
-    else if (!w3dShown() && W <= H && bar.height && !document.body.classList.contains('ui-hidden')) standAt(tube, Math.max(tube.y, bar.top - 3));
-    // A wide screen without the strip whose picture doesn't fill it: the tube stands beside the picture, not in front of
-    // it. (A landscape screen's picture fills the screen, so there the tube stays centred above the controls.)
-    else if (!w3dShown() && world.rect && W > H && !world.rect.fill && world.rect.dw < W - 1) {
+    else if (W <= H && bar.height && !document.body.classList.contains('ui-hidden')) standAt(tube, Math.max(tube.y, bar.top - 3));
+    // A wide screen without the strip whose picture doesn't fill it: the tube stands beside the picture, not in front of it.
+    if (beside) {
       const r = world.rect, room = 70 * U, right = r.dx + r.dw + room;
       tube.x = right < W - room ? right : Math.max(room, r.dx - room);
+    } else {
+      // A landscape environment fills the screen and keeps the building in the middle. The tube stands on the near
+      // courtyard, to the side, so it does not cover the arch. Until that plate is ready it stays centred.
+      tube.standAside = true;
+      if (W > H && world.img?.fullScene) tube.x = W * 0.86;
     }
+    noteSpot(tube);
   }
   // Stands a flat-picture cracker at y, below the ground's usual edge (placeItem keeps crackers above it).
   function standAt(it, y) {
@@ -13258,7 +17491,6 @@
   function w3dRenderDue() {
     const now = performance.now();
     if (lowEnd3d() && !w3dMoved && now - w3dLastRender < (lite3d ? 66 : 250)) return false;
-    if (lowEnd3d() && Date.now() - adClosedAt < AD_REST && now - w3dLastRender < 250) return false; // just back from a video
     w3dLastRender = now;
     return true;
   }
@@ -13422,7 +17654,7 @@
     }
     if (hitItem(x, y)) return; // Fire lights it
     if (burstEntitled()) {
-      if (waitingItems().length >= burstMax()) { toast(`Up to ${burstMax()} crackers at once. Tap Burst all!`); return; }
+      if (waitingItems().length >= burstMax()) { burstFull(); return; }
       if (longWaiting(settings.item)) { toast('One long cracker at a time. Light it first'); return; }
     } else clearStreet(); // free players move their one cracker
     if (itemLocked(settings.item)) { offerTry(settings.item); return; }
@@ -13461,6 +17693,30 @@
   // ---------- Boot ----------
   let resizeRaf = 0;
   window.addEventListener('resize', () => { cancelAnimationFrame(resizeRaf); resizeRaf = requestAnimationFrame(resize); });
+
+  // ---------- Soft keyboard ----------
+  // While the on-screen keyboard is up (a text field has focus and the visible height has dropped well below the
+  // screen's own), body.kb-open: the app hides its banner (the bridge watches the class, as for Live Sky) so it doesn't
+  // sit on the keyboard, sheets tuck their hints away and let their buttons scroll with the fields, and the focused field
+  // is kept in view. The banner comes back as soon as the keyboard goes, whatever closed it.
+  (() => {
+    const vv = window.visualViewport, NOT_TEXT = /^(checkbox|radio|range|button|submit|reset|color|file|image|hidden)$/;
+    const isText = (el) => !!el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !NOT_TEXT.test(el.type)) || el.isContentEditable);
+    let full = 0, fullW = 0, open = false, t = 0;
+    const sync = () => {
+      const h = vv ? vv.height : window.innerHeight, w = window.innerWidth, el = document.activeElement;
+      if (w !== fullW) { fullW = w; full = 0; } // turned: the screen's height is learnt again
+      if (!isText(el) || h > full) full = Math.max(full, h);
+      const now = isText(el) && h < full * 0.8;
+      if (now !== open) { open = now; document.body.classList.toggle('kb-open', now); }
+      if (now) el.scrollIntoView({ block: 'center', inline: 'nearest' }); // above the keyboard, clear of a pinned footer
+    };
+    const later = () => { clearTimeout(t); t = setTimeout(sync, 120); }; // the keyboard slides in over ~250 ms
+    (vv || window).addEventListener('resize', later);
+    document.addEventListener('focusin', (e) => { if (isText(e.target)) { later(); setTimeout(sync, 450); } });
+    document.addEventListener('focusout', () => setTimeout(sync, 60));
+    sync();
+  })();
   document.addEventListener('visibilitychange', () => {
     syncLiveSky();
     pointer = null; if (pen) penUp();
@@ -13472,22 +17728,14 @@
     } else {
       last = performance.now(); frameMean = 16.7; slowFor = fastFor = 0;
       if (!frameRaf) frameRaf = requestAnimationFrame(frame);
-      if (!paused) { holdMusic(false); if (Sound.ctx) safeSound(() => Sound.ctx.resume()); }
+      if (!paused && !menuHeld) { holdMusic(false); if (Sound.ctx) safeSound(() => Sound.ctx.resume()); }
     }
   });
   window.addEventListener('pagehide', () => { abortLaunch(); cancelAnimationFrame(frameRaf); frameRaf = 0; });
   window.addEventListener('pageshow', () => { last = performance.now(); if (!document.hidden && !frameRaf) frameRaf = requestAnimationFrame(frame); });
 
   // ----- Diya Path (diya-path.js): the puzzle borrows the sky, the wallet, the daily streak and the sounds -----
-  let hintBusy = false;
-  const PUZZLE_HINT_GEMS = 10, PUZZLE_AD_GRACE = 10;
-  // No video ads for a player's first 10 puzzle breaks (a level's result, or leaving a puzzle); after that, the usual
-  // breaks, at most one every few minutes.
-  function puzzleAdBreak() {
-    let n = 0;
-    try { n = (+localStorage.getItem('luts:puzzles-done') || 0) + 1; localStorage.setItem('luts:puzzles-done', String(n)); } catch (e) { n = PUZZLE_AD_GRACE + 1; }
-    if (n > PUZZLE_AD_GRACE) adBreak('break');
-  }
+  const PUZZLE_HINT_GEMS = 10;
   // ----- Sky Duel (duel.js): a 30-second show on a landmark's sky, scored by the crowd, to challenge a friend -----
   // It borrows the Lantern Rush round (rush.kind 'duel', no lanterns), so everything a Rush turns off stays off.
   const duelHooks = { tap: null, quit: null };
@@ -13504,10 +17752,10 @@
     fire(type, fx, fy) { launchShell({ x: fx * W, y: fy * H, type: TYPES[type] ? type : 'peony', user: true, exact: true, fast: 1.7, tap: true }); },
     shells: () => DOCK_ORDER.filter((id) => id !== 'random' && TYPES[id]).map((id) => ({ id, label: shellLabel(id), icon: TYPES[id].icon || '🎆', art: CRACKER_ART[id] || '', gems: SHELL_GEM_COST[id] || 0, premium: PREMIUM_SHELLS.has(id) })),
     premium: () => premium.active,
-    gems: () => gems(), spend: (n) => spendGems(n), openGems: (cost, label) => openGems({ cost, label }), openPremium: () => openPremium('duel'),
+    gems: () => gems(), spend: (n) => spendGems(n, 'duel'), openGems: (cost, label) => openGems({ cost, label }), openPremium: () => openPremium('duel'),
     worlds: () => RUSH_WORLDS.map((id) => ({ id, name: placeName(id) })),
     world: () => (rush.ownWorld ?? (world.pending || world.id)),
-    placeName, worldArt: (id) => worldArt(id, 'assets/menu/challenge.jpg'),
+    placeName, worldArt: (id) => worldArt(id, 'assets/menu/challenge.webp'),
     combo: (a, b) => showCombo(a, b), celebrate: () => celebrate(), toast: (t, ms) => toast(t, ms), achieve: (id) => achieve(id),
     share: (o) => shareThing(o), card: (o) => shareCard(o), link: (h) => rushLink(h), encode: (o) => encodeCard(o), clean,
     openSheet: (e) => { if (!sheets.includes(e)) sheets.push(e); openSheet(e); }, closeSheet: (e) => closeSheet(e),
@@ -13532,6 +17780,22 @@
     native: () => !!(window.LUTSNative || window.LUTS_DUEL_ANYWHERE), playLink: (src) => playLink(src), toApp: (src) => toApp(src), // the web sends duels to the app
   };
   window.LUTSGame = {
+    // The one free-gem video: the gem sheet, the Store and home's side button all count and pay through this (one
+    // daily count, one reward), so they never disagree.
+    storeShows: () => storeShows(),
+    gemOffer: () => offerLine(), // Buy 1 Get 1 Free on the Store's Gem shop row, while it's on
+    bonusSpins: { get left() { return wallet.spins; }, take() { if (wallet.spins <= 0) return false; wallet.spins--; saveWallet(); return true; } }, // Lucky Draw spins from bundles
+    gemVideo: {
+      get left() { return Math.max(0, GEM_VIDEOS_A_DAY - (wallet.vid[dayKey()] || 0)); },
+      get reward() { return GEM_VIDEO; },
+      ready: () => videoOk(rewardsProvider()) && !rewardBusy,
+      async watch() {
+        if (this.left <= 0) { toast(inLang('Videos are done for today. Come back tomorrow')); return false; }
+        const before = gems();
+        await watchGemVideo();
+        return gems() > before;
+      },
+    },
     // For tests: the 3D forecourt's dog and old man (where they are, what they are up to), or null.
     get folk() { return w3d ? w3d.folk : null; },
     // For tests: the shell types the card show on screen has launched so far.
@@ -13639,22 +17903,6 @@
       // Which street to play on: the scene loads in its place (chor.js waits for it). The Premium ones need Premium.
       get street() { return chor.street; },
       setStreet(id) { if (id === chor.street) return; chor.street = id; clearStreet(); syncWorld3d(); },
-      // A rewarded video (to slip away when caught): whether one can play now, and playing it. Resolves true once the
-      // video was watched to the end and its reward confirmed (once per receipt).
-      canVideo: () => premium.active || (videoOk(rewardsProvider()) && !rewardBusy),
-      async watchVideo(tag) {
-        if (premium.active) return true; // Premium: no ads, the reward without the video
-        const provider = rewardsProvider();
-        if (!provider || rewardBusy) return false;
-        rewardBusy = true;
-        try {
-          const receipt = await rewardTimeout(() => provider.watchAd({ chor: tag }));
-          if (!receipt || receipt.kind !== 'ad' || await provider.verifyReceipt(receipt) !== true || wallet.tx.includes(`ad:${receipt.id}`)) return false;
-          wallet.tx.push(`ad:${receipt.id}`); saveWallet();
-          if (provider.acknowledgeReceipt) { try { await provider.acknowledgeReceipt(receipt); } catch (_) { /* deduplicated by id */ } }
-          return true;
-        } catch (error) { toast(videoMiss(error)); return false; } finally { rewardBusy = false; }
-      },
       gems: () => gems(),
       // A thrown cracker lights as it lands (with any others waiting on the street).
       fire: () => requestFire(),
@@ -13673,14 +17921,16 @@
       addGems: (n) => addGems(n),
       premium: () => premium.active,
       // A rare stash opens with Premium, or for gems; short of gems, the shop opens.
-      spend(n, label) { if (premium.active || spendGems(n)) return true; openGems({ cost: n, label }); return false; },
+      spend(n, label) { if (premium.active || spendGems(n, 'street')) return true; openGems({ cost: n, label }); return false; },
       openPremium: () => openPremium({ levels: true }),
-      toast, buzz, dayKey,
+      toast, holdToasts, buzz, dayKey,
+      lowEnd: () => lowEnd3d() || measuredTier === 0, // (a lighter story finale)
       tick: () => Sound.tick(0),
     },
     enter() {
       abortLaunch();
       if (rush.on) endRush(true);
+      if (live.on) stopLive(); // a puzzle opened by a link (#gears, lightuptheskies://open?h=gears) during a Live Sky show ends it
       closeDrawer(); closeCardModal(); closeSheets();
       if (mode === 'card' || mode === 'envelope') { $('#envelope').hidden = true; exitCardMode(); }
       hideOverlay($('#intro'));
@@ -13698,6 +17948,7 @@
     // A finished puzzle's show over the chosen landmark: more and bigger shells for more stars. Returns its length.
     show(stars) {
       clearTimers('diya');
+      puzzleSkyUntil = performance.now() + 12000;
       const n = 3 + stars * 3, top = world.img && world.rect ? clamp(world.rect.roof - H * 0.08, H * 0.16, H * 0.4) : H * 0.4;
       const kinds = ['chrysanthemum', 'peony', 'willow', 'kamuro', 'crossette', 'ring'];
       for (let i = 0; i < n; i++) {
@@ -13708,6 +17959,7 @@
     },
     // Rocket Rush's finale: one shell where it asks, x and y as shares of the sky (y stays above the landmark).
     fire(o) {
+      puzzleSkyUntil = performance.now() + 8000;
       const top = world.img && world.rect ? clamp(world.rect.roof - H * 0.08, H * 0.16, H * 0.4) : H * 0.4;
       launchShell({ type: o.type, c1: o.c1, c2: o.c2, tint: true, size: o.size, fast: o.fast, x: W * o.x, y: H * 0.1 + o.y * (top - H * 0.1) });
     },
@@ -13736,12 +17988,57 @@
     shareResult({ kicker = '', title = '', big = '', stars = -1, line = '', text = '', name = 'light-up-the-skies.png', art = 'assets/menu/diya-path.png' }) {
       return shareThing({ title, text, url: appLink(), blob: shareCard({ art, kicker, title, big, stars, line }), name, src: 'level' });
     },
+    // My sky (timeline.js): a moment to the share sheet. A card, a dedication and a badge share as from their own
+    // screens; anything else as a picture card (the app's mark for free players) with the keywords and the Play link.
+    shareMoment(e) {
+      if (!e) return Promise.resolve(false);
+      if (e.k === 'card') { const m = myCards.find((x) => x.id === e.r); if (m) return shareMade(m.c); }
+      if (e.k === 'joy') { const j = joys.find((x) => `${x.d}:${x.t}` === e.r); if (j) return shareJoy(j); }
+      if (e.k === 'ach' && achieved[e.r]) return shareBadge(e.r);
+      // One language on the picture: the kind as a short title, the moment's own line under it, the date in the same
+      // language (the keywords and the Play link stay English, for search).
+      const lang = document.documentElement.lang || 'en';
+      let when = '';
+      try { when = new Date(e.at).toLocaleDateString(lang, { day: 'numeric', month: 'long' }); } catch (err) { when = new Date(e.at).toDateString(); }
+      const line = inLang(e.text);
+      // the art: a spiral drawn again from its kept drawing; a world's own picture at full size; else the moment's picture
+      let art = e.k === 'gears' && e.r && window.SkyGears && SkyGears.art ? SkyGears.art(e.r, 480) : null;
+      if (!art && e.r && typeof e.r === 'object' && e.r.w) art = worldArt(e.r.w, '');
+      if (!art) art = e.th || '';
+      const blob = shareCard({ art, emoji: art ? '' : e.i || '✨', kicker: `${inLang('My sky')} · ${when}`, title: inLang(MOMENT_TITLE[e.k] || 'My sky'), line });
+      return shareThing({ title: inLang('My sky'), text: `${e.i || '✨'} ${line}\n${SHARE_WORDS}`, url: appLink(), blob, name: 'my-sky.png', src: 'mysky' });
+    },
     // A puzzle's own recorded clip to the share bar, the same way a recorded show is offered.
     shareVideo(blob, name, type, caption) {
       setShareCaption(`${caption}\nPlay it: ${appLink()}${getApp('level')}`);
       deliverVideo(blob, name, type);
     },
     gems, addGems, toast, buzz, dayKey,
+    // The app's mark on a picture made elsewhere (Sky Gears' saved image); Premium pictures carry none.
+    brandMark: (g, k) => drawBrandMark(g, k),
+    // ----- Sky Gears (sky-gears.js) -----
+    // Launch: the drawing's points (see drawingBurst) go up as one rocket from the bottom and burst in its shape in the
+    // middle of the sky. The sky behind the puzzle screens runs for the length returned (seconds); endSky() stops it early.
+    launchDrawing(pts, o = {}) {
+      if (!Array.isArray(pts) || pts.length < 2 || launch.state !== 'READY') return 0;
+      if (paused) togglePause(false); // a paused sky would draw nothing
+      const size = o.size || 1, r = drawingR(size);
+      const y = clamp(H * 0.36, safeTop() + r + 16, Math.max(safeTop() + r + 16, H * 0.5));
+      puzzleSkyUntil = performance.now() + 6000; // the burst is over by 5.6 s; Sky Gears' endSky() closes the window then
+      launchShell({ type: 'drawing', pts, x: W / 2, y, size, exact: true, straight: true, fast: 1.25, c1: pts[0][2], user: true });
+      return 5.6;
+    },
+    // How many points a drawing's burst can have now (the picture allowance less what is already in the sky).
+    drawingBudget: () => drawingRoom(),
+    // keep: the sky's last sparks are left to fade (the launch ended on its own); the frame loop parks once covered.
+    endSky(keep) { puzzleSkyUntil = 0; if (!keep && mode === 'puzzle') clearScene(); },
+    // Its gem unlocks: the wallet, and a spend that opens the gem sheet itself when short. Premium unlocks everything.
+    gearsShop: {
+      gems: () => gems(),
+      spend(cost, label, id) { if (spendGems(cost, `gears_${id || 'item'}`)) return true; openGems({ cost, label }); return false; },
+      premium: () => premium.active,
+      openPremium: () => openPremium({ levels: true }),
+    },
     resume: () => Sound.resume(),
     audio: () => (Sound.ready() ? { ctx: Sound.ctx, out: Sound.dest(0) } : null),
     // The fireworks' own sounds, for the puzzles: a rocket's hissing lift (with a whistle), crackle and a burst. pan: -1…1.
@@ -13751,12 +18048,11 @@
       burst: (size, pan, delay) => Sound.burst(size, pan, delay),
     },
     place: () => placeName(world.pending || world.id),
-    adBreak: () => puzzleAdBreak(),
     premium: () => premium.active,
     openPremium: (intent) => openPremium(intent || { levels: true }),
     // Puzzle hints past the free ones are paid in gems; short of gems, the shop opens.
     hintCost: () => PUZZLE_HINT_GEMS,
-    buyHint() { if (spendGems(PUZZLE_HINT_GEMS)) return true; openGems({ cost: PUZZLE_HINT_GEMS, label: 'Hint' }); return false; },
+    buyHint() { if (spendGems(PUZZLE_HINT_GEMS, 'puzzle_hint')) return true; openGems({ cost: PUZZLE_HINT_GEMS, label: 'Hint' }); return false; },
     // A finished daily puzzle's score for its category leaderboard ("diya" or "rocket"); everyone plays the same puzzle,
     // so Play's daily, weekly and all-time lists rank today's, this week's and the best daily ever.
     dailyScore(kind, score) { if ((kind === 'diya' || kind === 'rocket') && score > 0) postScores(`${kind}:${Math.round(score)}`); },
@@ -13767,13 +18063,13 @@
       if (daily) { if (!had && stars) festPoints('puzzleDaily', 60); }
       else festPoints('puzzle', Math.max(0, stars - had) * 20);
       if (stars && window.LUTSGoals) LUTSGoals.tick('puzzle');
+      // My sky: a Diya Path level lit (its levelEnd came just before; Rocket Rush adds its own from rocket-rush.js)
+      const end = track.last;
+      if (end && end.mode === 'diya_path' && end.result === 'win' && Date.now() - end.at < 3000) {
+        const nm = (($('#diyaLevelName') || {}).textContent || '').trim() || (daily ? 'Daily Diya' : 'Diya Path');
+        moment({ kind: 'diya', icon: '🪔', line: 'Diya Path · {0} · {1}★', args: [nm, stars], thumb: 'assets/menu/thumb-diya.webp', key: `diya:${nm}`, within: 60000, best: stars }); // (a worse replay keeps the better)
+      }
       return { gain, chest };
-    },
-    // A rewarded video doubles a chest: true once Google confirms the video was watched.
-    async doubleChest(n) {
-      if (!(await this.watchVideo())) return false;
-      addGems(n, 'chest doubled');
-      return true;
     },
     // The solved Daily Diya (or cleared Daily Rocket) counts toward the Daily Sky streak.
     markDaily(day = dayKey(), kind = 'diya') {
@@ -13787,24 +18083,10 @@
       return dailyStreak(st);
     },
     dailyStreak: () => dailyStreak(),
+    // Light someone up for the home screen's Today card: lit someone up today yet, and the diya streak.
+    joyToday: () => !!todayJoy(), joyStreak: () => joyStreak(),
     // True once today's Daily Sky, Diya or Rocket is played (the streak is safe for today).
     playedToday() { const st = loadRush(), k = dayKey(); return (st.days || {})[k] !== undefined || !!(st.diya || {})[k] || !!(st.rocket || {})[k]; },
-    videoReady() { if (premium.active) return true; const p = rewardsProvider(); return videoOk(p); },
-    // A rewarded video for more hints: true once Google confirms it was watched (each receipt counts once).
-    async watchVideo() {
-      if (premium.active) return true; // Premium: no ads, the reward without the video
-      const provider = rewardsProvider();
-      if (hintBusy || rewardBusy || !this.videoReady()) return false;
-      hintBusy = true;
-      try {
-        const receipt = await rewardTimeout(() => provider.watchAd({ hints: 2 }));
-        if (!receipt || receipt.kind !== 'ad' || await provider.verifyReceipt(receipt) !== true || wallet.tx.includes(`ad:${receipt.id}`)) return false;
-        wallet.tx.push(`ad:${receipt.id}`); saveWallet();
-        if (provider.acknowledgeReceipt) { try { await provider.acknowledgeReceipt(receipt); } catch (_) { /* deduplicated by id */ } }
-        return true;
-      } catch (error) { toast(error.message || 'No video is available. Try again later.'); return false; }
-      finally { hintBusy = false; }
-    },
   };
   window.dispatchEvent(new Event('luts:game'));
 
@@ -13816,6 +18098,7 @@
   incoming = readHash();
   if (incoming) { keepReceived(incoming); $('#intro').hidden = true; showEnvelope(incoming); }
   else openRushFromHash(); // a friend's challenge or the Daily Sky, opened from a link
+  linkOpened(); // (counted now, before the routes in the later files read their link and clear it)
   document.body.classList.toggle('home', !$('#intro').hidden);
   // Entering or leaving the menu swaps the Particle Festival world for the classic sky and back.
   let wasHome = document.body.classList.contains('home');
@@ -13827,6 +18110,170 @@
     syncLiveSky();
   }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   syncLiveSky();
+  // A purchase sheet (Premium, Store, Gems) open: body.shop-open, and the app hides its banner under it (no ad on a paywall).
+  const shopEls = ['#premiumPanel', '#storeModal', '#gemModal'].map((q) => $(q)).filter(Boolean);
+  const syncShop = () => document.body.classList.toggle('shop-open', shopEls.some((el) => !el.hidden));
+  shopEls.forEach((el) => new MutationObserver(syncShop).observe(el, { attributes: true, attributeFilter: ['hidden'] }));
+  syncShop();
+  // ---------- First-play coach marks and first-time celebrations ----------
+  // One small helper for every mode: a gold ring (and on touch a finger) over the real control, a dim veil with a
+  // cutout (one box-shadow, nothing drawn per frame), a short label and Skip. The real action clears it (a tap inside
+  // the ring, or coach.act(flow) from the game: a launch, a sparkler stroke); each flow shows once (localStorage
+  // luts:coach:<flow>). It waits while a sheet, paywall, gate or toast is over its screen, and it never opens over a
+  // purchase sheet. On a TV the ring sits on the focused control and OK does the action (no finger).
+  const FIRSTS = ['burst', 'win', 'card', 'wish'];
+  const coach = (() => {
+    const tr = (s) => (window.LUTSLang ? LUTSLang.t(s) : s);
+    const vis = (q) => { const n = typeof q === 'string' ? $(q) : q; return !!(n && n.getClientRects().length && getComputedStyle(n).visibility !== 'hidden'); };
+    const first = (q) => [...document.querySelectorAll(q)].find(vis) || null;
+    const isTv = () => document.documentElement.classList.contains('tv');
+    const sheetOpen = (id) => vis(`#${id}`);
+    let playAt = 0; // Let the play screen settle before the contextual coach appears.
+    const settled = () => { if (mode !== 'play') { playAt = 0; return false; } if (!playAt) playAt = performance.now(); return performance.now() - playAt > 1500; };
+    const inPlay = (m) => settled() && playMode === m && launch.state === 'READY' && !live.on && !live.boot && !rush.on && !chor.on
+      && !document.body.classList.contains('launch-active');
+    const lvLabel = (q) => { const n = first(q), b = n && n.querySelector('b'); return b && b.textContent.trim() === '1' ? 'Tap here to play level 1' : 'Tap here to play the next level'; };
+    const lighterOrFire = () => (touchFirst() && vis('#lighterGrip') ? '#lighterGrip' : '#btnFire');
+    // flow: when() its screen is up; steps: [target, label, until] — until 'tap' (a tap in the target) or 'act' (coach.act)
+    const FLOWS = {
+      sky: { when: () => inPlay('sky'), steps: () => [[lighterOrFire(), touchFirst() ? 'Hold the sparkler and drag it to a cracker’s fuse' : 'Tap Fire to light your first firework', 'act', false, touchFirst() && vis('#lighterGrip')]] },
+      ground: { when: () => inPlay('ground'), steps: () => [['#groundList .shell-chip:not([hidden])', 'Tap a cracker to place it on the street', 'tap'], [lighterOrFire(), touchFirst() ? 'Now sweep the sparkler across the fuses' : 'Tap Fire', 'act']] },
+      load: { when: () => playMode !== 'spark' && inPlay(playMode) && done('sky') && tried.size > 0, steps: () => [[`#${playMode === 'ground' ? 'groundList' : 'shellList'} .rack-load`, 'Tap here to load the crackers you want', 'tap']] },
+      spark: { when: () => inPlay('spark'), steps: () => [['#stage', 'Trace here: draw with your finger to write in light', 'act', true]] },
+      live: { when: () => live.on && !paused && (live.watched || 0) >= 12 && vis('#btnLiveExit'), steps: () => [['#btnLiveExit', 'Your turn: tap here to light this sky yourself', 'tap']] },
+      daily: { when: () => sheetOpen('rushModal') && vis('#btnRushGo'), steps: () => [['#btnRushGo', 'Tap here to start: burst the lanterns as they rise', 'tap']] },
+      diya: { when: () => vis('#diyaMap') && !!first('#diyaMap .diya-level:not([disabled]):not(.won):not(.premium-only)'), steps: () => { const q = '#diyaMap .diya-level.next, #diyaMap .diya-level:not([disabled]):not(.won):not(.premium-only)'; return [[q, lvLabel(q), 'tap']]; } },
+      rocket: { when: () => vis('#rrMap') && !!first('#rrMap .diya-level:not([disabled]):not(.won):not(.premium-only)'), steps: () => { const q = '#rrMap .diya-level.next, #rrMap .diya-level:not([disabled]):not(.won):not(.premium-only)'; return [[q, lvLabel(q), 'tap']]; } },
+      duel: { when: () => sheetOpen('duelModal') && vis('#btnDuelGo'), steps: () => [['#btnDuelGo', 'Tap here: fire your crackers and beat your friend', 'tap']] },
+      birthdays: { when: () => sheetOpen('bdayModal') && vis('#btnBdayAdd'), steps: () => [['#btnBdayAdd', 'Tap here to add a birthday', 'tap']] },
+      card: { when: () => sheetOpen('cardModal') && vis('#cTo'), steps: () => [['#cTo', 'Type their name here', 'tap']] },
+      joy: { when: () => sheetOpen('joyModal') && vis('#joyText'), steps: () => [['#joyText', 'Write who you are grateful for today', 'tap'], ['#btnJoyGo', 'Tap here to light them up', 'tap']] },
+      wallpapers: { when: () => sheetOpen('wallModal') && !!first('#wallModal .modal-body button'), steps: () => [['#wallModal .modal-body button', 'Tap a wallpaper to set it', 'tap']] },
+    };
+    const key = (f) => `luts:coach:${f}`;
+    const doneSet = new Set();
+    const done = (f) => { if (doneSet.has(f)) return true; let d = true; try { d = localStorage.getItem(key(f)) === '1'; } catch (e) { /* no storage: never nag */ } if (d) doneSet.add(f); return d; };
+    const mark = (f) => { doneSet.add(f); try { localStorage.setItem(key(f), '1'); } catch (e) { /* none */ } };
+    // A player who had the game before the coach (1.8.0 and earlier) never sees it or the first-time celebrations: once,
+    // a profile with the welcome or first show seen, gems or level progress counts as returning and every flow is done.
+    try {
+      if (!localStorage.getItem('luts:coach:migrated')) {
+        const ls = localStorage, back = ls.getItem('luts:welcomed') || ls.getItem('luts:firstshow') || Number(ls.getItem('luts:gems')) > 0
+          || ls.getItem('luts:diya') || ls.getItem('luts:rocket');
+        if (back) { for (const f of Object.keys(FLOWS)) mark(f); for (const w of FIRSTS) ls.setItem(`luts:first:${w}`, '1'); }
+        ls.setItem('luts:coach:migrated', '1');
+      }
+    } catch (e) { /* storage unavailable */ }
+    let cur = null, box = null;
+    const BLOCK = '#premiumPanel, #storeModal, #gemModal, #tryModal, #liveGate, #liveLock, #crackerTrial, #welcomeModal, #giftModal, #arSafety, #endCard, #settings, #shareBar';
+    const blocked = (f) => !!first(BLOCK) || el.toast.classList.contains('show') || document.body.classList.contains('kb-open') // (the keyboard is up: wait, never half under it)
+      || ['sky', 'ground', 'spark', 'load'].includes(f) && sheets.some((s) => !s.hidden);
+    function build() {
+      box = document.createElement('div');
+      box.className = 'coach'; box.hidden = true;
+      box.innerHTML = '<div class="coach-ring"><i class="coach-finger" aria-hidden="true">👆</i></div><div class="coach-label"><p class="coach-text" role="status" aria-live="polite"></p><button type="button" class="coach-skip">Skip</button></div>';
+      document.body.append(box);
+      box.querySelector('.coach-skip').addEventListener('click', (e) => { e.stopPropagation(); if (cur) { track('tutorial_skip', { flow: cur.f, step: cur.i }); finish(); } });
+    }
+    function place() {
+      if (!cur) return;
+      const n = cur.spot ? null : first(cur.q);
+      if (!cur.spot && !n) { hide(); return; }
+      const r = cur.spot ? { left: innerWidth * 0.2, top: innerHeight * 0.22, width: innerWidth * 0.6, height: innerHeight * 0.3 } : n.getBoundingClientRect();
+      const pad = 6, ring = box.querySelector('.coach-ring'), lab = box.querySelector('.coach-label');
+      const w = Math.max(44, r.width + pad * 2), h = Math.max(44, r.height + pad * 2), x = r.left + r.width / 2 - w / 2, y = r.top + r.height / 2 - h / 2;
+      ring.style.cssText = `left:${x}px;top:${y}px;width:${w}px;height:${h}px`;
+      box.classList.toggle('low', y + h > innerHeight - 110); // (near the bottom: the finger points down from above, off the ad banner)
+      const short = innerHeight < 500 && !cur.spot;
+      box.classList.toggle('short', short);
+      if (short) { // landscape phone: beside the ring, vertically centred, so the tabs and the stage stay clear
+        // (on the ring's side, under the HUD row: the cracker on the stage, the drop target, stays in view)
+        const right = x + w / 2 > innerWidth / 2, cy = Math.min(y - 8, 64);
+        lab.style.cssText = `top:${Math.max(8, cy)}px;margin:0;max-width:300px;` + (right ? 'left:auto;right:16px' : 'right:auto;left:16px');
+      } else {
+        const below = y + h / 2 < innerHeight / 2;
+        if (box.classList.contains('drag')) lab.style.cssText = `top:${Math.round(innerHeight * 0.22)}px`; // (the sparkler: high in the sky, clear of the stage it points to)
+        else lab.style.cssText = below ? `top:${Math.min(innerHeight - 160, y + h + 16)}px` : `bottom:${Math.max(16, innerHeight - y + 16)}px`;
+      }
+      // never over the mode tabs (Sky / Ground / Sparkler): the card moves above them
+      const tabs = $('#modeTabs');
+      if (tabs && vis(tabs)) {
+        const t = tabs.getBoundingClientRect(), l = lab.getBoundingClientRect();
+        if (l.bottom > t.top && l.top < t.bottom && l.right > t.left && l.left < t.right) lab.style.top = `${Math.max(8, t.top - l.height - 10)}px`, lab.style.bottom = 'auto';
+      }
+    }
+    function show(f, i) {
+      const s = FLOWS[f].steps()[i];
+      if (!box) build();
+      cur = { f, i, n: FLOWS[f].steps().length, q: s[0], until: s[2], spot: !!s[3] };
+      box.querySelector('.coach-text').textContent = tr(s[1]);
+      box.classList.toggle('drag', !!s[4]);
+      box.querySelector('.coach-skip').textContent = tr('Skip');
+      box.classList.toggle('tv', isTv());
+      box.classList.toggle('spot', cur.spot);
+      box.hidden = false;
+      if (!cur.spot) { const n = first(cur.q), r = n && n.getBoundingClientRect(); if (r && (r.top < 60 || r.bottom > innerHeight - 90 || r.left < 0 || r.right > innerWidth)) n.scrollIntoView({ block: 'center', inline: 'center' }); } // (a field below the fold in a sheet, or a chip off the side of a row: into view first)
+      place();
+      if (isTv() && !cur.spot) { const n = first(cur.q); if (n && n.focus) n.focus({ preventScroll: true }); }
+      if (i === 0) track('tutorial_begin', { flow: f });
+    }
+    function hide() { if (box) box.hidden = true; cur = null; }
+    function finish() { if (cur) mark(cur.f); hide(); }
+    function next() {
+      if (!cur) return;
+      const { f, i, n } = cur;
+      if (i + 1 >= n) { track('tutorial_complete', { flow: f }); finish(); return; }
+      hide(); setTimeout(() => { if (FLOWS[f].when()) show(f, i + 1); }, 350);
+    }
+    // the real action: a tap inside the ring's control
+    document.addEventListener('pointerdown', (e) => {
+      if (!cur || cur.until !== 'tap' || !e.target.closest) return;
+      const n = first(cur.q);
+      if (n && (n === e.target || n.contains(e.target))) next();
+    }, true);
+    document.addEventListener('keydown', (e) => { if (cur && cur.until === 'tap' && isTv() && (e.key === 'Enter' || e.key === ' ')) { const n = first(cur.q); if (n && n === document.activeElement) next(); } }, true);
+    const act = (f) => { if (cur && cur.f === f) { const all = FLOWS[f].steps(); if (cur.i + 1 >= all.length) next(); else { cur.i = all.length - 1; next(); } } else if (FLOWS[f] && !done(f)) { track('tutorial_complete', { flow: f }); mark(f); } };
+    const names = Object.keys(FLOWS), PLAY = ['sky', 'ground', 'spark'];
+    const loop = setInterval(() => {
+      if (document.hidden) return;
+      if (cur) {
+        if (!FLOWS[cur.f].when() && (cur.f === 'load' || PLAY.includes(cur.f) && playMode !== cur.f)) { hide(); } // (another mode: its own coach comes next; this one waits)
+        else if (!FLOWS[cur.f].when() || blocked(cur.f)) { box.hidden = true; return; } else { box.hidden = false; place(); return; }
+      }
+      const left = names.filter((f) => !done(f));
+      if (!left.length) { clearInterval(loop); return; } // every flow done: no more work, ever
+      if (document.body.classList.contains('launch-active') || rush.on || chor.on) return; // (nothing to coach mid-launch or mid-level)
+      for (const f of left) if (FLOWS[f].when() && !blocked(f)) { show(f, 0); break; }
+    }, 450);
+    addEventListener('resize', () => { if (cur) place(); });
+    return { act, done, active: () => cur && cur.f, reset: () => { for (const f of Object.keys(FLOWS)) try { localStorage.removeItem(key(f)); } catch (e) { /* none */ } } };
+  })();
+  window.LUTSCoach = coach;
+  // A first: a burst of gold sparks from the middle of the screen, a warm line and a short buzz. Once each, ever.
+  function celebrateFirst(what, line) {
+    try { if (localStorage.getItem(`luts:first:${what}`)) return; localStorage.setItem(`luts:first:${what}`, '1'); } catch (e) { return; }
+    const wrap = document.createElement('div');
+    wrap.className = 'first-burst'; wrap.setAttribute('aria-hidden', 'true');
+    const cols = ['#ffd36b', '#ff7a59', '#fff1c9', '#ff4fd8', '#5ff0ff'];
+    for (let i = 0; i < 18; i++) {
+      const s = document.createElement('i'), a = (i / 18) * Math.PI * 2, d = 70 + (i % 3) * 30;
+      s.style.cssText = `--dx:${Math.cos(a) * d}px;--dy:${Math.sin(a) * d}px;background:${cols[i % cols.length]}`;
+      wrap.append(s);
+    }
+    document.body.append(wrap);
+    setTimeout(() => wrap.remove(), 1300);
+    try { if (navigator.vibrate) navigator.vibrate([18, 40, 28]); } catch (e) { /* unsupported */ }
+    track('first_moment', { what });
+    const card = document.createElement('div'); // its own gold-on-dark-glass card, not the plain toast
+    card.className = 'first-card'; card.setAttribute('role', 'status');
+    card.textContent = window.LUTSLang ? LUTSLang.t(line) : line;
+    document.querySelectorAll('.first-card').forEach((c) => c.remove());
+    document.body.append(card);
+    setTimeout(() => card.classList.add('out'), 2200);
+    setTimeout(() => card.remove(), 2500);
+  }
+  window.LUTSFirst = celebrateFirst;
+  { const end = track.levelEnd; track.levelEnd = (m, result) => { end(m, result); if (result === 'win') celebrateFirst('win', 'Your first win! The sky is proud of you ✨'); }; }
   if (document.fonts && document.fonts.load) {
     for (const font of ['800 40px Outfit', '300 16px Outfit', '40px "Great Vibes"']) document.fonts.load(font).catch(() => {});
   }

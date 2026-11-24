@@ -63,7 +63,7 @@
       if (this.state !== 'READY') return false;
       const ticket = ++this.generation;
       this.setState('IGNITING');
-      // A video ad at a natural break plays before the cracker is lit; it can never block or fail the launch.
+      // Preparation completes before the cracker is lit; it can never block or fail the launch.
       if (this.beforeLaunch) {
         try { await this.beforeLaunch(selection); } catch (_) { /* play on */ }
         if (ticket !== this.generation) return false;

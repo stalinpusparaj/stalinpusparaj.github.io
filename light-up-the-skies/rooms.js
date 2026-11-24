@@ -1,6 +1,7 @@
 // Mela Night: fireworks together, up to four people over a temple's sky (home screen, Challenges row).
 //  - Play online: joins an open room at that temple (or opens one; if nobody comes in 30 seconds, two computer players
-//    join, marked 🤖). Play with friends: a private room with a code and a WhatsApp invite (#room=CODE). Practice: you
+//    join, marked 🤖). From 8 to 9 India time the wait is 8 seconds, and every show that hour uses tonight's temple
+//    (mela-night.js). Play with friends: a private room with a code and a WhatsApp invite (#room=CODE). Practice: you
 //    and three computer players.
 //  - The show is 60 seconds on the sky of Sky Duel (LUTSDuel.start): your taps fire your crackers, everyone's bursts
 //    appear on every phone, and you tap a player's chip to send them a heart. Most hearts wins.
@@ -22,6 +23,33 @@
   const today = () => new Date().toISOString().slice(0, 10);
   const load = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { return {}; } };
   const save = (v) => { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } };
+  const Night = () => window.LUTSMelaNight;
+  // One line per sentence, so each can be translated on its own.
+  function fillLines(el, lines) {
+    if (!el) return;
+    el.replaceChildren();
+    (lines || []).forEach((text, i) => {
+      if (i) el.append(document.createElement('br'));
+      const s = document.createElement('span');
+      s.textContent = text;
+      el.append(s);
+    });
+  }
+  function nightNow() {
+    const api = Night();
+    if (!api) return null;
+    const sky = api.sky();
+    const yday = api.sky(Date.now() - 864e5).key;
+    const rec = load();
+    return { api, sky, yday, rec, pack: { sky, crew: rec.crew, streak: rec.streak, today: sky.key, yday, seen: rec.seen } };
+  }
+  function paintNight() {
+    const n = nightNow();
+    if (!n) return;
+    fillLines($('#melaNight'), n.api.cardLines(n.pack));
+    const crew = $('#melaCrew');
+    if (crew) fillLines(crew, n.api.sheetLines(n.pack));
+  }
 
   // ---------- Realtime Database over REST (no SDK): writes with fetch, the room streamed with EventSource ----------
   let offset = 0; // server clock minus this phone's
@@ -35,9 +63,11 @@
     return res.json();
   }
   const SV = { '.sv': 'timestamp' };
+  // An automated browser (tests, screenshot runs) never counts as a player: it reads the counts but says nothing.
+  const robot = () => !!navigator.webdriver && !window.LUTS_BEATS;
   async function syncClock() {
     const f = fb();
-    if (!f || !f.on) return;
+    if (!f || !f.on || robot()) return;
     await f.token();
     const t0 = Date.now(), r = await req('PUT', `online/${f.uid()}`, { w: place, at: SV }).catch(() => null);
     if (r && typeof r.at === 'number') offset = r.at - (t0 + Date.now()) / 2;
@@ -45,27 +75,71 @@
   const me = () => (fb() ? fb().uid() : '');
 
   // ---------- Who's online: a heartbeat every minute, counted per place ----------
-  let place = 'home', counts = { all: 0 }, countsAt = 0;
+  let place = 'home', counts = { all: 0 }, countsAt = 0, lastBeat = 0;
   async function beat() {
-    if (document.hidden || !fb() || !fb().on) return;
+    if (document.hidden || !fb() || !fb().on || robot()) return;
+    lastBeat = Date.now();
     try { await req('PUT', `online/${me()}`, { w: place, at: SV }); } catch (e) { /* offline */ }
   }
+  // Where the phone is outside a Mela Night room: Live Sky, Sky Gears, a puzzle, or home (a room keeps its temple).
+  const SCREENS = [['live-sky', 'live'], ['gears-open', 'gears'], ['diya-open', 'diya'], ['rr-open', 'rocket']];
+  const screenPlace = () => { const b = document.body.classList; for (const [c, w] of SCREENS) if (b.contains(c)) return w; return 'home'; };
+  let followT = 0;
+  function followScreen() {
+    if (room) return;
+    const w = screenPlace();
+    if (w === place) return;
+    // This phone's own move counts at once (no fresh read: every phone reading the whole list costs downloads)
+    if (counts[place] > 0) counts[place]--;
+    counts[w] = (counts[w] || 0) + 1;
+    place = w;
+    clearTimeout(followT); // at most one write every 15 s, however fast the player hops between screens
+    followT = setTimeout(beat, Math.max(0, lastBeat + 15e3 - Date.now()));
+    renderModeCounts();
+  }
+  // Read only while a count is on screen (home, or Live Sky's chip) and at most every 2 minutes: each read is the whole list.
+  const countsShown = () => !document.hidden && (document.body.classList.contains('home') || document.body.classList.contains('live-sky'));
   async function readCounts() {
-    if (Date.now() - countsAt < 50e3) return counts;
+    if (Date.now() - countsAt < 110e3 || !countsShown()) return counts;
     try {
       const v = await req('GET', 'online', undefined, `&orderBy=%22at%22&startAt=${Math.round(now() - 150e3)}`) || {};
       counts = { all: 0 };
       for (const k of Object.keys(v)) { counts.all++; const w = v[k] && v[k].w; if (w) counts[w] = (counts[w] || 0) + 1; }
       countsAt = Date.now();
-    } catch (e) { /* keep the last */ }
+    } catch (e) { if (Date.now() - countsAt > 150e3) counts = { all: 0 }; } // keep the last a while, never as 'now' for long
     return counts;
   }
   // The home card: a count once enough are playing to mean something, else an invitation (never a made-up number).
   async function renderHomeCount() {
+    paintNight();
+    markBack();
+    lookBack();
     const el = $('#melaCount');
     if (!el) return;
     const c = await readCounts();
     el.textContent = c.all >= 10 ? `🟢 ${c.all.toLocaleString('en-IN')} playing now` : 'Up to 4 at a temple';
+    renderModeCounts();
+  }
+  // Each mode's own count, on its home tile and over Live Sky: from 3 people (the home total from 10), and otherwise
+  // nothing at all. The counts are phones that said where they were in the last 2½ minutes; never a made-up number.
+  const MIN_HERE = 3;
+  const TILES = { live: ['#btnLiveSky', 'watching now'], gears: ['#btnGears', 'drawing now'], diya: ['#btnDiya', 'playing now'], rocket: ['#btnRocket', 'playing now'] };
+  function renderModeCounts() {
+    for (const [w, [sel, verb]] of Object.entries(TILES)) {
+      const t = $(`${sel} .tile-text`);
+      if (!t) continue;
+      let e = t.querySelector('.tile-live');
+      const n = counts[w] || 0;
+      if (n < MIN_HERE) { if (e) e.remove(); continue; }
+      if (!e) { e = document.createElement('em'); e.className = 'tile-live'; t.append(e); }
+      e.textContent = `🟢 ${n.toLocaleString('en-IN')} ${verb}`;
+    }
+    let chip = $('#liveWatching');
+    const n = counts.live || 0, show = document.body.classList.contains('live-sky') && n >= MIN_HERE;
+    if (!show) { if (chip) chip.hidden = true; return; }
+    if (!chip) { chip = document.createElement('div'); chip.id = 'liveWatching'; chip.className = 'live-watching'; chip.setAttribute('role', 'status'); document.body.append(chip); }
+    chip.textContent = `🟢 ${n.toLocaleString('en-IN')} watching now`;
+    chip.hidden = false;
   }
 
   // ---------- The room: a local copy kept in step with the stream ----------
@@ -112,6 +186,8 @@
   const isRace = () => meta().mode === 'race';
   const placeOf = (w) => { const rp = RACE_PLACES.find((x) => x[0] === w); return rp ? rp[2] : D().placeName(w); };
   async function create(w, pub) {
+    const night = nightNow();
+    if (night && night.sky.on && mode === 'show') w = night.sky.world; // one temple for every room during the hour
     await syncClock();
     for (let tries = 0; tries < 5; tries++) {
       const code = Array.from({ length: 4 }, () => 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 31)]).join('');
@@ -146,6 +222,7 @@
     const first = new Promise((res) => { room.ready = res; setTimeout(res, 8000); });
     room.src = await listen(code);
     await first;
+    if (room && room.code === code && meta().w && room.w !== meta().w) { room.w = meta().w; place = room.w; beat(); }
     view('lobby');
   }
   function leave(quiet) {
@@ -156,6 +233,7 @@
     clearInterval(r.botTimer); clearTimeout(r.autoTimer);
     if (show.on) stopShow(true);
     if (race.on) stopRace(true);
+    if (street.on) stopStreet();
     place = 'home'; beat();
     // The host closes the room (and its open listing); a guest gives up the seat.
     const mySeat = SEATS.find((s) => r.data && r.data.players && r.data.players[s] && r.data.players[s].u === me());
@@ -174,19 +252,30 @@
   // ---------- The ways in ----------
   const pick = { show: PLACES[0][0], race: RACE_PLACES[0][0] };
   let pickW = pick.show;
+  async function liveToWatch(w) {
+    let live = {};
+    try { live = await req('GET', 'live', undefined, `&orderBy=%22at%22&startAt=${Math.round(now() - 50e3)}`) || {}; } catch (e) { return ''; }
+    const hit = Object.entries(live).filter(([, v]) => v && v.w === w && v.mode !== 'race' && v.mode !== 'street').sort((a, b) => (b[1].at || 0) - (a[1].at || 0))[0];
+    return hit ? hit[0] : '';
+  }
   async function playOnline() {
     busy(true);
     try {
-      const w = pickW;
+      const n = nightNow();
+      const hour = !!(n && n.sky.on && mode === 'show');
+      const w = hour ? n.sky.world : pickW;
       await syncClock();
       const open = await req('GET', `open/${w}`, undefined, `&orderBy=%22at%22&startAt=${Math.round(now() - 90e3)}`).catch(() => null) || {};
-      for (const code of Object.keys(open).filter((c) => open[c].n < 4 && open[c].host !== me())) {
+      for (const code of Object.keys(open).filter((c) => open[c] && open[c].n < 4 && open[c].host !== me())) {
         try { const r = await join(code); await enter(r.code, r.w); return; } catch (e) { /* full or started: the next */ }
       }
+      // During the hour, a show that has already started is the one to drop into.
+      if (hour) { const liveCode = await liveToWatch(w); if (liveCode) { await watch(liveCode); return; } }
       const code = await create(w, true);
       await enter(code, w);
-      // Nobody in 30 seconds: two computer players join and the show starts.
-      room.autoTimer = setTimeout(() => { if (room && meta().state === 'lobby' && isHost()) fillBots(2).then(startShow); }, 30e3);
+      // Nobody yet: two computer players join. At 8 it is 8 seconds, otherwise 30.
+      const wait = hour ? 8000 : 30e3;
+      room.autoTimer = setTimeout(() => { if (room && meta().state === 'lobby' && isHost()) fillBots(2).then(startShow); }, wait);
     } catch (e) { D().toast('Couldn’t reach the mela. Check the internet and try again.'); }
     finally { busy(false); }
   }
@@ -254,6 +343,8 @@
   function changed() {
     if (!room || !room.data) return;
     const m = meta();
+    if (m.w && room.w !== m.w) { room.w = m.w; place = m.w; }
+    if (m.mode === 'street' || street.on) { streetChanged(); return; } // (street.on: the host closed the room, its meta is gone)
     if (m.state === 'show' && m.start && !room.started) { room.started = true; if (m.mode === 'race') beginRace(); else beginShow(); }
     if (show.on) renderChips();
     if (race.on) renderBoard();
@@ -262,8 +353,9 @@
     if (isHost() && m.state === 'lobby') {
       const n = players().filter(Boolean).length;
       if (m.pub) req('PATCH', `open/${room.w}/${room.code}`, { n }).catch(() => {});
+      const hour = m.pub && (m.mode || 'show') === 'show' && Night() && Night().sky().on;
       if (m.pub && n >= 4) startShow();
-      else if (m.pub && n >= 2 && !room.soon) { room.soon = true; clearTimeout(room.autoTimer); room.autoTimer = setTimeout(startShow, 12e3); }
+      else if (m.pub && n >= 2 && !room.soon) { room.soon = true; clearTimeout(room.autoTimer); room.autoTimer = setTimeout(startShow, hour ? 4000 : 12e3); }
     }
   }
 
@@ -282,19 +374,23 @@
   function beginShow() {
     if (!hud) buildHud();
     D().closeSheet($('#melaModal'));
-    show.on = true; show.slot = 0;
+    show.on = true;
     document.body.classList.add('mela-on');
     D().start(room.w);
     D().hooks.tap = tap;
     hud.hidden = false;
-    hud.querySelector('.mela-place').textContent = D().placeName(room.w);
+    const sky = Night() && Night().sky();
+    hud.querySelector('.mela-place').textContent = sky && room.w === sky.world ? Night().say.sky(sky.name) : D().placeName(room.w);
     hud.classList.toggle('watching', !!room.watcher);
     hud.querySelector('.mela-tip').textContent = room.watcher ? '👀 You’re watching · tap a player to send ❤️' : 'Tap the sky to fire · tap a friend to send ❤️';
     const box = hud.querySelector('.mela-shells');
     box.innerHTML = '';
-    shells().forEach((s, i) => {
+    const list = shells();
+    const skyNow = Night() && Night().sky();
+    show.slot = list.length && skyNow ? skyNow.index % list.length : 0; // every phone starts on the same cracker tonight
+    list.forEach((s, i) => {
       const b = document.createElement('button');
-      b.type = 'button'; b.className = `mela-shell${i === 0 ? ' on' : ''}`; b.title = s.label;
+      b.type = 'button'; b.className = `mela-shell${i === show.slot ? ' on' : ''}`; b.title = s.label;
       b.innerHTML = s.art ? `<img src="assets/crackers/${esc(s.art)}.webp" alt="">` : `<span>${esc(s.icon)}</span>`;
       b.addEventListener('pointerdown', (e) => { e.stopPropagation(); show.slot = i; box.querySelectorAll('.mela-shell').forEach((x, k) => x.classList.toggle('on', k === i)); });
       box.append(b);
@@ -328,6 +424,7 @@
   function remoteEv(id, ev) {
     if (!room || room.fired.has(id)) return;
     room.fired.add(id);
+    if (street.on && ev.u !== me() && window.PatakaChor) { PatakaChor.remoteBang(String(ev.s), ev.x / 10, ev.y / 10); camTo(ev.x / 10, ev.y / 10); return; } // the host's cracker
     if (race.on && ev.u !== me() && window.PatakaChor) { PatakaChor.remoteBang(String(ev.s), ev.x / 10, ev.y / 10); if (room.watcher) camTo(ev.x / 10, ev.y / 10); return; } // a racer's cracker on the street
     if (!show.on || ev.u === me() || show.t < -0.5 || show.t > SECS + 1) return;
     room.launches[ev.u] = (room.launches[ev.u] || 0) + 1;
@@ -400,11 +497,74 @@
     let gems = 0;
     if (st.paid < SHOWS_PAID && !room.watcher) { gems = humans >= 2 ? (won ? 20 : 5) : 5; st.paid++; save(st); }
     if (gems) D().addGems(gems, won ? 'you won the mela' : 'for the mela');
+    rememberNight(ranked);
     if (window.LUTSGoals) LUTSGoals.tick('mela');
     if (won) D().celebrate && D().celebrate();
     room.result = { ranked, won, gems };
+    if (window.LUTSTimeline && !room.watcher) LUTSTimeline.add(won ? { kind: 'mela', icon: '🏆', line: 'Mela Night: you won' } // My sky
+      : { kind: 'mela', icon: '🎪', line: 'Mela Night: place {0} of {1}', args: [ranked.findIndex((p) => p.u === me()) + 1, ranked.length] });
     D().openSheet($('#melaModal'));
     view('result');
+  }
+  // The other people, and the hearts between you, kept on this phone for tomorrow's card.
+  function rememberNight(ranked) {
+    const n = nightNow();
+    if (!n || !room || room.watcher) return;
+    const mine = me();
+    const hearts = (room.data && room.data.hearts) || {};
+    const people = (ranked || []).filter((p) => p && !p.bot && p.u && p.u !== mine).map((p) => ({
+      u: p.u,
+      n: String(p.n || 'Friend').replace(/\s+/g, ' ').trim().slice(0, 24) || 'Friend',
+      got: Math.max(0, Math.round(+((hearts[mine] && hearts[mine][p.u]) || 0))),
+      sent: Math.max(0, Math.round(+((hearts[p.u] && hearts[p.u][mine]) || (room.hearted && room.hearted[p.u]) || 0))),
+    }));
+    if (!people.length) return;
+    people.sort((a, b) => b.got - a.got || b.sent - a.sent);
+    const rec = load();
+    rec.crew = { day: n.sky.key, people: people.slice(0, 3) };
+    save(rec);
+    if (n.sky.on) sawTogether(people[0]);
+    paintNight();
+  }
+  // A person in tonight's show counts as here. The shared count grows only when their phone was here yesterday too.
+  function sawTogether(person) {
+    const n = nightNow();
+    if (!n || !person) return;
+    const rec = load();
+    rec.seen = { day: n.sky.key, u: person.u, n: person.n };
+    const grew = n.api.noteBack(rec.streak, person, n.sky.key, n.yday, rec.crew);
+    if (grew) rec.streak = grew;
+    save(rec);
+  }
+  let backAt = 0, backTry = 0;
+  async function markBack() {
+    const n = nightNow();
+    if (!n || (!n.sky.on && !n.sky.soon) || robot() || !fb() || !fb().on) return;
+    const rec = load();
+    if (rec.backDay === n.sky.key) return;
+    if (Date.now() - backTry < 120e3) return;
+    backTry = Date.now();
+    try { await req('PUT', `back/${n.sky.key}/${me()}`, { n: String(myName()).slice(0, 24), at: SV }); }
+    catch (e) { return; }
+    const again = load();
+    again.backDay = n.sky.key;
+    save(again);
+  }
+  async function lookBack() {
+    const n = nightNow();
+    const person = n && n.api.personOf(n.rec.crew, n.sky.key, n.yday);
+    if (!n || (!n.sky.on && !n.sky.soon) || !person || !person.u || !fb() || !fb().on || robot()) return;
+    if (Date.now() - backAt < 120e3 && n.rec.seen && n.rec.seen.day === n.sky.key) return;
+    backAt = Date.now();
+    let here = null;
+    try { here = await req('GET', `back/${n.sky.key}/${person.u}`); } catch (e) { return; }
+    if (!here || !here.at) return;
+    const rec = load();
+    rec.seen = { day: n.sky.key, u: person.u, n: person.n };
+    const grew = n.api.noteBack(rec.streak, person, n.sky.key, n.yday, rec.crew);
+    if (grew) rec.streak = grew;
+    save(rec);
+    paintNight();
   }
 
   // ---------- The street race: everyone on the same street with the same nine stashes; the board shows who found what ----------
@@ -570,8 +730,123 @@
     if (gems) D().addGems(gems, won ? 'you won the race' : 'for the mela');
     if (window.LUTSGoals) LUTSGoals.tick('mela');
     room.result = { ranked, won: won && !room.watcher, gems, race: true };
+    if (window.LUTSTimeline && !room.watcher) LUTSTimeline.add(won ? { kind: 'mela', icon: '🏆', line: 'Mela Night: you won the race' } // My sky
+      : { kind: 'mela', icon: '🎪', line: 'Mela Night race: place {0} of {1}', args: [ranked.findIndex((p) => p.u === me()) + 1, ranked.length] });
     D().openSheet($('#melaModal'));
     view('result');
+  }
+
+  // ---------- Festival Street live: one player on their street, anyone with the link watches ----------
+  // The host plays as usual; each cracker that bangs goes to the room, and every guest's phone lets it off at the same
+  // spot (from the drone, with the show camera). Guests send hearts; the host sees them float up, and gets 💎2 for each
+  // new guest (up to 💎10 a day). No clock and no seats: it ends when the host leaves the street or taps End.
+  const street = { on: false, pill: null, seen: 0, hearts: 0, timer: 0 };
+  const GUEST_GEMS = 2, GUEST_GEMS_DAY = 10;
+  async function goLive(w) {
+    const C = window.PatakaChor;
+    if (!C || !D()) return;
+    if (!fb() || !fb().on) { D().toast('Couldn’t go live. Check the internet and try again.'); return; }
+    if (room && meta().mode === 'street' && isHost()) { inviteStreet(); return; }
+    try {
+      const prev = mode; mode = 'street';
+      const code = await create(w, false); mode = prev;
+      await req('PATCH', `rooms/${code}/meta`, { state: 'show', start: Math.round(now()) });
+      leave(true);
+      room = { code, w, data: null, fired: new Set(), started: true, bots: [], hearted: {}, launches: {}, made: Date.now(), watcher: false };
+      place = w; beat();
+      const first = new Promise((res) => { room.ready = res; setTimeout(res, 8000); });
+      room.src = await listen(code);
+      await first;
+      req('PUT', `live/${code}`, { w, mode: 'street', n: 1, at: SV }).catch(() => {});
+      const r = room;
+      C.onBang = (type, x, z) => { if (room === r) req('POST', `rooms/${r.code}/ev`, { u: me(), s: String(type).slice(0, 20), x: Math.round(x * 10), y: Math.round(z * 10) }).catch(() => {}); };
+      startStreet();
+      inviteStreet();
+    } catch (e) { D().toast('Couldn’t go live. Check the internet and try again.'); }
+  }
+  function inviteStreet() {
+    if (!room) return;
+    D().share({ title: 'Festival Street', text: `🪔 Watch my Diwali fireworks live on ${placeOf(room.w)} in Fireworks Street! 🎆\nTap to watch:`, url: D().link(`room=${room.code}`), src: 'room' });
+  }
+  function startStreet() {
+    const r = room;
+    street.on = true; street.seen = Object.keys((r.data && r.data.watch) || {}).length; street.hearts = heartsOf(meta().host);
+    if (!street.pill) {
+      street.pill = document.createElement('div'); street.pill.className = 'street-live';
+      street.pill.innerHTML = '<span class="sl-txt"></span><button type="button" class="sl-heart" aria-label="Send a heart">❤️</button><button type="button" class="sl-invite" aria-label="Invite">📡</button><button type="button" class="sl-x" aria-label="End">✕</button>';
+      street.pill.querySelector('.sl-heart').addEventListener('click', (e) => { const h = meta().host; if (room && h) { heartTo(h); floatHeart(e.currentTarget); } });
+      street.pill.querySelector('.sl-invite').addEventListener('click', inviteStreet);
+      street.pill.querySelector('.sl-x').addEventListener('click', () => { const watcher = room && room.watcher; leave(true); if (watcher) D().home(); });
+      document.body.append(street.pill);
+    }
+    street.pill.hidden = false;
+    street.pill.classList.toggle('guest', !!r.watcher);
+    clearInterval(street.timer);
+    // The host left Fireworks Street (Home, Back): the live room ends with them.
+    street.timer = setInterval(() => { if (room !== r) return; if (!r.watcher && window.PatakaChor && !PatakaChor.on) leave(true); }, 2000);
+    renderStreet();
+  }
+  function stopStreet() {
+    street.on = false;
+    clearInterval(street.timer);
+    if (street.pill) street.pill.hidden = true;
+    if (window.PatakaChor) PatakaChor.onBang = null;
+    document.body.classList.remove('mela-watch');
+    stopCam();
+  }
+  function renderStreet() {
+    if (!street.pill || !room) return;
+    const nw = Object.keys((room.data && room.data.watch) || {}).length, h = heartsOf(meta().host);
+    const host = (players()[0] || {}).n || '';
+    street.pill.querySelector('.sl-txt').textContent = room.watcher ? `👀 ${host} · ❤️ ${h}` : `🔴 LIVE · 👀 ${nw} · ❤️ ${h}`;
+    street.pill.querySelector('.sl-heart').hidden = !room.watcher;
+    street.pill.querySelector('.sl-invite').hidden = !!room.watcher;
+  }
+  function streetChanged() {
+    if (!room || !room.data) return;
+    if (!room.data.meta) { const watcher = room.watcher; const r = room; room = null; stopStreet(); try { r.src.close(); } catch (e) { /* closed */ } if (watcher) { D().toast('The live show has ended'); D().home(); } return; }
+    if (room.watcher && !street.on) { beginStreetWatch(); return; }
+    if (!street.on) return;
+    const nw = Object.keys(room.data.watch || {}).length, h = heartsOf(meta().host);
+    if (!room.watcher) {
+      if (h > street.hearts) floatHeart(street.pill);
+      if (nw > street.seen) {
+        D().toast(`👀 ${nw} watching your street`);
+        const st = load(); if (st.gday !== today()) { st.gday = today(); st.ggems = 0; }
+        const add = Math.min(GUEST_GEMS * (nw - street.seen), GUEST_GEMS_DAY - (st.ggems || 0));
+        if (add > 0) { st.ggems = (st.ggems || 0) + add; save(st); D().addGems(add, 'friends watching'); }
+        street.seen = nw;
+        if (meta().pub !== undefined) req('PATCH', `live/${room.code}`, { n: 1 + nw }).catch(() => {});
+      }
+    }
+    street.hearts = h;
+    renderStreet();
+  }
+  function beginStreetWatch() {
+    const r = room, C = window.PatakaChor;
+    if (!C) return;
+    D().closeSheet($('#melaModal'));
+    C.start(r.w);
+    document.body.classList.add('mela-watch');
+    const up = () => { const w = w3(); if (w && w.drone) { if (!w.aerial) w.drone(); startCam(); } else if (room === r) setTimeout(up, 400); };
+    setTimeout(up, 600);
+    startStreet();
+  }
+  function heartTo(uid) {
+    if (!room) return;
+    const t = performance.now();
+    if (t - (room.hearted[uid + ':t'] || 0) < 1200) return;
+    room.hearted[uid + ':t'] = t;
+    const n = (room.hearted[uid] || 0) + 1;
+    if (n > 60) return;
+    room.hearted[uid] = n;
+    req('PUT', `rooms/${room.code}/hearts/${uid}/${me()}`, n).catch(() => { room.hearted[uid] = n - 1; });
+  }
+  function floatHeart(from) {
+    const b = from && from.getBoundingClientRect ? from.getBoundingClientRect() : { left: innerWidth / 2, top: innerHeight / 2, width: 0 };
+    const h = document.createElement('span'); h.className = 'street-heart'; h.textContent = '❤️';
+    h.style.left = `${b.left + b.width / 2}px`; h.style.top = `${b.top}px`;
+    document.body.append(h); setTimeout(() => h.remove(), 1600);
   }
 
   // ---------- The sheet: pick a temple and a way in · the lobby · the result ----------
@@ -590,14 +865,17 @@
     box.innerHTML = '';
     for (const b of document.querySelectorAll('#melaModes button')) b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
     $('#melaSub').textContent = mode === 'race' ? 'Race friends down a street. First to find all 9 stashes wins.' : 'Fireworks together, up to four at a temple. Most hearts wins.';
+    const night = nightNow();
+    if (night && night.sky.on && mode === 'show') pick.show = night.sky.world;
     pickW = pick[mode];
+    paintNight();
     const list = mode === 'race' ? RACE_PLACES.map(([id, art, name]) => [id, art, name, '']) : PLACES.map(([id, where]) => [id, id, D().placeName(id), where]);
     for (const [id, art, name, where] of list) {
       const b = document.createElement('button');
       b.type = 'button'; b.className = `mela-place-card${id === pickW ? ' on' : ''}`;
       const n = c[id] || 0;
       b.innerHTML = `<span class="mela-art" style="background-image:url('${esc(mode === 'race' ? `assets/chor/thumb/${id}.webp` : D().worldArt(art))}')"></span><b>${esc(name)}</b>${where ? `<small>${esc(where)}</small>` : ''}${n >= 3 ? `<em>🟢 ${n} here</em>` : ''}`;
-      b.addEventListener('click', () => { pick[mode] = id; renderPick(); });
+      b.addEventListener('click', () => { if (mode === 'show' && Night() && Night().sky().on && id !== Night().sky().world) return; pick[mode] = id; renderPick(); });
       box.append(b);
     }
     renderLive();
@@ -614,7 +892,7 @@
     box.querySelector('ol').innerHTML = '';
     for (const [code, v] of list) {
       const li = document.createElement('li');
-      li.innerHTML = `<span><b>${esc(v.mode === 'race' ? placeOf(v.w) : D().placeName(v.w))}</b><small>${v.mode === 'race' ? '⏱ Street race' : '🎆 Fireworks show'} · ${+v.n || 0} 👤</small></span>`;
+      li.innerHTML = `<span><b>${esc(v.mode === 'race' || v.mode === 'street' ? placeOf(v.w) : D().placeName(v.w))}</b><small>${v.mode === 'street' ? '🪔 Festival Street' : v.mode === 'race' ? '⏱ Street race' : '🎆 Fireworks show'} · ${+v.n || 0} 👤</small></span>`;
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'btn ghost'; b.textContent = '👀 Watch';
       b.addEventListener('click', () => watch(code));
@@ -644,7 +922,8 @@
     $('#melaBots').hidden = !isHost() || pub || n >= 4;
     $('#melaInvite').hidden = pub;
     if (room.watcher) { $('#melaStart').hidden = $('#melaBots').hidden = $('#melaInvite').hidden = true; $('#melaLobbyNote').textContent = '👀 You’re watching. The show starts when the host is ready'; return; }
-    $('#melaLobbyNote').textContent = pub ? (n >= 2 ? 'Starting soon…' : 'Finding players… computer players join in 30 seconds') : (isHost() ? 'Start when your friends are in' : 'Waiting for the host to start');
+    const hour = pub && (meta().mode || 'show') === 'show' && Night() && Night().sky().on;
+    $('#melaLobbyNote').textContent = pub ? (n >= 2 ? 'Starting soon…' : (hour ? Night().say.wait : 'Finding players… computer players join in 30 seconds')) : (isHost() ? 'Start when your friends are in' : 'Waiting for the host to start');
   }
   function renderResult() {
     const r = room && room.result;
@@ -661,6 +940,14 @@
       ol.append(li);
     });
     $('#melaResGems').textContent = r.gems ? `💎 +${r.gems}` : '';
+    const n = nightNow();
+    const next = [];
+    if (n) {
+      const nxt = n.api.nextEvening();
+      next.push(nxt.later ? n.api.say.tomorrow(nxt.name) : n.api.say.again(nxt.name));
+      if (n.rec.streak && n.rec.streak.mutual && n.rec.streak.count >= 2 && n.rec.streak.day === n.sky.key) next.push(n.api.say.streak(n.rec.streak.count, n.rec.streak.name));
+    }
+    fillLines($('#melaNext'), next);
   }
   function shareResult() {
     const r = room && room.result;
@@ -703,11 +990,13 @@
     $('#melaAgain').addEventListener('click', () => { const pub = room && meta().pub; leave(true); view('pick'); if (pub) playOnline(); else withFriends(); });
     $('#melaShare').addEventListener('click', shareResult);
     $('#melaDone').addEventListener('click', () => { leave(true); view('pick'); D().closeSheet($('#melaModal')); });
+    paintNight();
     if (fb() && fb().on) { syncClock().then(() => { beat(); renderHomeCount(); }); setInterval(() => { beat(); renderHomeCount(); }, 60e3); }
     document.addEventListener('visibilitychange', () => { if (!document.hidden) { beat(); renderHomeCount(); } });
+    new MutationObserver(followScreen).observe(document.body, { attributes: true, attributeFilter: ['class'] });
     setTimeout(openLink, 900);
     setTimeout(() => { if (fb() && fb().on) renderLive().catch(() => {}); }, 3000);
     window.addEventListener('hashchange', openLink);
   });
-  window.LUTSMela = { watch, get room() { return room; }, get show() { return show; }, get race() { return race; }, setMode: (m) => { mode = m; }, players, readCounts, joinCode, create, enter, startShow, fillBots, leave }; // (for tests)
+  window.LUTSMela = { watch, goLive, get street() { return street; }, get room() { return room; }, get show() { return show; }, get race() { return race; }, setMode: (m) => { mode = m; }, players, readCounts, joinCode, create, enter, startShow, fillBots, leave, paintNight, skyName: (at) => (Night() ? Night().sky(at).name : '') }; // (for tests)
 })();

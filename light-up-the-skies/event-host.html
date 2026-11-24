@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://light-up-the-skies-default-rtdb.asia-southeast1.firebasedatabase.app; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self' 'sha256-b7q+fF00IZDELNdt9wvRgAhQwYOib/HHxXzNiOoXE/I='; object-src 'none'; base-uri 'self'; form-action 'self'">
+<title>Event Sky – organiser</title>
+<link rel="icon" href="assets/icons/favicon-32.png">
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="event-sky.css">
+<link rel="stylesheet" href="event-host.css">
+</head>
+<body class="es-host">
+<header class="eh-top">
+  <button class="eh-icon" id="btnBack" type="button" aria-label="Back">‹</button>
+  <div class="eh-titles">
+    <h1 id="hdTitle">My events</h1>
+    <p class="eh-sub" id="hdSub" data-no-i18n></p>
+  </div>
+  <span class="eh-chip" id="hdRole" hidden></span>
+</header>
+<div class="eh-banner" id="banner" role="status" aria-live="polite" hidden></div>
+<div class="eh-banner info" id="cfgMsg" role="status" data-no-i18n hidden></div>
+
+<main id="main" class="eh-main">
+  <!-- ============================================================ My events -->
+  <section class="eh-view" id="vMine" hidden>
+    <div class="eh-row wrap">
+      <button class="es-btn" id="btnCreate" type="button">Create an event</button>
+    </div>
+    <div class="eh-card eh-note" id="mineWeb" hidden>
+      <p>Create your event in the Light Up the Skies app</p>
+      <a class="es-btn ghost" id="lnkPlay" href="#" rel="noopener">Get it on Google Play</a>
+    </div>
+    <h2 class="eh-h2">My events</h2>
+    <ul class="eh-cards" id="mineList" aria-live="polite"></ul>
+    <p class="eh-muted" id="mineEmpty" hidden>No events on this device yet.</p>
+    <div class="eh-row wrap eh-links">
+      <a class="es-btn ghost" id="lnkGuest" href="event.html">Join an event as a guest</a>
+      <a class="es-btn ghost" id="lnkTv" href="event-wall.html?pair=1&amp;tv=1" hidden>Show an event on this TV</a>
+      <button class="es-btn ghost" id="btnRecover" type="button">Use a host key</button>
+    </div>
+  </section>
+
+  <!-- ============================================================ Create wizard (app only) -->
+  <section class="eh-view" id="vNew" hidden>
+    <ol class="eh-steps" id="wizSteps" aria-label="Steps"></ol>
+
+    <div class="eh-step" id="wTpl" data-step="1">
+      <h2 class="eh-h2">What are you celebrating?</h2>
+      <div class="eh-tpls" id="tplList" role="radiogroup" aria-label="What are you celebrating?">
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="wedding"><span class="eh-tpl-ico" aria-hidden="true">💍</span><b>Wedding</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="birthday"><span class="eh-tpl-ico" aria-hidden="true">🎂</span><b>Birthday</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="party"><span class="eh-tpl-ico" aria-hidden="true">🎆</span><b>Party</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="corporate"><span class="eh-tpl-ico" aria-hidden="true">🏢</span><b>Office event</b></button>
+      </div>
+    </div>
+
+    <div class="eh-step" id="wDetails" data-step="2" hidden>
+      <h2 class="eh-h2">Details</h2>
+      <label class="eh-field"><span>Title</span><input id="wTitle" type="text" maxlength="60" autocomplete="off" required></label>
+      <label class="eh-field"><span id="wNamesLabel">Couple's names</span><input id="wNames" type="text" maxlength="40" autocomplete="off"></label>
+      <div class="eh-field"><span>Sky</span><div class="eh-worlds" id="wWorlds" role="radiogroup" aria-label="Sky"></div></div>
+      <label class="eh-field"><span>Language for guests</span><select id="wLang"></select></label>
+      <label class="eh-field"><span>About how many guests?</span><input id="wGuests" type="number" min="1" max="1000" step="1" inputmode="numeric"></label>
+      <div class="eh-field" id="wFnBox" hidden>
+        <span>Functions</span>
+        <p class="eh-muted">Up to 8 functions with the Shaadi Pass</p>
+        <ul class="eh-fns" id="wFns"></ul>
+        <button class="eh-btn" id="wFnAdd" type="button">Add a function</button>
+      </div>
+    </div>
+
+    <div class="eh-step" id="wTime" data-step="3" hidden>
+      <h2 class="eh-h2">Time</h2>
+      <label class="eh-field"><span>Check-in opens</span><input id="wOpens" type="datetime-local" required></label>
+      <label class="eh-field"><span>Check-in closes</span><input id="wCloses" type="datetime-local" required></label>
+      <label class="eh-field"><span>Keep the gallery for</span><select id="wDays"></select></label>
+      <p class="eh-muted" id="wTz" data-no-i18n></p>
+    </div>
+
+    <div class="eh-step" id="wPlan" data-step="4" hidden>
+      <h2 class="eh-h2">Plan</h2>
+      <p class="eh-check" id="wDate" role="status" aria-live="polite"></p>
+      <div id="planBox"></div>
+    </div>
+
+    <div class="eh-step" id="wPrivacy" data-step="5" hidden>
+      <h2 class="eh-h2">Privacy</h2>
+      <label class="eh-toggle"><input id="wApprove" type="checkbox"><span>Check photos before they show</span></label>
+      <label class="eh-field"><span>Contact for photo removal</span><input id="wContact" type="text" maxlength="80" autocomplete="email" placeholder="A phone number or email guests can use"></label>
+      <label class="eh-field"><span>Note for guests (optional)</span><textarea id="wNote" maxlength="300" rows="3"></textarea></label>
+      <div id="wDpBox" hidden>
+        <label class="eh-toggle"><input id="wDp" type="checkbox"><span>Disposable camera</span></label>
+        <label class="eh-field" id="wDpAtBox"><span>Reveal time</span><input id="wDpAt" type="datetime-local"></label>
+      </div>
+      <p class="eh-err" id="wErr" role="alert"></p>
+    </div>
+
+    <div class="eh-step" id="wDone" data-step="6" hidden>
+      <h2 class="eh-h2">Your event is ready</h2>
+      <div class="eh-card">
+        <h3>Save your host key</h3>
+        <p class="eh-key" id="wKey" data-no-i18n></p>
+        <p>If you change phones, this key makes the new phone the host. Keep it somewhere safe.</p>
+        <div class="eh-row wrap">
+          <button class="es-btn ghost" id="wKeyCopy" type="button">Copy</button>
+          <button class="es-btn" id="wKeySaved" type="button">I've saved it</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="eh-row eh-wiznav" id="wizNav">
+      <button class="es-btn ghost" id="wPrev" type="button">Back</button>
+      <button class="es-btn" id="wNext" type="button">Next</button>
+    </div>
+  </section>
+
+  <!-- ============================================================ Event dashboard -->
+  <section class="eh-view" id="vEvent" hidden>
+    <nav class="eh-tabs" id="tabs" role="tablist" aria-label="Event">
+      <button role="tab" type="button" id="t-photos" data-tab="photos" aria-controls="pPhotos">Photos</button>
+      <button role="tab" type="button" id="t-live" data-tab="live" aria-controls="pLive">Live</button>
+      <button role="tab" type="button" id="t-team" data-tab="team" aria-controls="pTeam">Team</button>
+      <button role="tab" type="button" id="t-screens" data-tab="screens" aria-controls="pScreens">Screens</button>
+      <button role="tab" type="button" id="t-share" data-tab="share" aria-controls="pShare">Share &amp; print</button>
+      <button role="tab" type="button" id="t-gallery" data-tab="gallery" aria-controls="pGallery">Gallery</button>
+      <button role="tab" type="button" id="t-downloads" data-tab="downloads" aria-controls="pDownloads">Downloads</button>
+      <button role="tab" type="button" id="t-guests" data-tab="guests" aria-controls="pGuests">Guests</button>
+      <button role="tab" type="button" id="t-rsvp" data-tab="rsvp" aria-controls="pRsvp">RSVP</button>
+      <button role="tab" type="button" id="t-book" data-tab="book" aria-controls="pBook">Guestbook</button>
+      <button role="tab" type="button" id="t-stats" data-tab="stats" aria-controls="pStats">Stats</button>
+      <button role="tab" type="button" id="t-shop" data-tab="shop" aria-controls="pShop" hidden>Shop</button>
+      <button role="tab" type="button" id="t-settings" data-tab="settings" aria-controls="pSettings">Settings</button>
+    </nav>
+
+    <!-- ---------- Photos: moderation deck ---------- -->
+    <div class="eh-panel" id="pPhotos" role="tabpanel" aria-labelledby="t-photos" hidden>
+      <p class="eh-counts" id="modCounts" aria-live="polite">Waiting 0 · Shown 0 · Hidden 0</p>
+      <div class="eh-chips" id="modFilters" role="radiogroup" aria-label="Show">
+        <button class="eh-chipbtn" type="button" role="radio" data-f="all" aria-checked="true">All</button>
+        <button class="eh-chipbtn" type="button" role="radio" data-f="arrivals" aria-checked="false">Arrivals</button>
+        <button class="eh-chipbtn" type="button" role="radio" data-f="photos" aria-checked="false">Photos</button>
+        <button class="eh-chipbtn" type="button" role="radio" data-f="videos" aria-checked="false">Videos</button>
+        <button class="eh-chipbtn" type="button" role="radio" data-f="reported" aria-checked="false" id="fReported">Reported (0)</button>
+      </div>
+      <p class="eh-muted" id="modOnline">Moderators online: 1</p>
+      <div class="eh-deck" id="deck" tabindex="0" aria-label="Photo to check" aria-describedby="deckHelpLine">
+        <figure class="eh-deck-card" id="deckCard" hidden>
+          <div class="eh-deck-media" id="deckMedia"></div>
+          <figcaption>
+            <b id="deckName" data-no-i18n></b>
+            <span class="eh-muted" id="deckMeta"></span>
+            <span id="deckCaption" data-no-i18n></span>
+          </figcaption>
+          <span class="eh-stamp show" aria-hidden="true">Show</span>
+          <span class="eh-stamp hide" aria-hidden="true">Hide</span>
+        </figure>
+        <p class="eh-empty" id="deckEmpty">All caught up ✨</p>
+        <div class="eh-deck-next" id="deckNext" aria-hidden="true"></div>
+      </div>
+      <p class="eh-muted eh-small" id="deckHelpLine">Swipe right to show, left to hide.</p>
+      <div class="eh-row eh-deckbtns">
+        <button class="es-btn ghost" id="bHide" type="button" aria-keyshortcuts="R">Hide</button>
+        <button class="es-btn ghost" id="bHl" type="button" aria-keyshortcuts="F" aria-pressed="false">Highlight</button>
+        <button class="es-btn" id="bShow" type="button" aria-keyshortcuts="P">Show</button>
+      </div>
+      <div class="eh-row wrap">
+        <button class="eh-btn" id="bPrev" type="button" aria-keyshortcuts="K">Previous</button>
+        <button class="eh-btn" id="bNextItem" type="button" aria-keyshortcuts="J">Next</button>
+        <button class="eh-btn" id="bUndo" type="button" aria-keyshortcuts="Z">Undo</button>
+        <button class="eh-btn" id="bKeys" type="button" aria-keyshortcuts="?">Keys</button>
+      </div>
+      <section class="eh-card" id="recentBox" hidden>
+        <h3>Recently shown</h3>
+        <ul class="eh-grid" id="recentList"></ul>
+      </section>
+    </div>
+
+    <!-- ---------- Live: announcements, challenge, disposable camera, finale ---------- -->
+    <div class="eh-panel" id="pLive" role="tabpanel" aria-labelledby="t-live" hidden>
+      <section class="eh-card">
+        <h3>Announcements</h3>
+        <label class="eh-field"><span>Text</span><input id="annText" type="text" maxlength="120" placeholder="Varmala in 10 minutes"></label>
+        <div class="eh-field" role="radiogroup" aria-label="Style">
+          <label class="eh-toggle"><input type="radio" name="annStyle" value="b" checked><span>Banner</span></label>
+          <label class="eh-toggle" id="annFullBox"><input type="radio" name="annStyle" value="f"><span>Full screen with countdown</span></label>
+        </div>
+        <label class="eh-field" id="annCdBox"><span>Countdown (minutes)</span><input id="annCd" type="number" min="0" max="15" step="1" value="0" inputmode="numeric"></label>
+        <label class="eh-field"><span>Time</span><input id="annAt" type="datetime-local"></label>
+        <div class="eh-row wrap">
+          <button class="es-btn" id="annNow" type="button">Announce now</button>
+          <button class="es-btn ghost" id="annSchedule" type="button">Schedule an announcement</button>
+        </div>
+        <p class="eh-muted" id="annFreeNote" hidden>Free events show announcements as a banner.</p>
+        <h4>Scheduled</h4>
+        <ul class="eh-list" id="annList"></ul>
+        <p class="eh-muted" id="annRoom"></p>
+      </section>
+      <section class="eh-card" id="chBox">
+        <h3>Start a photo challenge</h3>
+        <label class="eh-field"><span>Title</span><input id="chTitle" type="text" maxlength="80"></label>
+        <label class="eh-field"><span>Minutes</span><input id="chMin" type="number" min="1" max="30" step="1" value="5" inputmode="numeric"></label>
+        <label class="eh-field"><span>Mission (optional)</span><select id="chMission"></select></label>
+        <button class="es-btn" id="chStart" type="button">Start the challenge</button>
+        <div id="chNow" hidden>
+          <p class="eh-live" id="chState" aria-live="polite"></p>
+          <button class="es-btn ghost" id="chPickBtn" type="button">Pick the winner</button>
+          <ul class="eh-grid" id="chPhotos"></ul>
+        </div>
+      </section>
+      <section class="eh-card" id="dpBox">
+        <h3>Disposable camera</h3>
+        <label class="eh-toggle"><input id="dpOn" type="checkbox"><span>Disposable camera</span></label>
+        <label class="eh-field"><span>Reveal time</span><input id="dpAt" type="datetime-local"></label>
+        <label class="eh-field"><span>Shots per guest</span><input id="dpSh" type="number" min="1" step="1" inputmode="numeric"></label>
+        <div class="eh-row wrap">
+          <button class="es-btn ghost" id="dpSave" type="button">Save</button>
+          <button class="es-btn" id="dpReveal" type="button">Reveal the photos now</button>
+        </div>
+        <label class="eh-toggle"><input id="dpFin" type="checkbox"><span>Reveal at the finale</span></label>
+      </section>
+      <section class="eh-card">
+        <h3>Grand finale</h3>
+        <p class="eh-muted">The names light up the sky in fireworks and drones on every screen.</p>
+        <button class="es-btn" id="finBtn" type="button">Start the finale</button>
+        <p class="eh-live" id="finState" aria-live="polite"></p>
+      </section>
+    </div>
+
+    <!-- ---------- Team ---------- -->
+    <div class="eh-panel" id="pTeam" role="tabpanel" aria-labelledby="t-team" hidden>
+      <div class="eh-row wrap" id="invBtns">
+        <button class="es-btn ghost" type="button" data-inv="c" id="invC">Invite a co-host</button>
+        <button class="es-btn ghost" type="button" data-inv="m">Invite a moderator</button>
+        <button class="es-btn ghost" type="button" data-inv="p">Invite a photographer</button>
+        <button class="es-btn ghost" type="button" data-inv="w">Add a screen</button>
+      </div>
+      <section class="eh-card" id="invBox" hidden>
+        <h3 id="invTitle"></h3>
+        <div class="eh-qrrow">
+          <canvas class="eh-qr" id="invQr" role="img" aria-label="QR code"></canvas>
+          <div>
+            <p class="eh-link" id="invUrl" data-no-i18n></p>
+            <p class="eh-muted" id="invNote"></p>
+            <div class="eh-row wrap">
+              <button class="eh-btn" id="invCopy" type="button">Copy</button>
+              <button class="eh-btn" id="invShare" type="button">Share</button>
+              <button class="eh-btn" id="invNew" type="button">Make a new link</button>
+              <button class="eh-btn" id="invOff" type="button">Turn this link off</button>
+            </div>
+          </div>
+        </div>
+      </section>
+      <h3>Team</h3>
+      <ul class="eh-list" id="teamList"></ul>
+      <p class="eh-muted" id="teamOnline"></p>
+      <section class="eh-card" id="laptopBox" hidden>
+        <h3>Manage on a laptop</h3>
+        <p class="eh-muted">Scan this with your laptop's camera, or open the link there. It joins as a co-host.</p>
+        <button class="es-btn ghost" id="laptopBtn" type="button">Show the laptop link</button>
+      </section>
+    </div>
+
+    <!-- ---------- Screens ---------- -->
+    <div class="eh-panel" id="pScreens" role="tabpanel" aria-labelledby="t-screens" hidden>
+      <section class="eh-card">
+        <a class="es-btn" id="scrHere" href="#">Open the wall on this device</a>
+        <h3>Open on another screen</h3>
+        <div class="eh-chips" id="scrRoles" role="radiogroup" aria-label="Screen">
+          <button class="eh-chipbtn" type="button" role="radio" data-s="main" aria-checked="true">Main</button>
+          <button class="eh-chipbtn" type="button" role="radio" data-s="slides" aria-checked="false">Slideshow</button>
+          <button class="eh-chipbtn" type="button" role="radio" data-s="mirror" aria-checked="false">Mirror</button>
+        </div>
+        <button class="es-btn ghost" id="scrLink" type="button">Show the screen link</button>
+        <div class="eh-qrrow" id="scrBox" hidden>
+          <canvas class="eh-qr" id="scrQr" role="img" aria-label="QR code"></canvas>
+          <div>
+            <p class="eh-link" id="scrUrl" data-no-i18n></p>
+            <p class="eh-muted">Anyone with this link can join as screen. Make a new link to stop the old one.</p>
+            <div class="eh-row wrap"><button class="eh-btn" id="scrCopy" type="button">Copy</button><button class="eh-btn" id="scrShare" type="button">Share</button></div>
+          </div>
+        </div>
+      </section>
+      <section class="eh-card" id="pairBox">
+        <h3>Pair a TV</h3>
+        <label class="eh-field"><span>Enter the code shown on the TV (10 letters and numbers), or scan its QR code</span><input id="pairPin" type="text" inputmode="text" maxlength="11" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+        <button class="es-btn" id="pairGo" type="button">Pair</button>
+        <p class="eh-live" id="pairMsg" role="status"></p>
+      </section>
+      <section class="eh-card" id="wallBox">
+        <h3>Big screen</h3>
+        <label class="eh-field"><span>Mode</span><select id="wMode">
+          <option value="mix">Mix</option><option value="reveal">Fireworks</option><option value="slide">Slideshow</option><option value="mosaic">Mosaic</option>
+        </select></label>
+        <label class="eh-field"><span>Slideshow length (seconds)</span><input id="wSl" type="number" min="3" max="15" step="1" value="6" inputmode="numeric"></label>
+        <label class="eh-field"><span>QR size</span><select id="wQs"><option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option></select></label>
+        <label class="eh-field"><span>QR corner</span><select id="wQp"><option value="br">Bottom right</option><option value="bl">Bottom left</option><option value="tr">Top right</option><option value="tl">Top left</option></select></label>
+        <label class="eh-field"><span>Videos that flash a lot</span><select id="wFl"><option value="dim">Play dimmed</option><option value="skip">Skip them</option></select></label>
+        <label class="eh-toggle"><input id="wSnd" type="checkbox"><span>Arrival sound</span></label>
+        <div class="eh-row wrap">
+          <button class="es-btn ghost" id="wQh" type="button">Hide QR</button>
+          <button class="es-btn" id="wSave" type="button">Save</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- ---------- Share & print ---------- -->
+    <div class="eh-panel" id="pShare" role="tabpanel" aria-labelledby="t-share" hidden>
+      <section class="eh-card">
+        <h3>Guest link</h3>
+        <div class="eh-qrrow">
+          <canvas class="eh-qr" id="gQr" role="img" aria-label="QR code"></canvas>
+          <div>
+            <p class="eh-link" id="gUrl" data-no-i18n></p>
+            <p class="eh-code" id="gCode"></p>
+            <div class="eh-row wrap"><button class="eh-btn" id="gCopy" type="button">Copy</button><button class="eh-btn" id="gShare" type="button">Share</button></div>
+          </div>
+        </div>
+      </section>
+      <section class="eh-card">
+        <h3>Print</h3>
+        <div class="eh-field" role="radiogroup" aria-label="Print">
+          <label class="eh-toggle"><input type="radio" name="prKind" value="a6x4" checked><span>Table cards (4 per A4 sheet)</span></label>
+          <label class="eh-toggle"><input type="radio" name="prKind" value="a4"><span>A4 poster</span></label>
+          <label class="eh-toggle"><input type="radio" name="prKind" value="a5"><span>A5 poster</span></label>
+        </div>
+        <label class="eh-field"><span>Language on the cards</span><select id="prLang"></select></label>
+        <div class="eh-row wrap">
+          <button class="es-btn" id="prPdf" type="button">Download PDF</button>
+          <button class="es-btn ghost" id="prPng" type="button">Download PNG</button>
+        </div>
+        <p class="eh-live" id="prMsg" role="status"></p>
+        <img class="eh-preview" id="prPreview" alt="Preview of the printable" hidden>
+      </section>
+    </div>
+
+    <!-- ---------- Gallery ---------- -->
+    <div class="eh-panel" id="pGallery" role="tabpanel" aria-labelledby="t-gallery" hidden>
+      <section class="eh-card">
+        <h3>Gallery link</h3>
+        <p class="eh-link" id="galUrl" data-no-i18n></p>
+        <div class="eh-row wrap">
+          <button class="eh-btn" id="galCopy" type="button">Copy</button>
+          <button class="eh-btn" id="galShare" type="button">Share</button>
+          <a class="eh-btn" id="galOpen" href="#" target="_blank" rel="noopener">Open</a>
+        </div>
+        <label class="eh-field"><span>Keep the gallery for</span><select id="galDays"></select></label>
+        <p class="eh-muted" id="galKeep"></p>
+        <p class="eh-muted" id="galFull"></p>
+      </section>
+      <section class="eh-card">
+        <h3>Add a password</h3>
+        <label class="eh-field"><span>Password</span><input id="galPw" type="text" minlength="10" maxlength="60" autocomplete="off" spellcheck="false"></label>
+        <div class="eh-row wrap">
+          <button class="eh-btn" id="galPwGen" type="button">Suggest one</button>
+          <button class="es-btn" id="galPwGo" type="button">Add a password</button>
+        </div>
+        <p class="eh-live" id="galPwMsg" role="status"></p>
+      </section>
+      <section class="eh-card">
+        <button class="es-btn ghost" id="galRotate" type="button">Make a new link (old links stop working)</button>
+        <p class="eh-live" id="galRotMsg" role="status"></p>
+      </section>
+      <section class="eh-card" id="sxBox" hidden>
+        <h3>Selfie search</h3>
+        <label class="eh-toggle"><input id="sxOn" type="checkbox"><span>Selfie search</span></label>
+        <p class="eh-muted">This looks at the event photos on this device to find faces. It can take a few minutes.</p>
+        <div class="eh-row wrap">
+          <button class="es-btn ghost" id="sxPrep" type="button">Prepare selfie search</button>
+        </div>
+        <p class="eh-live" id="sxMsg" role="status"></p>
+      </section>
+    </div>
+
+    <!-- ---------- Downloads ---------- -->
+    <div class="eh-panel" id="pDownloads" role="tabpanel" aria-labelledby="t-downloads" hidden>
+      <section class="eh-card">
+        <h3>All photos and videos (ZIP)</h3>
+        <label class="eh-field"><span>Photos</span><select id="dlOnly"></select></label>
+        <button class="es-btn" id="dlZip" type="button">Download</button>
+      </section>
+      <section class="eh-card">
+        <h3>Best-of video (about 60 s)</h3>
+        <p class="eh-muted" id="dlVidFree" hidden>Free events get a 30-second video with the Light Up the Skies mark.</p>
+        <div class="eh-row wrap">
+          <button class="es-btn" id="dlVid916" type="button">Vertical (WhatsApp status)</button>
+          <button class="es-btn ghost" id="dlVid169" type="button">Wide (TV)</button>
+        </div>
+        <label class="eh-toggle"><input id="dlCalm" type="checkbox"><span>Calmer fireworks</span></label>
+      </section>
+      <section class="eh-card" id="dlBookBox">
+        <h3>Photo book (PDF, up to 300 photos)</h3>
+        <label class="eh-field"><span>Photos</span><select id="dlBookOnly"><option value="highlights">Highlights</option><option value="all">All photos</option></select></label>
+        <div class="eh-row wrap">
+          <button class="es-btn" id="dlBook1" type="button">1 photo per page</button>
+          <button class="es-btn ghost" id="dlBook4" type="button">4 photos per page</button>
+        </div>
+      </section>
+      <section class="eh-card">
+        <h3>Lists</h3>
+        <div class="eh-row wrap">
+          <button class="eh-btn" type="button" data-csv="guests">Guest list (CSV)</button>
+          <button class="eh-btn" type="button" data-csv="rsvp" id="dlCsvRsvp">RSVP (CSV)</button>
+          <button class="eh-btn" type="button" data-csv="stats">Stats (CSV)</button>
+          <button class="eh-btn" type="button" data-csv="consent">Consent log (CSV)</button>
+          <button class="eh-btn" type="button" data-csv="analytics" id="dlCsvAn">Analytics (CSV)</button>
+        </div>
+      </section>
+      <section class="eh-card">
+        <button class="es-btn ghost" id="dlRemind" type="button">Remind me to download</button>
+        <p class="eh-muted" id="dlFull"></p>
+      </section>
+      <div class="eh-progress" id="dlProg" hidden>
+        <progress id="dlBar" max="100" value="0" aria-label="Progress"></progress>
+        <p id="dlMsg" role="status" aria-live="polite"></p>
+        <button class="eh-btn" id="dlCancel" type="button">Cancel</button>
+      </div>
+      <ul class="eh-list" id="dlParts"></ul>
+    </div>
+
+    <!-- ---------- Guests ---------- -->
+    <div class="eh-panel" id="pGuests" role="tabpanel" aria-labelledby="t-guests" hidden>
+      <p class="eh-counts" id="guestCount"></p>
+      <ul class="eh-list eh-guests" id="guestList"></ul>
+      <button class="eh-btn" id="guestMore" type="button" hidden>Show more</button>
+    </div>
+
+    <!-- ---------- RSVP ---------- -->
+    <div class="eh-panel" id="pRsvp" role="tabpanel" aria-labelledby="t-rsvp" hidden>
+      <p class="eh-muted" id="rsvpOff" hidden>RSVP is on the Shaadi Pass and for companies.</p>
+      <section class="eh-card" id="rsvpBox">
+        <h3>RSVP</h3>
+        <p class="eh-counts" id="rsvpTotal"></p>
+        <ul class="eh-list" id="rsvpSum"></ul>
+        <div class="eh-row wrap">
+          <button class="es-btn ghost" id="rsvpLink" type="button">Share the RSVP link</button>
+          <button class="es-btn" id="rsvpCsv" type="button">Download RSVP (CSV)</button>
+        </div>
+      </section>
+      <div class="eh-table-wrap"><table class="eh-table" id="rsvpTable"><thead></thead><tbody></tbody></table></div>
+    </div>
+
+    <!-- ---------- Guestbook ---------- -->
+    <div class="eh-panel" id="pBook" role="tabpanel" aria-labelledby="t-book" hidden>
+      <p class="eh-muted">Only the hosts can read and hear these. They never show on the big screen.</p>
+      <ul class="eh-list eh-book" id="bookList"></ul>
+      <p class="eh-empty" id="bookEmpty" hidden>No messages yet.</p>
+    </div>
+
+    <!-- ---------- Stats ---------- -->
+    <div class="eh-panel" id="pStats" role="tabpanel" aria-labelledby="t-stats" hidden>
+      <div id="statsBox"></div>
+    </div>
+
+    <!-- ---------- Shop (only when es_cfg.shop): event-shop.js's own staff panels ---------- -->
+    <div class="eh-panel" id="pShop" role="tabpanel" aria-labelledby="t-shop" hidden>
+      <section class="eh-card" id="shopSettings"></section>
+      <section class="eh-card" id="shopOrders"></section>
+      <p class="eh-live" id="shopMsg" role="status"></p>
+    </div>
+
+    <!-- ---------- Settings ---------- -->
+    <div class="eh-panel" id="pSettings" role="tabpanel" aria-labelledby="t-settings" hidden>
+      <section class="eh-card" id="setPass" hidden>
+        <p id="setPassMsg">Your pass is being confirmed with Google Play. Full photo limits switch on automatically, usually within a few hours.</p>
+      </section>
+      <form class="eh-card" id="setForm" novalidate>
+        <h3>Event</h3>
+        <label class="eh-field"><span>Title</span><input id="sTitle" type="text" maxlength="60" required></label>
+        <label class="eh-field"><span id="sNamesLabel">Names</span><input id="sNames" type="text" maxlength="40"></label>
+        <div class="eh-field"><span>Sky</span><div class="eh-worlds" id="sWorlds" role="radiogroup" aria-label="Sky"></div></div>
+        <label class="eh-field"><span>Language for guests</span><select id="sLang"></select></label>
+        <label class="eh-field"><span>Check-in opens</span><input id="sOpens" type="datetime-local"></label>
+        <label class="eh-field"><span>Check-in closes</span><input id="sCloses" type="datetime-local"></label>
+        <div class="eh-field" id="sFnBox"><span>Functions</span><ul class="eh-fns" id="sFns"></ul><button class="eh-btn" id="sFnAdd" type="button">Add a function</button></div>
+        <div class="eh-field"><span>Photo missions</span><ul class="eh-fns" id="sMs"></ul><button class="eh-btn" id="sMsAdd" type="button">Add a mission</button></div>
+        <label class="eh-toggle"><input id="sApprove" type="checkbox"><span>Check photos before they show</span></label>
+        <label class="eh-field"><span>Contact for photo removal</span><input id="sContact" type="text" maxlength="80" placeholder="A phone number or email guests can use"></label>
+        <label class="eh-field"><span>Note for guests (optional)</span><textarea id="sNote" maxlength="300" rows="3"></textarea></label>
+        <h3>On the guest page and gallery</h3>
+        <label class="eh-toggle"><input id="sGb" type="checkbox"><span>Guestbook</span></label>
+        <label class="eh-toggle" id="sVoBox"><input id="sVo" type="checkbox"><span>Voice messages in the guestbook</span></label>
+        <label class="eh-toggle" id="sRsBox"><input id="sRs" type="checkbox"><span>RSVP</span></label>
+        <label class="eh-toggle"><input id="sDl" type="checkbox"><span>Guests can download photos</span></label>
+        <label class="eh-toggle"><input id="sVp" type="checkbox"><span>Videos play in the gallery</span></label>
+        <label class="eh-toggle"><input id="sRx" type="checkbox"><span>Reactions</span></label>
+        <div class="eh-field" id="sLogoBox"><span>Your logo</span>
+          <div class="eh-row wrap"><img class="eh-logo" id="sLogoImg" alt="Your logo" hidden><input id="sLogo" type="file" accept="image/png,image/jpeg,image/webp"><button class="eh-btn" id="sLogoDel" type="button">Remove the logo</button></div>
+        </div>
+        <button class="es-btn" id="sSave" type="submit">Save</button>
+        <p class="eh-live" id="sMsg" role="status"></p>
+      </form>
+      <section class="eh-card" id="setOpen">
+        <h3>Check-in</h3>
+        <p id="setWindow"></p>
+        <div class="eh-row wrap">
+          <button class="es-btn ghost" id="sCloseNow" type="button">Close check-in now</button>
+          <button class="es-btn ghost" id="sReopen" type="button"></button>
+        </div>
+      </section>
+      <section class="eh-card" id="setPlan">
+        <h3>Plan</h3>
+        <p id="setPlanName"></p>
+        <div id="upgradeBox"></div>
+      </section>
+      <section class="eh-card" id="setKey">
+        <h3>Host key</h3>
+        <button class="es-btn ghost" id="sKeyShow" type="button">Show the host key</button>
+        <p class="eh-key" id="sKey" data-no-i18n hidden></p>
+      </section>
+      <section class="eh-card eh-danger" id="setDelete">
+        <h3>Delete this event</h3>
+        <p>This deletes every photo, video, message and RSVP now. It can't be undone.</p>
+        <label class="eh-field"><span>Type the event code to confirm</span><input id="sDelCode" type="text" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false"></label>
+        <button class="es-btn danger" id="sDelGo" type="button" disabled>Delete everything</button>
+        <p class="eh-live" id="sDelMsg" role="status"></p>
+      </section>
+      <section class="eh-card" id="setLeave" hidden>
+        <button class="es-btn ghost" id="sLeave" type="button">Leave this event</button>
+      </section>
+    </div>
+  </section>
+</main>
+
+<div class="eh-sheet overlay" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle" hidden>
+  <div class="eh-sheet-box">
+    <button class="eh-icon eh-sheet-x" id="sheetX" type="button" aria-label="Close">×</button>
+    <h2 id="sheetTitle"></h2>
+    <div id="sheetBody"></div>
+  </div>
+</div>
+<div class="eh-toast" id="toast" role="status" aria-live="polite" hidden><span id="toastText"></span><button class="eh-btn" id="toastAct" type="button" hidden></button></div>
+
+<script src="event-config.js"></script>
+<script src="event-host.js"></script>
+<script src="i18n.js"></script>
+<script src="event-sky.js"></script>
+<script src="event-media.js"></script>
+<script src="event-zip.js"></script>
+<script src="event-pdf.js"></script>
+<script src="event-mp4.js"></script>
+<script src="drone-show.js"></script>
+<script src="event-fx.js"></script>
+<script src="event-print.js"></script>
+<script src="event-export.js"></script>
+<script src="event-stats.js"></script>
+<script src="tv.js"></script>
+</body>
+</html>

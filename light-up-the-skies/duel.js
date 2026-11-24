@@ -15,7 +15,7 @@
   const SHELLS = D.shells(), BY_ID = Object.fromEntries(SHELLS.map((s) => [s.id, s]));
   const power = (id) => (!BY_ID[id] ? 1 : BY_ID[id].premium ? 3 : BY_ID[id].gems ? 2 : 1);
   const DEFAULT = ['peony', 'chrysanthemum', 'ring', 'strobe', 'willow', 'crackle'].filter((id) => BY_ID[id]);
-  const PICTURES = new Set(['tiger', 'flagindia', 'india', 'bangladesh', 'usa', 'uk', 'china', 'brazil']);
+  const PICTURES = new Set(['tiger', 'flagindia', 'india', 'bangladesh', 'usa', 'uk', 'china', 'brazil', 'japan']);
   const PAIRS = { 'crackle>willow': 'Golden rain', 'willow>crackle': 'Glitter fall', 'heart>heart': 'Love!', 'peony>chrysanthemum': 'Bouquet',
     'strobe>palm': 'Starlit palm', 'flagindia>tiger': 'Jai Hind!', 'ring>doublering': 'Halo', 'kamuro>strobe': 'Twinkling crown', 'crossette>crackle': 'Thunder' };
 
@@ -91,7 +91,7 @@
     const a = document.createElement('span');
     a.className = frame ? `${cls} frame-${frame}` : cls;
     if (p) { const i = document.createElement('img'); i.src = p; i.alt = ''; a.append(i); }
-    else a.textContent = (name || '?').trim().charAt(0).toUpperCase() || '🎆';
+    else { const n = (name || '').trim(); a.textContent = n && n !== '?' ? n.charAt(0).toUpperCase() : '🪔'; } // no grey '?': a diya stands in
     return a;
   }
 
@@ -138,6 +138,8 @@
     try { localStorage.setItem(AUTH_KEY, JSON.stringify(auth)); } catch (e) { /* ignore */ }
     return id;
   }
+  // The same anonymous sign-in for the other Firestore features (wishes.js: Public Wishes).
+  window.LUTSFirebase = { on: ON, docs: DOCS, token, uid: () => auth && auth.uid };
   const str = (v) => ({ stringValue: String(v) });
   async function postBoard(r) {
     if (!ON || !r.score) return;
@@ -169,7 +171,7 @@
       }).filter((v) => v && !(load().hidden || []).includes(v.id)).sort((a, b) => b.s - a.s); // reported ones stay hidden here
       boards.set(w, { at: Date.now(), list });
       return list;
-    } catch (e) { return b ? b.list : []; }
+    } catch (e) { boards.set(w, { at: Date.now() - 90e3, list: b ? b.list : [] }); return b ? b.list : []; } // offline: try again in 30 s, not every tick
   }
 
   // Other games' weekly boards on the same Firebase (Fireworks Street's street races, the puzzles' sprints): post a score (higher
@@ -280,7 +282,8 @@
   // (150 gems, included with Premium) adds a second, richer track with the Skyburst frame at the top. -----
   const TIERS = 20, PER_TIER = 100, PASS_PLUS = 150;
   const season = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
-  const seasonName = () => new Date().toLocaleString('en-IN', { month: 'long' });
+  // The month the pass runs, read off today's date each time (never a stored name), in the player's language.
+  const seasonName = (d = new Date()) => { try { return d.toLocaleString(`${document.documentElement.lang || 'en'}-IN`, { month: 'long' }); } catch (e) { return d.toLocaleString('en-IN', { month: 'long' }); } };
   const daysLeft = () => { const d = new Date(), end = new Date(d.getFullYear(), d.getMonth() + 1, 1); return Math.ceil((end - d) / 864e5); };
   // [free reward, Street Pass+ reward] per tier: gems as a number, or a frame id.
   const REWARDS = Array.from({ length: TIERS }, (_, i) => {
@@ -370,7 +373,8 @@
     const ready = REWARDS.some(([f, q], i) => i < tier && ((f && !p.got.includes(`${i + 1}f`)) || (q && passPlus(p) && !p.got.includes(`${i + 1}p`))));
     const b = document.createElement('button');
     b.type = 'button'; b.className = `pass-chip${ready ? ' ready' : ''}`;
-    b.textContent = `🎟️ ${seasonName()} Street Pass · tier ${tier}/${TIERS}${ready ? ' · rewards ready!' : ''}`;
+    const left = daysLeft(); // (the month's last days say so: a new pass comes with the new month)
+    b.textContent = `🎟️ ${seasonName()} Street Pass · tier ${tier}/${TIERS}${ready ? ' · rewards ready!' : left <= 3 ? ` · ${left} days left` : ''}`;
     b.addEventListener('click', () => showSheet('pass'));
     body().append(b);
   }
@@ -428,6 +432,7 @@
   const affordable = (id) => run.free || D.premium() || !BY_ID[id].gems || BY_ID[id].gems <= D.gems();
   function begin({ world, loadout, vs = null, replay = null, free = false }) {
     if (!hud) buildHud();
+    if (!replay && window.LUTSTrack) { LUTSTrack.screen('sky_duel'); LUTSTrack.level('sky_duel', vs ? 'vs' : 'solo'); }
     Object.assign(run, { on: true, replay: !!replay, t: -3, taps: [], loadout: loadout.slice(), uses: loadout.map(() => USES), slot: 0, world, vs, score: 0, free, next: 0, show: replay });
     D.start(world);
     hud.hidden = false;
@@ -485,6 +490,7 @@
     run.raf = requestAnimationFrame(tick);
   }
   function stop(quit) {
+    if (quit && window.LUTSTrack) { LUTSTrack.levelEnd('sky_duel', 'quit'); LUTSTrack.home(); }
     run.on = false;
     D.hooks.tap = null;
     cancelAnimationFrame(run.raf);
@@ -504,6 +510,7 @@
     postBoard(r);
     r.champ = r.score > 0 && crown(r.world, { n: D.savedName(), p: photo(), f: myFrame(), s: r.score, me: true, l: r.loadout, t: r.taps });
     const won = r.vs && r.score > r.vs.s;
+    if (window.LUTSTrack) LUTSTrack.levelEnd('sky_duel', !r.vs || won ? 'win' : 'lose');
     // Win streak against friends and Champions: every third win in a row pays 10 gems; a loss can be saved for 10.
     if (r.vs) {
       const s2 = load();
@@ -519,6 +526,11 @@
     if (r.xp) addXp(r.xp);
     if (won) D.achieve('rival');
     if (won || r.champ) D.celebrate();
+    if (window.LUTSTimeline) { // My sky
+      const pts = r.score.toLocaleString('en-IN');
+      LUTSTimeline.add(r.vs ? { kind: 'duel', icon: won ? '🏆' : '⚔️', line: won ? 'Sky Duel: beat {0} · {1} points' : 'Sky Duel vs {0} · {1} points', args: [r.vs.n || 'a friend', pts] }
+        : { kind: 'duel', icon: '⚔️', line: 'Sky Duel · {0} points', args: [pts] });
+    }
     last = r;
     showSheet('result');
     syncBanner();
@@ -697,6 +709,7 @@
 
   let go = null; // what the main button does
   function showSheet(state, w) {
+    if (window.LUTSTrack) LUTSTrack.screen('sky_duel');
     body().innerHTML = '';
     let title = 'Sky Duel', sub = '', goText = 'Start the show', chal = false, steal = null;
     const world = w || D.world(), champ = champOf(world);
@@ -844,10 +857,17 @@
   document.body.append(banner);
   banner.addEventListener('click', () => showSheet('champ'));
   let shownFor = '';
+  const fetching = new Set();
   function syncBanner() {
     const home = document.body.classList.contains('home'), busy = document.body.classList.contains('rushing') || document.body.classList.contains('chor');
     const w = D.world();
-    if (ON && !home && !busy) board(w).then(() => { if (D.world() === w) setTimeout(syncBanner, 0); }); // cached two minutes
+    if (document.body.classList.contains('live-sky') || document.hidden) return; // no banner over a light show; nothing while hidden
+    // Fetch only when the two-minute cache is stale and no fetch is in flight, then redraw once (no zero-delay re-arm loop).
+    const cached = boards.get(w);
+    if (ON && !home && !busy && !fetching.has(w) && !(cached && Date.now() - cached.at < 120e3)) {
+      fetching.add(w);
+      board(w).finally(() => { fetching.delete(w); if (D.world() === w) syncBanner(); });
+    }
     const c = !home && !busy ? champOf(w) : null;
     banner.hidden = !c;
     if (!c) { shownFor = ''; return; }

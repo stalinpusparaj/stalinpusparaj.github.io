@@ -43,7 +43,7 @@
 
   // Open layers, topmost wins: focus stays inside it (the home screen, a sheet, the paywall, settings…), so buttons of
   // the screen underneath that happen to peek out are never picked.
-  const LAYERS = '.modal:not([hidden]), #premiumPanel:not([hidden]), #worldPanel:not([hidden]), #settings.open, .overlay:not([hidden])';
+  const LAYERS = '.modal:not([hidden]), #premiumPanel:not([hidden]), #worldPanel:not([hidden]), #settings.open, .overlay:not([hidden]), .home-menu:not([hidden]), #adCard:not([hidden])';
   function layer() {
     let top = null, z = -Infinity;
     for (const el of document.querySelectorAll(LAYERS)) {

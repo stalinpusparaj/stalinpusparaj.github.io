@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en" class="es-wall-html">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://light-up-the-skies-default-rtdb.asia-southeast1.firebasedatabase.app; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-b7q+fF00IZDELNdt9wvRgAhQwYOib/HHxXzNiOoXE/I='; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Event Sky – big screen</title>
+<link rel="icon" href="assets/icons/favicon-32.png">
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="event-sky.css">
+<link rel="stylesheet" href="event-wall.css">
+</head>
+<body class="es-wall">
+<!-- Event Sky wall: event-wall.js (engine and screens), event-packer.js (gallery pages). Build spec §3.6, §4.13. -->
+<div id="wBg" aria-hidden="true"></div>
+<canvas id="wSky" aria-hidden="true"></canvas>
+<video id="wVid" muted playsinline preload="auto" disablepictureinpicture aria-hidden="true" hidden></video>
+<button id="wTap" class="w-tap" type="button" aria-label="Show the screen controls"></button>
+
+<header class="w-head" id="wHead" hidden>
+  <h1 id="wTitle" data-no-i18n></h1>
+  <p id="wNames" data-no-i18n></p>
+</header>
+<p id="wCount" class="w-count" aria-live="polite"></p>
+<p id="wOpens" class="w-opens" role="timer" hidden></p>
+<p id="wSpecial" class="w-special" role="status" hidden></p>
+<div id="wTicker" class="w-ticker" role="status" aria-live="polite" hidden><span id="wTickerText" data-no-i18n></span></div>
+
+<div id="wQr" class="w-qr br m" hidden>
+  <canvas id="wQrCanvas" width="132" height="132" role="img" aria-label="QR code to join the event"></canvas>
+  <p class="w-scan">Scan to join the sky</p>
+  <p class="w-code" id="wCode"></p>
+</div>
+<p id="wKeep" class="w-keep" hidden></p>
+<p id="wStatus" class="w-status" role="status" aria-live="polite" hidden></p>
+<p id="wToast" class="w-toast" role="status" aria-live="polite" hidden></p>
+<div id="wLive" class="sr-only" aria-live="polite"></div>
+
+<nav id="wBar" class="w-bar" aria-label="Screen controls" hidden>
+  <button class="w-btn" id="wBtnMode" type="button" aria-label="Next mode (M)">Mode</button>
+  <button class="w-btn" id="wBtnQr" type="button" aria-label="Show or hide the QR code (H)">QR</button>
+  <button class="w-btn" id="wBtnSize" type="button" aria-label="QR size (Q)">QR size</button>
+  <button class="w-btn" id="wBtnSound" type="button" aria-label="Arrival sound (S)" aria-pressed="false">Sound</button>
+  <button class="w-btn" id="wBtnFull" type="button" aria-label="Full screen">Full screen</button>
+  <button class="w-btn" id="wBtnHelp" type="button" aria-label="Help (?)">Help</button>
+</nav>
+
+<section id="wHelp" class="w-sheet" role="dialog" aria-modal="true" aria-labelledby="wHelpTitle" hidden>
+  <div class="w-card">
+    <h2 id="wHelpTitle">Big screen keys</h2>
+    <table class="w-keys">
+      <tr><th>Q</th><td>QR size</td></tr>
+      <tr><th>Shift + Q</th><td>QR corner</td></tr>
+      <tr><th>H</th><td>Hide or show the QR</td></tr>
+      <tr><th>M</th><td>Next mode</td></tr>
+      <tr><th>F</th><td>Grand finale (hosts)</td></tr>
+      <tr><th>S</th><td>Arrival sound</td></tr>
+      <tr><th>?</th><td>This help</td></tr>
+    </table>
+    <p class="small">TV remote: OK shows or hides the QR, left and right change the mode, up and down change the QR size.</p>
+    <p>Keep this screen plugged in. It runs all night and recovers on its own.</p>
+    <div class="w-row"><button class="w-btn primary" id="wHelpClose" type="button">Close</button></div>
+  </div>
+</section>
+
+<section id="wCard" class="w-sheet" role="dialog" aria-modal="true" aria-labelledby="wCardTitle" hidden>
+  <div class="w-card">
+    <h2 id="wCardTitle"></h2>
+    <p id="wCardText"></p>
+    <p id="wCardSmall" class="small"></p>
+    <p id="wPin" class="w-pin" data-no-i18n hidden></p>
+    <canvas id="wPinQr" class="w-pin-qr" width="160" height="160" role="img" aria-label="QR code to pair this screen" hidden></canvas>
+    <div id="wPairAsk" class="w-pair-ask" hidden>
+      <p id="wPairTitle" data-no-i18n></p>
+      <div class="w-row"><button class="w-btn primary" id="wPairYes" type="button">Yes, show it</button><button class="w-btn" id="wPairNo" type="button">No</button></div>
+    </div>
+    <p id="wPinWait" class="w-wait" hidden>Waiting for the hosts…</p>
+    <form id="wCodeForm" hidden>
+      <label for="wCodeInput" class="sr-only">Event code</label>
+      <input id="wCodeInput" maxlength="9" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text">
+      <p id="wCodeErr" class="err" role="alert"></p>
+      <div class="w-row"><button class="w-btn primary" id="wCodeGo" type="submit">Join</button></div>
+    </form>
+    <div class="w-row" id="wCardRow">
+      <button class="w-btn" id="wCardPair" type="button" hidden>Show a PIN for this screen</button>
+      <button class="w-btn" id="wCardRetry" type="button" hidden>Try again</button>
+    </div>
+  </div>
+</section>
+
+<!-- Order: config, then this page's prelude (it sets the event-page language hooks for i18n.js), i18n.js, the data
+     layer, then the engines. event-wall.js starts the wall on DOMContentLoaded, once every script below has run. -->
+<script src="event-config.js"></script>
+<script src="event-wall.js"></script>
+<script src="i18n.js"></script>
+<script src="event-sky.js"></script>
+<script src="tv.js"></script>
+<script src="drone-show.js"></script>
+<script src="event-fx.js"></script>
+<script src="event-media.js"></script>
+<script src="event-packer.js"></script>
+</body>
+</html>

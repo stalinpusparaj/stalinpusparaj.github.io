@@ -232,7 +232,7 @@ export async function create({ canvas, scene: id = 'taj', tier = 1, onLost, onFo
   const LOOT_COLOURS = ['#d6332f', '#f2b233', '#2f9a5f', '#3b6fd6', '#e0559a', '#ff7a2b'].map((c) => new THREE.Color(c));
   const lootGold = new THREE.Color('#ffd34d'), lootM = new THREE.Matrix4(), lootQ = new THREE.Quaternion(), lootE = new THREE.Euler(), lootV = new THREE.Vector3(), lootS = new THREE.Vector3(1, 1, 1);
   // Pataka Chor's donkey, on its route (world3d-donkey.js).
-  let donkey = null;
+  let donkey = null, offStage = false;
   if (donkeyModule && def.donkey) {
     donkey = donkeyModule.build({ tier, route: def.donkey.route, kind: def.donkey.kind, ground: 2 * LAYER + 0.01, view: { project: (x, y, z, out) => api.project(x, y, z, out), ppm: (d) => api.ppm(d) } });
     scene.add(...donkey.objects);
@@ -405,7 +405,10 @@ export async function create({ canvas, scene: id = 'taj', tier = 1, onLost, onFo
     // The forecourt's dog and old man (world3d-folk.js): shown or put away, whether a show is on and the crackers standing
     // (pinned at it.an), which they keep clear of; something loud at a world point (null: overhead); a show worth
     // applauding; a tap (true when it touched one of them).
-    setFolk(on, busy, crackers) { if (folk) folk.set(on, busy, crackers); },
+    setFolk(on, busy, crackers) { if (folk) folk.set(on && !offStage, busy, crackers); },
+    // A film (Fireworks Street's story finale): the street's walkers (the folk, the donkey, camel or elephant) off
+    // stage, so none crosses the shot, and back after.
+    setCast(on) { offStage = !on; if (donkey) donkey.objects.forEach((o) => { o.visible = on; }); if (folk && !on) folk.set(false, true); dirty = true; },
     startle(pos, power, kind) { if (folk) folk.startle(pos, power, kind); },
     cheer() { if (folk) folk.cheer(); },
     pet(sx, sy) { return !!folk && folk.pet(sx, sy); },

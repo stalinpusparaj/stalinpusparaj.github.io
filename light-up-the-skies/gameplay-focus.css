@@ -1,0 +1,112 @@
+/* Gameplay: more sky, a readable instruction, and one clear primary action. */
+.play-tools { position: relative; }
+.play-tools > summary { list-style: none; width: 48px; min-height: 48px; display: grid; place-items: center; border: 1px solid #8e7953; border-radius: 16px; background: #19152d; color: #ffe0a0; cursor: pointer; font-size: 1.2rem; letter-spacing: 2px; }
+.play-tools > summary::-webkit-details-marker { display: none; }
+.play-tools[open] > summary { background: #463554; border-color: #ffe0a0; }
+.play-tools-panel { position: absolute; top: calc(100% + 10px); right: 0; z-index: 100; display: grid; grid-template-columns: repeat(2, minmax(72px, 1fr)); gap: 12px; width: min(260px, calc(100vw - 24px)); padding: 16px; border: 1px solid #a18a60; border-radius: 20px; background: #171229; box-shadow: 0 12px 32px #000b; }
+.hud .play-tools-panel .icon-btn { width: 100%; min-height: 64px; height: auto; border-radius: 14px; padding: 10px 4px 24px; }
+.hud .play-tools-panel .icon-btn::after { content: attr(aria-label); display: block; position: absolute; bottom: 4px; top: auto; left: 4px; right: 4px; transform: none; width: auto; max-width: none; font: 500 .7rem/1.2 var(--font); text-align: center; white-space: normal; }
+.hud .play-tools-panel .wide-only { display: inline-flex; }
+body:not(.home) .bottom-ui #hint { white-space: normal; overflow-wrap: anywhere; font-family: var(--font); font-style: normal; font-weight: 500; font-size: .8rem; line-height: 1.4; max-width: 560px; margin-inline: auto; padding: 6px 12px; color: #fff1d3; background: #100d20d9; border-radius: 12px; text-shadow: none; }
+body:not(.home) .bottom-ui .mode-tabs { border: 1px solid #9f8959; box-shadow: none; border-radius: 20px; padding: 4px; background: #141024f0; }
+body:not(.home) .bottom-ui .mode-tabs button { min-height: 48px; border-radius: 15px; }
+body:not(.home) .bottom-ui .dock { border: 1px solid #9f8959; border-radius: 20px; box-shadow: 0 8px 24px #0006; }
+body:not(.home) .fire-fab-wrap::before { content: none; }
+body:not(.home) .fire-fab { width: 64px; height: 64px; border-radius: 22px; box-shadow: 0 4px 14px #0008; }
+body:not(.home) .fire-fab svg { width: 24px; height: 24px; }
+.play-tools summary:focus-visible, .bottom-ui button:focus-visible, .hud button:focus-visible { outline: 3px solid white; outline-offset: 3px; }
+@media (max-width: 760px) {
+  html:not(.tv) .hud { row-gap: 16px; }
+  html:not(.tv) .hud .actions { gap: 8px; }
+  html:not(.tv) .hud .actions > .icon-btn, html:not(.tv) .hud .brand { width: 48px; height: 48px; min-width: 48px; }
+  html:not(.tv) .hud .actions > .icon-btn::after { font-size: .68rem; }
+  html:not(.tv) .scene-bar { gap: 6px; }
+  html:not(.tv) .scene-bar .scene-chip { min-height: 44px; padding: 6px 10px; box-shadow: none; }
+  html:not(.tv) .scene-bar .view-toggle button { min-height: 44px; padding: 6px 12px; }
+  html:not(.tv) .duel-champ { top: calc(130px + var(--safe-t)); max-width: calc(100vw - 96px); padding: 5px 12px 5px 6px; min-height: 44px; box-shadow: none; animation: none; border-color: #766647; background: #171329e8; }
+  html:not(.tv) .duel-champ .duel-ava { width: 30px; height: 30px; }
+  html:not(.tv) .duel-champ b { font-size: .72rem; }
+  html:not(.tv) .duel-champ small { font-size: .65rem; }
+  html:not(.tv) .duel-champ::after { content: none; }
+}
+@media (prefers-reduced-motion: reduce) { .play-tools *, .fire-fab, .mode-tabs button { animation: none !important; transition: none !important; } }
+/* The champion sits above the normal HUD; an open tool sheet must cover it. */
+.hud:has(.play-tools[open]) { z-index: 65; }
+.play-tools-caption { font: 500 .65rem/1 var(--font); letter-spacing: 0; position: absolute; top: calc(100% + 5px); }
+.play-discovery { min-height: 48px; padding: 10px; border: 1px solid #857354; border-radius: 12px; color: #ffe0a0; font-size: .8rem; line-height: 1.35; overflow-wrap: anywhere; background: #272039; }
+body.mode-spark .duel-champ { display: none; }
+@media (max-width: 760px) {
+  html:not(.tv) .spark-float { padding: 4px; background: #171329ed; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  html:not(.tv) .spark-float .tool { min-height: 48px; width: 44px; }
+}
+.play-tools-panel { max-height: calc(var(--app-h, 100vh) - 110px - var(--safe-t, 0px)); overflow-y: auto; overscroll-behavior: contain; }
+.hud .play-tools-panel .icon-btn { justify-content: center; align-items: center; }
+body:not(.home) .bottom-ui .mode-tabs button { min-width: 0; white-space: normal; line-height: 1.25; overflow-wrap: anywhere; }
+@media (orientation: landscape) and (max-height: 560px) {
+  html:not(.tv) .hud > .hide-eye { width: 44px; height: 44px; }
+  html:not(.tv) .scene-bar .tap-sky { min-height: 44px; }
+  /* The More sheet hangs under the top bar and stops above the dock, with two full rows visible. */
+  html:not(.tv) .play-tools-panel {
+    position: fixed; top: calc(78px + var(--safe-t, 0px)); right: max(12px, var(--safe-r, 0px));
+    bottom: calc(104px + var(--safe-b, 0px)); max-height: none; width: min(300px, 48vw);
+    padding: 10px; gap: 8px;
+  }
+  html:not(.tv) .hud .play-tools-panel .icon-btn,
+  html:not(.tv) .play-tools-panel .play-discovery { min-height: 52px; height: auto; padding-top: 6px; padding-bottom: 18px; }
+  html:not(.tv) .duel-champ { display: none; }
+  html:not(.tv) .bottom-ui { gap: 6px; }
+  html:not(.tv) .bottom-ui .mode-tabs { align-self: flex-start; width: min(420px, 55vw); margin-left: 12px; }
+  html:not(.tv) .bottom-ui .mode-tabs button { min-height: 44px; font-size: .8rem; padding: 4px 10px; }
+  html:not(.tv) .spark-float { top: calc(74px + var(--safe-t)); right: calc(12px + var(--safe-r)); transform: none; flex-direction: row; }
+  html:not(.tv) .spark-float .tool { min-height: 48px; width: 48px; }
+}
+/* Wide phones/tablets: one console row instead of two stacked bars. */
+@media (orientation: landscape) and (min-width: 640px) {
+  html:not(.tv) body:not(.mode-spark) .bottom-ui {
+    display: grid; grid-template-columns: minmax(240px, .34fr) minmax(0, 1fr);
+    align-items: end; gap: 8px; padding-inline: max(12px, var(--safe-l)) max(12px, var(--safe-r));
+  }
+  html:not(.tv) body:not(.mode-spark) .bottom-ui > #hint,
+  html:not(.tv) body:not(.mode-spark) .bottom-ui > #launchStatus { grid-column: 1 / -1; grid-row: 1; max-width: 70vw; margin: 0 auto; }
+  html:not(.tv) body:not(.mode-spark) .bottom-ui > #modeTabs {
+    grid-column: 1; grid-row: 2; width: 100%; max-width: none; margin: 0; align-self: stretch;
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  html:not(.tv) body:not(.mode-spark) #modeTabs button { flex-direction: column; gap: 4px; padding: 6px; min-height: 64px; font-size: .8rem; }
+  html:not(.tv) body:not(.mode-spark) #modeTabs .tab-icon { width: 24px; height: 24px; font-size: 22px; }
+  html:not(.tv) body:not(.mode-spark) .bottom-ui > #dock { grid-column: 2; grid-row: 2; min-width: 0; width: 100%; }
+  html:not(.tv) body:not(.mode-spark) .bottom-ui > .world-strip { display: none !important; }
+  html:not(.tv) body:not(.mode-spark) .bottom-ui > .play-rewards { grid-column: 1; grid-row: 3; justify-self: start; }
+  html:not(.tv) body:not(.mode-spark) .bottom-ui > #btnFire { grid-column: 2; grid-row: 3; }
+  html:not(.tv) .bottom-ui .shell-chip { min-width: 60px; max-width: 82px; padding: 3px; }
+  html:not(.tv) .bottom-ui .shell-chip .ico { width: 48px; height: 42px; }
+  html:not(.tv) .bottom-ui .shell-chip > span:nth-child(2) { font-size: .7rem; line-height: 1.25; }
+  html:not(.tv) .scene-bar { min-width: 0; max-width: 46vw; }
+  html:not(.tv) .hud { grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; }
+  html:not(.tv) .hud .actions { gap: 6px; }
+  html:not(.tv) .hud .actions > .icon-btn, html:not(.tv) .hud .brand { width: 44px; height: 44px; min-width: 44px; }
+  html:not(.tv) .play-tools > summary { width: 44px; min-height: 44px; }
+  html:not(.tv) .scene-bar .scene-chip { max-width: 22vw; }
+  html:not(.tv) .scene-bar .view-toggle button { padding: 6px 12px; min-height: 44px; }
+  html:not(.tv) .play-tools-panel { max-height: calc(var(--app-h) - 96px); }
+}
+@media (orientation: landscape) and (min-width: 640px) {
+  html:not(.tv) body.mode-spark .bottom-ui {
+    display: grid; grid-template-columns: minmax(240px, .34fr) minmax(0, 1fr);
+    align-items: end; gap: 8px; padding-inline: max(12px, var(--safe-l)) max(12px, var(--safe-r));
+  }
+  html:not(.tv) body.mode-spark .bottom-ui > #modeTabs { grid-column: 1; grid-row: 2; width: 100%; max-width: none; margin: 0; align-self: stretch; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  html:not(.tv) body.mode-spark #modeTabs button { flex-direction: column; gap: 4px; padding: 6px; min-height: 64px; font-size: .8rem; }
+  html:not(.tv) body.mode-spark #modeTabs .tab-icon { width: 24px; height: 24px; font-size: 22px; }
+  html:not(.tv) body.mode-spark .bottom-ui > #dock { grid-column: 2; grid-row: 2; min-width: 0; }
+  html:not(.tv) body.mode-spark .bottom-ui > #hint,
+  html:not(.tv) body.mode-spark .bottom-ui > #launchStatus { grid-column: 1 / -1; grid-row: 1; max-width: calc(100% - 140px); margin: 0 0 0 auto; }
+  html:not(.tv) body.mode-spark .bottom-ui > #shapeStrip { position: absolute; bottom: calc(100% + 8px); right: 0; width: min(680px, 100%); margin: 0; background: #171329f5; }
+  html:not(.tv) body.mode-spark:not(.shapes-closed) .bottom-ui > #hint { visibility: hidden; }
+  html:not(.tv) body.mode-spark .bottom-ui > #btnShapesOpen { position: absolute; bottom: calc(100% + 4px); left: 0; min-height: 44px; margin: 0; }
+  html:not(.tv) body.mode-spark .bottom-ui > .play-rewards { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
+  html:not(.tv) .bottom-ui .ground-tools .clear-btn,
+  html:not(.tv) .bottom-ui #btnBurstAll.finale-btn { width: 44px; height: 44px; min-height: 44px; }
+  html:not(.tv) .bottom-ui { width: min(1400px, calc(100% - 24px)); }
+}
+body.launch-active .bottom-ui > #hint { visibility: hidden; }

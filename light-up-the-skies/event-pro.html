@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en" class="esp">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://light-up-the-skies-default-rtdb.asia-southeast1.firebasedatabase.app; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-b7q+fF00IZDELNdt9wvRgAhQwYOib/HHxXzNiOoXE/I='; object-src 'none'; base-uri 'self'; form-action 'self'">
+<!-- When the cloud Worker is switched on (RTDB es_cfg.worker), add its origin to connect-src above (spec §3.0). -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#070b24">
+<title>Photographer upload · Event Sky</title>
+<link rel="icon" href="assets/icons/favicon-32.png">
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="event-sky.css">
+<style>
+/* Photographer page (event-pro.html). Shared tokens and components come from event-sky.css. */
+html.esp { background: var(--navy); }
+@media (min-width: 1280px) and (min-height: 640px) { html.esp, html.esp body.es { font-size: 20px; } }
+.esp .ep-wrap { width: 100%; max-width: 44rem; margin: 0 auto; padding: calc(12px + var(--safe-t)) 16px calc(40px + var(--safe-b)); }
+.esp .ep-head { text-align: center; padding: 8px 0 4px; }
+.esp .ep-kicker { margin: 0; color: var(--muted); font-size: .9rem; letter-spacing: .04em; }
+.esp h1 { margin: 4px 0; font: 700 1.6rem/1.2 var(--font-display); color: var(--gold); text-shadow: var(--glow); }
+.esp .names { margin: 0; color: var(--gold2); }
+.esp .ep-when { margin: 6px 0 0; color: var(--muted); font-size: .9rem; }
+.esp .ep-drop { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 150px; padding: 18px;
+  border: 2px dashed rgba(245, 196, 81, .6); border-radius: 16px; text-align: center; cursor: pointer; background: rgba(7, 11, 36, .35); }
+.esp .ep-drop strong { font-size: 1.15rem; color: var(--gold2); }
+.esp .ep-drop.over { border-style: solid; background: rgba(245, 196, 81, .12); }
+.esp .ep-drop:focus-visible { outline: 3px solid var(--gold2); outline-offset: 2px; }
+.esp .ep-left { margin: 12px 0 0; font-weight: 700; color: var(--gold2); font-variant-numeric: tabular-nums; }
+.esp .ep-bar { width: 100%; height: 10px; margin-top: 10px; border-radius: 6px; overflow: hidden; background: var(--navy3); }
+.esp .ep-bar > span { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--gold2), var(--gold)); transition: width .25s; }
+.esp .ep-count { margin: 8px 0 0; font-variant-numeric: tabular-nums; }
+.esp .ep-queue { list-style: none; margin: 12px 0 0; padding: 0; max-height: 50vh; overflow: auto; }
+.esp .ep-queue li { display: grid; grid-template-columns: 48px 1fr auto; gap: 10px; align-items: center; padding: 6px 0; border-top: 1px solid rgba(59, 67, 122, .7); }
+.esp .ep-queue li:first-child { border-top: 0; }
+.esp .ep-queue .pv { display: block; width: 48px; height: 48px; border-radius: 8px; object-fit: cover; background: var(--navy3); }
+.esp .ep-queue .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .9rem; }
+.esp .ep-queue .st { font-size: .8rem; color: var(--muted); }
+.esp .ep-queue .st.err { color: var(--bad); }
+.esp .ep-queue .st.ok { color: var(--ok); }
+.esp .ep-queue .acts { display: flex; gap: 6px; }
+.esp .ep-queue .acts button { min-height: var(--tap); min-width: var(--tap); padding: 4px 10px; border-radius: 22px; border: 1px solid var(--gold);
+  background: transparent; color: var(--gold); font: inherit; font-size: .85rem; cursor: pointer; }
+.esp .ep-grid { list-style: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; margin: 10px 0 0; padding: 0; }
+.esp .ep-grid li { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.esp .ep-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; background: var(--navy3); border: 1px solid var(--line2); }
+.esp .ep-grid .es-btn.link { margin: 0; font-size: .85rem; }
+.esp .ep-foot { margin-top: 28px; text-align: center; }
+.esp .ep-del-img { display: block; width: 160px; height: 160px; margin: 8px auto; object-fit: cover; border-radius: 12px; background: var(--navy3); }
+.esp .ep-foot .brand { font-family: var(--font-display); color: var(--gold); }
+@media (max-width: 380px) { .esp .ep-wrap { padding-left: 12px; padding-right: 12px; } .card { padding: 16px 14px; } }
+@media (prefers-reduced-motion: reduce) { .esp .ep-bar > span { transition: none; } }
+</style>
+</head>
+<!-- Event Sky photographer page (event-pro.js): join with the photographer invite (?e=CODE&j=p.SECRET), then send many
+     photos at once (files or a ZIP). Free events burn in "Photo: {name}" and the Light Up the Skies mark. Build spec:
+     research/event-sky-spec.md §3.9, §4.19. -->
+<body class="es esp">
+<div class="ep-wrap">
+  <header class="ep-head">
+    <p class="ep-kicker" id="kicker">Photographer upload</p>
+    <h1 id="title">Photographer upload</h1>
+    <p class="names" id="names" data-no-i18n hidden></p>
+    <p class="ep-when" id="when"></p>
+  </header>
+
+  <section class="card" id="scrGate" hidden>
+    <p id="gateMsg">Open the photographer link the hosts sent you.</p>
+    <form id="codeForm" novalidate>
+      <label for="codeIn">Event code</label>
+      <input type="text" id="codeIn" maxlength="7" autocomplete="off" autocapitalize="characters" spellcheck="false" data-no-i18n>
+      <button class="es-btn" id="codeGo" type="submit">Open</button>
+    </form>
+  </section>
+
+  <p class="msg" id="loading" role="status">Loading…</p>
+
+  <main id="scrMain" hidden>
+    <section class="card" id="creditCard">
+      <label for="proName">Your name for the photo credit</label>
+      <input type="text" id="proName" maxlength="30" autocomplete="name" data-no-i18n>
+      <p class="small" id="freeNote" hidden></p>
+      <div id="creditRow" hidden><label class="es-check" for="creditOn"><input type="checkbox" id="creditOn"><span>Add my photo credit</span></label></div>
+      <div class="field" id="fnRow" hidden>
+        <label for="fnPick">Function</label>
+        <select id="fnPick" data-no-i18n></select>
+      </div>
+    </section>
+
+    <section class="card" id="sendCard">
+      <div class="ep-drop" id="drop" role="button" tabindex="0" aria-describedby="dropHint">
+        <strong>Drop photos or a ZIP here</strong>
+        <span class="small" id="dropHint">Or tap to choose. JPEG, PNG, WebP or HEIC.</span>
+      </div>
+      <div class="es-row">
+        <label class="es-btn small"><input type="file" class="es-file" id="pick" accept="image/*,.zip,application/zip" multiple>Choose photos</label>
+        <label class="es-btn small ghost"><input type="file" class="es-file" id="pickZip" accept=".zip,application/zip">Choose a ZIP</label>
+      </div>
+      <p class="ep-left" id="left" aria-live="polite"></p>
+      <div class="ep-bar" aria-hidden="true"><span id="bar"></span></div>
+      <p class="ep-count" id="count" aria-live="polite"></p>
+      <p class="msg" id="status" role="status" aria-live="polite"></p>
+      <div class="es-row">
+        <button class="es-btn small ghost" id="pauseBtn" type="button" hidden>Pause</button>
+        <button class="es-btn small quiet" id="clearBtn" type="button" hidden>Clear the finished list</button>
+      </div>
+      <ul class="ep-queue" id="queue" aria-label="Photos being sent"></ul>
+    </section>
+
+    <section class="card" id="mineCard">
+      <h2>My uploads</h2>
+      <p class="small">Deleting a photo removes it from the screen and the gallery. Deleted photos still count toward the limit.</p>
+      <ul class="ep-grid" id="mine"></ul>
+      <p class="msg" id="mineMsg" role="status"></p>
+      <button class="es-btn small ghost" id="mineMore" type="button">Show my uploads</button>
+    </section>
+
+    <section class="card" id="shopCard" hidden>
+      <h2>Sell prints</h2>
+      <div id="shopSettings"></div>
+      <div id="shopOrders"></div>
+    </section>
+
+    <p class="ep-foot small"><span class="brand" data-no-i18n>Light Up the Skies</span> · Event Sky</p>
+  </main>
+</div>
+
+<div class="sheet" id="delSheet" role="dialog" aria-modal="true" aria-labelledby="delTitle" hidden>
+  <div class="sheet-panel">
+    <button class="sheet-x" id="delX" type="button" aria-label="Close">×</button>
+    <h2 id="delTitle">Delete this photo?</h2>
+    <img id="delImg" alt="" class="ep-del-img" width="160" height="160">
+    <p>It is removed from the screen and the gallery. This can't be undone.</p>
+    <div class="sheet-actions">
+      <button class="es-btn danger solid" id="delYes" type="button">Delete</button>
+      <button class="es-btn ghost" id="delNo" type="button">Keep</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="event-config.js"></script>
+<script src="event-pro.js"></script>
+<script src="i18n.js"></script>
+<script src="event-sky.js"></script>
+<script src="event-media.js"></script>
+<script src="event-zip.js"></script>
+<script src="event-shop.js"></script>
+</body>
+</html>

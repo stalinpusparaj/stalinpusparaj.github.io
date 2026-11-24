@@ -26,13 +26,20 @@
   const RARE = 4, RARE_ORBS = 2, RARE_SHOP = 4, RARE_REFILL = 0.35; // Premium finds: of the day's stashes, sky orbs, the shop's dozen; share of new stashes
   // The street race is a heist: the nine stashes are pieces of a key, the key opens Seth-ji's vault, and the week's
   // treasure has to be carried back to the gate with Seth-ji on your heels. Each week a different treasure.
-  const TREASURES = [['lakshmi', 'Golden Lakshmi', '🪷'], ['nataraja', 'Bronze Nataraja', '🔱'], ['ganesha', 'Silver Ganesha', '🐘'], ['peacock', 'Jewelled Peacock', '🦚'], ['diya', 'Diamond Diya', '🪔'], ['crown', 'Maharaja’s Crown', '👑']];
+  const TREASURES = [['lakshmi', 'Golden Lotus', '🪷', 0], ['nataraja', 'Bronze Bell', '🔔', 0], ['ganesha', 'Silver Elephant', '🐘', 0], ['peacock', 'Jewelled Peacock', '🦚'], ['diya', 'Diamond Diya', '🪔'], ['crown', 'Maharaja’s Crown', '👑']];
   // Each treasure's own picture (assets/chor/treasure, made in Google Flow); the emoji stays for texts and toasts.
-  const tPic = (t) => `<img class="chor-tpic" src="assets/chor/treasure/${t[0]}.webp" alt="" aria-hidden="true">`;
+  // (a 4th 0: no picture, the emoji instead: the old deity pictures stay only on the Nataraja Rescue story)
+  const tPic = (t) => t[3] === 0 ? `<b class="chor-tpic chor-temoji" aria-hidden="true">${t[2]}</b>` : `<img class="chor-tpic" src="assets/chor/treasure/${t[0]}.webp" alt="" aria-hidden="true">`;
   // The same pictures for canvases (the vault's marker in the street), loaded once each.
   const tImgs = {};
   const tImg = (id) => { if (!tImgs[id]) { tImgs[id] = new Image(); tImgs[id].src = `assets/chor/treasure/${id}.webp`; } return tImgs[id]; };
   const treasureOfWeek = (ms = Date.now()) => TREASURES[Math.floor((ms / 864e5 + 3) / 7) % TREASURES.length];
+  // When each treasure is next in the vault: weeks turn on Monday (UTC), one treasure a week, in the list's order.
+  const nextChange = (ms = Date.now()) => (Math.floor((ms / 864e5 + 3) / 7) + 1) * 7 * 864e5 - 3 * 864e5;
+  function weeksUntil(id, ms = Date.now()) {
+    const now = TREASURES.indexOf(treasureOfWeek(ms)), at = TREASURES.findIndex((t) => t[0] === id);
+    return (at - now + TREASURES.length) % TREASURES.length; // 0: this week
+  }
   const THIEF_HEISTS = 5, ESCAPE_RUN = 3.6, GATE_R = 3.5; // heists for the Master Thief frame; Seth-ji's speed after you; how near the gate counts
   const BAG = 6, BIG_BAG = 10, /* kinds of cracker the bag holds (each up to STACK); it scrolls */ STASHES = 9, RARE_GEMS = 15, REACH = 24; // metres: further away, the stash is only a glow to walk to
   // The Kit, for gems (Premium: the bigger bag free): a bigger bag for good, and decoys, stash pings and lucky charms (keep
@@ -42,6 +49,10 @@
     decoy: { name: 'Decoy ×3', line: 'A noise up the street: the dog runs to it, everyone looks away', gems: 10, adds: 3 },
     ping: { name: 'Stash ping ×3', line: 'Every hidden stash glows through walls for 12 seconds', gems: 8, adds: 3 },
     charm: { name: 'Lucky charm ×2', line: 'Caught? Keep your bag', gems: 12, adds: 2 },
+    // The story's hero powers (state.powers): the priest gives one of each per rescue, so they are earned free; these top up.
+    vision: { name: 'Flare Vision ×3', line: 'Nataraja Rescue: every clue glows for 12 seconds', gems: 8, adds: 3, power: true },
+    dash: { name: 'Vayu Dash ×3', line: 'Nataraja Rescue: 3 seconds at a sprint', gems: 10, adds: 3, power: true },
+    smoke: { name: 'Smoke Decoy ×3', line: 'Nataraja Rescue: a puff up the street, Seth-ji turns to look', gems: 10, adds: 3, power: true },
   };
   const PING = 12;
   // The streets, all free to play. (A street can be made Premium again with premium: true: its card then opens Premium.)
@@ -210,13 +221,16 @@
   let state = load(), stashes = [], hud = null, arc = null, raf = 0, shownView = -1, memo = newMemo(), clock = 0, lastT = 0;
   let aim = null, flying = [], marksKey = '', ads = []; // ads: the streets advertised on the shop's walls // aim: the cracker being aimed; flying: thrown ones in the air
   // The watch: the alert (0..100), the chase once it fills ({ t, lost }), when each watcher last noticed you, the last throw.
+  // Festival Street (the home screen's Play tile): no clock, the steal at your pace, friends can watch live. Off when a
+  // timed heist starts (the Challenges card, the picker's heist card).
+  let festival = false;
   let atStart = true; // just arrived on a street and not yet moved: hidden (see where)
-  let alert = 0, chase = null, noticed = {}, lastThrow = -99, aimAt = null, aimFrame = 0, graceTo = 0, pingTo = 0;
+  let alert = 0, chase = null, noticed = {}, lastThrow = -99, aimAt = null, aimFrame = 0, graceTo = 0, pingTo = 0, dashTo = 0;
 
   function fresh(day) {
     // A new day: new stashes and a new night's score; the bag, the kit, the street and walking carry over.
     if (state.day !== day) {
-      const keep = ['bag', 'best', 'seen', 'tut', 'walk', 'walkTip', 'bigBag', 'decoy', 'ping', 'charm', 'street', 'book', 'sets', 'trophies', 'heists', 'raceBest'];
+      const keep = ['bag', 'best', 'seen', 'tut', 'walk', 'walkTip', 'bigBag', 'decoy', 'ping', 'charm', 'street', 'book', 'sets', 'trophies', 'heists', 'raceBest', 'powers', 'story'];
       state = { ...Object.fromEntries(keep.map((k) => [k, state[k]])), day, taken: [], takenBy: {}, score: 0 };
       state.bag = state.bag || [];
     }
@@ -233,7 +247,7 @@
       + '<button type="button" data-open="book" aria-label="Book"><img src="assets/chor/ui/book.webp" alt="" aria-hidden="true"><small>Book</small></button>'
       + '<button type="button" class="chor-end" aria-label="End night"><img src="assets/chor/ui/end.webp" alt="" aria-hidden="true"><small>End</small></button></div></div>'
       + '<div class="chor-views" role="group" aria-label="Move to"></div>'
-      + '<div class="chor-race" hidden></div>'
+      + '<div class="chor-race" hidden></div><div class="chor-powers" role="group" hidden></div>'
       + '<canvas class="chor-mcv" aria-hidden="true"></canvas><div class="chor-marks"></div><div class="chor-pops"></div>'
       + '<div class="chor-ads"></div>'
       + '<div class="chor-stick" hidden aria-hidden="true"><i class="base"></i><i class="knob"></i></div>'
@@ -265,17 +279,22 @@
       if (e.target.closest('[data-walk]')) { setWalk(!w.walking); return; }
       if (e.target.closest('[data-catalog]')) { openCatalog(); return; }
       if (e.target.closest('[data-trophies]')) { openTrophies(); return; }
-      if (e.target.closest('[data-race]')) { if (race) endRace(false); else startRace(null); return; }
+      if (e.target.closest('[data-race]')) { if (race) endRace(false); else startRace(null, null, null, festival); return; }
+      if (e.target.closest('[data-live]')) { if (window.LUTSMela && LUTSMela.goLive) LUTSMela.goLive(G().street); return; }
       if (e.target.closest('[data-drone]')) { w.drone(); chosenView = -1; G().tick(); syncViews(); return; } // (the joystick brings you down)
       if (e.target.closest('[data-shop]')) { goStreet('chor-shop'); return; }
       const b = e.target.closest('[data-view]');
       if (b) { w.goView(+b.dataset.view); chosenView = +b.dataset.view; atStart = false; G().tick(); syncViews(); } // (gone to a spot: off the start)
     });
     stickPad(hud.querySelector('.chor-stick'));
+    // The chips row fades at its right edge while there is more to scroll to; none once at the end (or when it all fits).
+    const views = hud.querySelector('.chor-views'), viewsEnd = () => views.classList.toggle('at-end', views.scrollLeft + views.clientWidth >= views.scrollWidth - 4);
+    views.addEventListener('scroll', viewsEnd, { passive: true }); new MutationObserver(viewsEnd).observe(views, { childList: true }); window.addEventListener('resize', viewsEnd);
+    window.addEventListener('resize', placeHint);
     // The score card says what it counts when tapped (people asked what "chaos" and "found" mean)
     const stat = hud.querySelector('.chor-stat');
     stat.style.pointerEvents = 'auto'; stat.setAttribute('role', 'button'); stat.tabIndex = 0;
-    stat.addEventListener('click', () => G().toast(T('Chaos: points for the mischief your crackers cause (near people, stalls, roofs, the donkey). Found: today’s hidden stashes on this street.'), 5200));
+    stat.addEventListener('click', () => !(race && race.story) && G().toast(T('Chaos: points for the mischief your crackers cause (near people, stalls, roofs, the donkey). Found: today’s hidden stashes on this street.'), 5200));
     hud.querySelector('.chor-end').addEventListener('click', endNight);
     hud.querySelector('.chor-ads').addEventListener('click', (e) => { const b = e.target.closest('[data-ad]'); const a = b && ads[+b.dataset.ad]; if (a && a.id !== G().street) goStreet(a.id); });
     hud.querySelector('[data-open="kit"]').addEventListener('click', openKit);
@@ -289,23 +308,25 @@
       try { await sheetAct(b.dataset.caught || b.dataset.kit || b.dataset.street || b.dataset.cat); } finally { b.disabled = false; }
     });
     bag.addEventListener('click', (e) => { const t = e.target.closest('[data-tool]'); if (t) (t.dataset.tool === 'decoy' ? decoy : ping)(); });
+    hud.querySelector('.chor-powers').addEventListener('click', (e) => { const b = e.target.closest('[data-power]'); if (b) usePower(b.dataset.power); });
   }
   function syncViews() {
     const w = G().w3d, box = hud.querySelector('.chor-views');
     if (!w || !w.views) { box.innerHTML = ''; return; }
     // One bar, no modes: on a phone you always walk (the joystick), and a spot takes you there and stays lit until you
     // walk off. The shop lists its own spots only (to "Out to the street"; the bazaar's are behind its door).
-    const list = w.wares ? w.views.slice(0, 6) : w.views, key = `${w.id}|${list.length}`;
+    const list = w.wares ? w.views.slice(0, 6) : w.views, key = `${w.id}|${list.length}|${festival}`;
     if (box.dataset.key !== key) {
       box.dataset.key = key;
       // In the shop, its collection; on a street, the way into the shop (the streets are the Street button above).
       box.innerHTML = '<button type="button" class="chor-catbtn" data-catalog>🛍️ All crackers</button>' // (the 3D shop is off for now: SHOP_OFF)
         + (w.drone ? '<button type="button" data-drone>🚁 Drone view</button>' : '')
         + '<button type="button" class="chor-catbtn" data-race>🗝 Heist</button><button type="button" data-trophies>🏆 Trophies</button>'
+        + (festival ? `<button type="button" class="chor-live" data-live>📡 ${T('Invite to watch')}</button>` : '')
         + list.map((v, i) => `<button type="button" data-view="${i}">${v.name}</button>`).join('');
     }
     const dr = box.querySelector('[data-drone]'); if (dr) dr.setAttribute('aria-pressed', String(!!w.aerial));
-    const rb = box.querySelector('[data-race]'); if (rb) { rb.setAttribute('aria-pressed', String(!!race)); rb.textContent = race ? T('⏹ Stop heist') : T('🗝 Heist'); }
+    const rb = box.querySelector('[data-race]'); if (rb) { rb.setAttribute('aria-pressed', String(!!race)); rb.textContent = race ? T(race.story ? '⏹ Leave story' : '⏹ Stop heist') : festival ? T('🪔 Calm steal') : T('🗝 Heist'); }
     box.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(w.walking ? +b.dataset.view === chosenView : +b.dataset.view === w.view)));
     hud.querySelector('.chor-stick').hidden = !w.walking;
     if (w.walking) requestAnimationFrame(() => restStick()); // (once the pad is laid out)
@@ -325,8 +346,29 @@
     if (state.ping > 0) html += `<button type="button" class="chor-slot tool" data-tool="ping"><i aria-hidden="true">📡</i><small>Ping</small><em>${state.ping}</em></button>`;
     box.innerHTML = html;
     const daily = stashes.filter((o) => typeof o.key === 'number');
-    hud.querySelector('.chor-count').textContent = race ? `🗝 ${daily.filter(isTaken).length}/${daily.length} keys` : `${daily.filter(isTaken).length}/${daily.length} found today`; // (today's stashes in free play; the key pieces in a heist)
+    // In a story the chaos and the keys mean nothing: the card shows the chapter instead (its clues are on the pill).
+    const sto = race && race.story;
+    hud.classList.toggle('story', !!sto); hud.classList.toggle('racing', !!race); document.body.classList.toggle('chor-story', !!sto);
+    const cnt = hud.querySelector('.chor-count');
+    if (sto) cnt.innerHTML = `<b>${sto.ch.ico} ${T('Chapter {0}').replace('{0}', CHAPTERS.indexOf(sto.ch) + 1)}</b><small>${T(sto.ch.name)}</small>`; // (two lines: it fit cut short on one)
+    else cnt.textContent = race ? `🗝 ${daily.filter(isTaken).length}/${daily.length} keys` : `${daily.filter(isTaken).length}/${daily.length} found today`; // (today's stashes in free play; the key pieces in a heist)
     hud.querySelector('.chor-score').textContent = `${state.score}`;
+    syncPowers(); placeHint();
+  }
+  // The story's hint (the game's toast) sits right under the clue pill, left of the powers column and above the
+  // joystick and the bag, measured from where they really are (CSS vars on body; chor-story CSS reads them).
+  function placeHint() {
+    if (!hud || !(race && race.story)) return;
+    requestAnimationFrame(() => {
+      const r = (s) => { const e = hud.querySelector(s); return e && !e.hidden && e.offsetParent ? e.getBoundingClientRect() : null; };
+      const pill = r('.chor-race'), pw = r('.chor-powers'), st = r('.chor-stick'), bag = r('.chor-bag'), bs = document.body.style;
+      if (!pill) return;
+      hud.style.setProperty('--chor-pill-b', `${Math.round(pill.bottom)}px`); // (the powers column starts under the pill)
+      const top = pill.bottom + 8, foot = Math.min(st ? st.top : 1e4, bag ? bag.top : 1e4, innerHeight) - 8;
+      bs.setProperty('--chor-hint-top', `${Math.round(top)}px`);
+      bs.setProperty('--chor-hint-right', `${Math.round(pw ? innerWidth - pw.left + 6 : 12)}px`);
+      bs.setProperty('--chor-hint-maxh', `${Math.max(40, Math.round(foot - top))}px`);
+    });
   }
   // A ware on display: its picture stands on a step (world3d setWares); here, its tag (what you tap): its picture,
   // its name and its price chip (free, its gem value, or Premium).
@@ -354,9 +396,10 @@
     return c;
   }
   function markImage(s) {
-    const sign = s.vault ? treasureOfWeek()[2] : s.gate ? '🏁' : s.heist ? '🏪' : s.delivery ? '📦' : s.orb ? (s.rare ? '🎆' : '🌟') : s.diya ? '🪔' : s.rare ? '💎' : '🎁';
-    const edge = s.vault ? '#ffd700' : s.gate ? '#7dffc0' : s.heist ? '#ff8a3c' : s.delivery ? '#7fd3ff' : s.orb ? '#b9a4ff' : s.diya ? '#ffb347' : s.rare ? '#e9b8ff' : '#ffd27a';
-    const badge = s.vault || s.gate ? '' : s.rare && !G().premium() ? `${RARE_GEMS}💎` : !s.heist && leftIn(s) > 1 ? `×${leftIn(s)}` : '';
+    const tr = (race && race.treasure) || treasureOfWeek();
+    const sign = s.clue ? (s.dark ? '❔' : s.sign) : s.vault ? tr[2] : s.gate ? (race && race.story ? '🛕' : '🏁') : s.heist ? '🏪' : s.delivery ? '📦' : s.orb ? (s.rare ? '🎆' : '🌟') : s.diya ? '🪔' : s.rare ? '💎' : '🎁';
+    const edge = s.clue ? (s.dark ? '#8a7cff' : '#ffb347') : s.vault ? '#ffd700' : s.gate ? '#7dffc0' : s.heist ? '#ff8a3c' : s.delivery ? '#7fd3ff' : s.orb ? '#b9a4ff' : s.diya ? '#ffb347' : s.rare ? '#e9b8ff' : '#ffd27a';
+    const badge = s.vault || s.gate || s.clue ? '' : s.rare && !G().premium() ? `${RARE_GEMS}💎` : !s.heist && leftIn(s) > 1 ? `×${leftIn(s)}` : '';
     // Bright, like the old markers: a strong halo, a lit box with a thick rim, a big sign.
     // Drawn at twice its size on screen (256 px), so it stays sharp on a high-density phone.
     const c = document.createElement('canvas'), g = c.getContext('2d'); c.width = c.height = 256; g.scale(2, 2);
@@ -366,7 +409,7 @@
     if (round) { g.beginPath(); g.arc(64, 70, 40, 0, Math.PI * 2); } else rr(g, 20, 26, 88, 88, 22);
     const body = g.createLinearGradient(0, 26, 0, 114); body.addColorStop(0, '#5a3a9a'); body.addColorStop(1, '#2a1650');
     g.fillStyle = body; g.fill(); g.lineWidth = 7; g.strokeStyle = edge; g.stroke();
-    const pic = s.vault ? tImg(treasureOfWeek()[0]) : null;
+    const pic = s.vault && tr[3] !== 0 ? tImg(tr[0]) : null;
     if (pic && pic.complete && pic.naturalWidth) { g.save(); rr(g, 24, 30, 80, 80, 18); g.clip(); g.drawImage(pic, 24, 30, 80, 80); g.restore(); } // the vault: the week's treasure itself
     else {
       if (pic) pic.addEventListener('load', () => syncLabels(), { once: true }); // (the emoji until its picture is in)
@@ -433,7 +476,7 @@
     marksKey = '';
     syncLabels();
     const box = hud.querySelector('.chor-marks');
-    box.innerHTML = stashes.map((s, i) => (isTaken(s) ? '' : s.ware ? ware(s, i) : `<button type="button" class="chor-stash${s.rare ? ' rare' : ''}${s.heist ? ' heist' : ''}${s.delivery ? ' delivery' : ''}${s.orb ? ' orb' : ''}${s.diya ? ' diya' : ''}" data-stash="${i}" aria-label="${s.heist ? "Seth-ji's shop stock" : 'Hidden crackers'}">${s.rare && !G().premium() ? `<em>${RARE_GEMS}💎</em>` : !s.heist && leftIn(s) > 1 ? `<em>×${leftIn(s)}</em>` : ''}</button>`)).join('');
+    box.innerHTML = stashes.map((s, i) => (isTaken(s) ? '' : s.ware ? ware(s, i) : `<button type="button" class="chor-stash${s.rare ? ' rare' : ''}${s.heist ? ' heist' : ''}${s.delivery ? ' delivery' : ''}${s.orb ? ' orb' : ''}${s.diya ? ' diya' : ''}${s.vault ? ' vault' : ''}" data-stash="${i}" aria-label="${s.heist ? "Seth-ji's shop stock" : 'Hidden crackers'}">${s.rare && !G().premium() ? `<em>${RARE_GEMS}💎</em>` : !s.heist && leftIn(s) > 1 ? `<em>×${leftIn(s)}</em>` : ''}</button>`)).join('');
   }
 
   // ---------- Throwing ----------
@@ -458,7 +501,9 @@
       const nearScreen = p && Math.hypot(p[0] - sx, p[1] - sy) < Math.max(60, 1.6 * w.ppm(p[2]));
       if (w.donkeyAt(sx, sy) || nearGround || nearScreen) return { kind: 'donkey', x: back.x, y: back.y, z: back.z };
     }
-    const who = w.folkAt(sx, sy);
+    // In the story nobody on the street is a target (the hero turns Seth-ji with a cracker up the street, never at him):
+    // a tap on a person aims past them at the street like any other spot.
+    const who = !(race && race.story) && w.folkAt(sx, sy);
     if (who) {
       const f = w.watchers.find((o) => o.name === who);
       if (f && Math.hypot(f.x - cam.x, f.z - cam.z) <= THROW) return { kind: 'folk', who, x: f.x, y: 1, z: f.z };
@@ -569,7 +614,7 @@
       out.push({ sx: p[0], sy: p[1], d: p[2], name, kind });
     };
     for (const t of w.targets) seen(t.x, t.y || 0.5, t.z, t.name, 'target');
-    for (const o of w.watchers) seen(o.x, 1, o.z, o.name === 'keeper' ? 'Seth-ji' : o.name === 'man' ? 'Grandpa' : 'Dog', 'folk');
+    if (!(race && race.story)) for (const o of w.watchers) seen(o.x, 1, o.z, o.name === 'keeper' ? 'Seth-ji' : o.name === 'man' ? 'Grandpa' : 'Dog', 'folk'); // (not in the story: see aim)
     const b = w.donkeyBack(); if (b && !ride) seen(b.x, b.y, b.z, animal(w), 'donkey');
     const h = w.heading;
     for (const d of [5, 10, 16, 24]) seen(cam.x - Math.sin(h) * d, 0, cam.z - Math.cos(h) * d, `${d} m`, 'street');
@@ -675,7 +720,7 @@
       hits.push({ target: { name: 'Chain! A stash went up', x: s.x, y: 0.6, z: s.z }, pts: 150, mult: 1 });
     });
     for (const h of scoreLanding(to, clock, w.targets, memo)) hits.push(h);
-    if (hit.kind === 'folk') {
+    if (hit.kind === 'folk' && !(race && race.story)) { // (the story never pays for one at a person)
       w.splat(hit.who);
       hits.unshift({ target: { name: SPLAT[hit.who], x: to.x, y: 2.2, z: to.z }, pts: 90, mult: 1 });
       alert = Math.min(100, alert + 45); // they know exactly who did that
@@ -703,6 +748,7 @@
       if (total) { state.score += total; save(); syncBag(); }
       if (hits.some((h) => h.target.name.startsWith('Chain'))) syncMarks();
       if (g.w3d && to.kind !== 'folk') g.w3d.startle({ x: to.x, y: to.y || 0, z: to.z }, 1, 'ground');
+      heroStun(to.x, to.z);
     }, delay * 1000);
   }
   // A score that floats up from where it happened.
@@ -857,10 +903,10 @@
   const ease = (v) => Math.sign(v) * Math.min(1, Math.abs(v)) ** 1.5;
   const vel = { f: 0, r: 0, t: 0 }; // the walk and the turn, easing towards what the stick asks (no jump to full speed)
   function walkStep(dt, w) {
-    if (!w.walking) return;
-    let fwd = 0, right = 0, turn = 0, speed = keys.has('run') ? SPRINT : WALK;
+    if (!w.walking || (race && race.t0 === null)) return; // (standing still through the countdown)
+    let fwd = 0, right = 0, turn = 0, speed = keys.has('run') || clock < dashTo ? SPRINT : WALK; // (Vayu Dash: a sprint without the push)
     // The stick: up and down walk you, left and right turn you (a strong push forward runs).
-    if (stick.on) { fwd = ease(-stick.dy / STICK); const t = stick.dx / STICK; if (Math.abs(t) > 0.1) turn = -ease(t); if (-stick.dy / STICK > 0.92) speed = SPRINT; }
+    if (stick.on) { fwd = ease(-stick.dy / STICK); const t = stick.dx / STICK; if (Math.abs(t) > 0.1) turn = -ease(t); if (-stick.dy / STICK > 0.92 || clock < dashTo) speed = SPRINT; }
     if (keys.has('f')) fwd += 1;
     if (keys.has('b')) fwd -= 1;
     if (keys.has('l')) right -= 1;
@@ -889,7 +935,7 @@
     const cam = w.camera();
     for (let i = 0; i < stashes.length; i++) {
       const s = stashes[i];
-      if (!s || isTaken(s) || (s.rare && !race) || s.heist || s.delivery || s.ware) continue; // (in a race a rare one is walked into too)
+      if (!s || isTaken(s) || (s.rare && !race) || s.heist || s.delivery || s.ware || s.dark || s.gate) continue; // (in a race a rare one is walked into too)
       if (Math.hypot(s.x - cam.x, s.z - cam.z) > 1.6) continue;
       if (roomFor(s.type) <= 0 && !s.diya && !s.orb && !race) { if (clock - fullSaid > 4) { fullSaid = clock; G().toast('Your bag is full. Use a cracker first'); } return; }
       take(i);
@@ -918,10 +964,11 @@
       // He heads for where you are, stopping just short of you.
       if (k && !me.hide && chase.t > OI) {
         const dx = me.x - k.x, dz = me.z - k.z, d = Math.hypot(dx, dz) || 1;
-        w.hunt('keeper', me.x - (dx / d) * 1.6, me.z - (dz / d) * 1.6, escaping ? ESCAPE_RUN : RUN);
+        if (escaping && race.story) heroCue(w, k, d);
+        w.hunt('keeper', me.x - (dx / d) * 1.6, me.z - (dz / d) * 1.6, (escaping ? ESCAPE_RUN : RUN) * (race && race.story && clock < race.story.slowTo ? HERO_SLOW : 1));
       }
       chase.lost = me.hide ? chase.lost + dt : 0;
-      if (k && !me.hide && me.eye <= HIGH && Math.hypot(me.x - k.x, me.z - k.z) < CATCH) { if (escaping) dropTreasure(w, me); else caught(w); }
+      if (k && !me.hide && me.eye <= HIGH && Math.hypot(me.x - k.x, me.z - k.z) < CATCH) { if (escaping) (race.story && !race.story.comeback ? comeback : dropTreasure)(w, me); else caught(w); }
       else if (!escaping && (chase.lost > LOSE || chase.t > CHASE)) {
         w.calm('keeper'); chase = null; alert = 55;
         g.toast(me.hide ? 'Phew. He lost you' : 'He gave up. For now');
@@ -933,27 +980,20 @@
     bar.classList.toggle('hidden', me.hide);
     bar.setAttribute('aria-label', me.hide ? 'Hidden' : `Alert ${Math.round(alert)}%`);
   }
-  // Caught: a finger wagged in your face. Then a choice: slip away (a video), keep your bag (a lucky charm, or gems), or
+  // Caught: a finger wagged in your face. Then a choice: keep your bag with a lucky charm or gems, or
   // hand it over and go back to the corner.
   function caught(w) {
     const g = G();
+    if (race && race.story) race.story.caught++;
     w.nab('keeper');
     chase = null; alert = 0; graceTo = clock + 60; // nobody looks while you decide
     hud.classList.add('caught'); setTimeout(() => hud && hud.classList.remove('caught'), 1800);
     g.buzz(80);
     if (!state.bag.length) { g.toast('Caught! Seth-ji wagged his finger at you. Off you go'); sendBack(); return; }
-    const n = state.bag.length, video = g.canVideo(), charm = (state.charm || 0) > 0;
+    const n = state.bag.length, charm = (state.charm || 0) > 0;
     sheet(`<b>Caught by Seth-ji!</b><p>"Hand over ${n > 1 ? `those ${n} crackers` : 'that cracker'}, chor!"</p>`
-      + (video ? `<button type="button" class="btn primary" data-caught="video">${g.premium() ? '👑 Slip away (Premium)' : '▶ Watch a video to slip away'}</button>` : '')
-      + `<button type="button" class="btn ${video ? 'ghost' : 'primary'}" data-caught="keep">${charm ? `🍀 Use a lucky charm (${state.charm} left)` : `Keep my bag · ${KIT.charm.gems / 2} 💎`}</button>`
+      + `<button type="button" class="btn primary" data-caught="keep">${charm ? `🍀 Use a lucky charm (${state.charm} left)` : `Keep my bag · ${KIT.charm.gems / 2} 💎`}</button>`
       + '<button type="button" class="btn ghost" data-caught="give">Hand it over</button>', async (act) => {
-      if (act === 'video') {
-        if (!(await g.watchVideo('escape'))) return false; // no reward: the choice stays open
-        closeSheet(); graceTo = clock + GRACE; alert = 30;
-        if (G().w3d) G().w3d.calm('keeper');
-        g.toast('You slipped away! Seth-ji is still scratching his head');
-        return true;
-      }
       if (act === 'keep') {
         if (charm) state.charm--;
         else if (!g.spend(KIT.charm.gems / 2, 'Keep your bag')) return false;
@@ -1025,15 +1065,13 @@
   }
   function openKit() {
     const g = G(), rows = Object.entries(KIT).map(([id, k]) => {
-      const owned = id === 'bigBag' ? (state.bigBag || g.premium()) : 0, have = id === 'bigBag' ? '' : `<small>You have ${state[id] || 0}</small>`;
+      const owned = id === 'bigBag' ? (state.bigBag || g.premium()) : 0, have = id === 'bigBag' ? '' : `<small>You have ${k.power ? powers()[id] || 0 : state[id] || 0}</small>`;
       return `<button type="button" class="chor-kit" data-kit="${id}" ${owned ? 'disabled' : ''}><b>${k.name}</b><small>${k.line}</small>${have}<span>${owned ? '✓' : `${k.gems} 💎`}</span></button>`;
     }).join('');
-    const video = g.canVideo() ? '<button type="button" class="chor-kit" data-kit="video"><b>▶ A box of 4 crackers</b><small>Watch a short video and it drops at your feet</small><span>Free</span></button>' : '';
-    sheet(`<b>Chor's kit</b><p>${g.gems()} 💎</p>${video}${rows}`, async (id) => {
-      if (id === 'video') { if (!(await g.watchVideo('box'))) return false; closeSheet(); dropBox(4, 'Video box!'); return true; }
+    sheet(`<b>Chor's kit</b><p>${g.gems()} 💎</p>${rows}`, async (id) => {
       const k = KIT[id];
       if (!k || !g.spend(k.gems, k.name)) return false;
-      if (k.once) state[id] = true; else state[id] = (state[id] || 0) + k.adds;
+      if (k.once) state[id] = true; else if (k.power) powers()[id] = (powers()[id] || 0) + k.adds; else state[id] = (state[id] || 0) + k.adds;
       save(); syncBag(); g.tick(); g.toast(`${k.name} in your kit`);
       openKit();
       return true;
@@ -1053,11 +1091,11 @@
     g.setStreet(id);
     whenReady();
   }
-  function decoy() {
+  function decoy(smoke) { // smoke: the story's Smoke Decoy, paid from its own count
     const g = G(), w = g.w3d;
-    if (!w || !(state.decoy > 0)) return;
+    if (!w || !(smoke || state.decoy > 0)) return;
     const cam = w.camera(), h = w.heading, x = Math.max(-5, Math.min(5, cam.x - Math.sin(h) * 14)), z = cam.z - Math.cos(h) * 14;
-    state.decoy--; save(); syncBag();
+    if (!smoke) state.decoy--; save(); syncBag();
     w.lure(x, z); g.bang(x, 0.5, z, 0.6);
     alert = Math.max(0, alert - 45);
     if (chase) { w.calm('keeper'); chase = null; g.toast('Decoy! Seth-ji turned to look'); } else g.toast('Decoy! Everyone looks the other way');
@@ -1232,6 +1270,7 @@
     if (!anywhere && Math.hypot(s.x - cam.x, s.z - cam.z) > reach(w)) { g.toast(w.walking ? 'Walk right up to it first' : 'Too far. Move closer first'); return; }
     if (s.vault) { grabTreasure(s, w); return; }
     if (s.gate) return;
+    if (s.clue) { storyClue(s, w); return; }
     if (s.diya) { luckyDiya(s); return; }
     const room = s.heist ? freeSlots() * STACK + kinds().reduce((a, t) => a + Math.max(0, STACK - countOf(t)), 0) : roomFor(s.type);
     if (room <= 0 && (!race || s.heist)) { g.toast('Your bag is full. Use a cracker first'); return; } // (in a race a find always counts: what fits goes in the bag)
@@ -1453,6 +1492,9 @@
         if (e.target.closest('[data-pick-how]')) { openTutorial(); return; }
         const hz = e.target.closest('[data-pick-heist]');
         if (hz) { closePicker(); raceFromHome(hz.dataset.pickHeist); return; }
+        if (e.target.closest('[data-pick-wall]')) { wallOfHonour(pickerSheet); return; }
+        const sz = e.target.closest('[data-pick-story]');
+        if (sz) { chapterPick(sz.dataset.pickStory, sz.dataset.storyStreet); return; }
         const c = e.target.closest('[data-pick]');
         if (!c) return;
         c.classList.add('chosen');
@@ -1466,7 +1508,7 @@
       return `<button type="button" class="chor-pcard${big ? ' big' : ''}${here ? ' here' : ''}" data-pick="${t.id}">
         <img src="assets/chor/thumb/${t.id}.webp" alt="" loading="${big ? 'eager' : 'lazy'}" decoding="async" onerror="this.src='assets/chor/thumb/chor-street.webp'">
         <span class="chor-pshade"></span>
-        ${here ? `<em class="chor-ptag now">${T('You are here')}</em>` : big ? `<em class="chor-ptag">${T('Continue')}</em>` : fresh ? `<em class="chor-ptag new">${T('New')}</em>` : ''}
+        ${here ? `<em class="chor-ptag now">${T('You are here')}</em>` : big ? `<em class="chor-ptag">${T(Object.keys(seen).length || g.on ? 'Continue' : 'Start here')}</em>` : fresh ? `<em class="chor-ptag new">${T('New')}</em>` : ''}
         <span class="chor-ptext"><b>${street}</b>${mark ? `<small>${mark}</small>` : ''}
           <span class="chor-pchips"><i>📍 ${T(city)}</i><i>${icon} ${T(beast)}</i>${big ? `<i>✦ ${T('Free')}</i>` : ''}</span></span>
         ${big ? `<span class="chor-pgo">${T(here ? 'Back to the street' : 'Play')} ›</span>` : ''}
@@ -1480,6 +1522,7 @@
       <div class="chor-pscroll">
         <p class="chor-plede">${T('Sneak in, find the hidden crackers, light them up, and don\'t get caught by Seth-ji.')}</p>
         ${(() => { const tr = treasureOfWeek(), got = (state.trophies || {})[tr[0]] || 0; return `<button type="button" class="chor-pheist" data-pick-heist="${last.id}"><i aria-hidden="true">${tPic(tr)}</i><span><small>🏆 ${T("This week's heist")}${got ? ` · ${T(`stolen ×${got}`)}` : ''}</small><b>${T(`Steal the ${tr[1]}`)}</b><em>${T('Find the 9 key pieces, open the vault, run!')} ›</em></span></button>`; })()}
+        ${storyCard()}
         ${card(last, true)}
         ${!SHOP_OFF && last.id !== 'chor-shop' ? `<button type="button" class="chor-pshop" data-pick="chor-shop"><img src="assets/chor/thumb/chor-shop.webp" alt="" loading="lazy"><span><small>${T('New')} · ${T('Every cracker on display')}</small><b>${T("Light Up the Skies · Seth-ji's cracker shop")}</b><i>${T('Walk in and pick any cracker')} ›</i></span></button>` : ''}
         <h3 class="chor-phead">${T('All streets')} <span>${STREETS.length}</span></h3>
@@ -1503,6 +1546,7 @@
   ];
   const ART = { find: ['🎁', '✨', '💎'], throw: ['🧨', '', '💥'], fire: ['🎆', '🔥', '✨'], ride: ['🫏', '🧺', '🎇'], hide: ['👁️', '📦', '🙈'] };
   function openTutorial(then) {
+    if (window.LUTSTrack) LUTSTrack('tutorial_begin', { flow: 'street' });
     if (!tut) {
       tut = document.createElement('div');
       tut.className = 'chor-tut'; tut.setAttribute('role', 'dialog'); tut.setAttribute('aria-modal', 'true');
@@ -1534,11 +1578,12 @@
     tut.onpointerup = (e) => { if (x0 == null) return; const dx = e.clientX - x0; x0 = null; if (Math.abs(dx) < 50) return; if (dx < 0 && i < STEPS.length - 1) { i++; draw(); } else if (dx > 0 && i) { i--; draw(); } };
     draw(); tut.hidden = false;
   }
-  function closeTutorial() { if (!tut || tut.hidden) return false; tut.hidden = true; state.tut = true; tutDone = true; save(); return true; }
+  function closeTutorial() { if (!tut || tut.hidden) return false; if (window.LUTSTrack) LUTSTrack('tutorial_complete', { flow: 'street' }); tut.hidden = true; state.tut = true; tutDone = true; save(); return true; }
 
   function start(pick) {
     const g = G();
     if (!g) return;
+    if (window.LUTSTrack) { LUTSTrack.enter('festival_street'); LUTSTrack.level('street', 'roam'); }
     if (state.raceSaved) { state.taken = state.raceSaved.taken || []; state.left = state.raceSaved.left || {}; delete state.raceSaved; save(); } // (a race left mid-way)
     fresh(g.dayKey());
     g.start();
@@ -1585,6 +1630,7 @@
     stashes.push(...dayExtras(seed, w.zone, g.skyTypes(), g.premiumSky()));
     if (!w.wares) { ads = []; hud.querySelector('.chor-ads').innerHTML = ''; }
     if (w.heist) stashes.push({ key: 'heist', heist: true, x: w.heist.x, z: w.heist.z, loot: heistLoot(seed, g.types(), g.premiumItem), count: HEIST });
+    if (race && race.story) stashes.push(...storyMarks(w));
     refillAt = clock + REFILL; syncLoot();
     if (canWalk(w)) w.setWalk(true); // always on foot (a TV, with no joystick, keeps the spots)
     hud.style.setProperty('--chor-acc', ACCENT[g.street] || '#ff5fa2'); document.body.style.setProperty('--chor-acc', ACCENT[g.street] || '#ff5fa2');
@@ -1599,27 +1645,43 @@
   let race = null; // { day, street, target: { n, p, f, t } | null, t0, saved }
   const fmtT = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}.${Math.floor((sec % 1) * 10)}`;
   const raceScore = (sec) => Math.max(1, 20000 - Math.round(sec * 4)); // (a board keeps the highest: a faster time scores more)
-  function startRace(target, day, mela) {
+  function startRace(target, day, mela, calm = false) {
     const g = G(), w = g && g.w3d;
     if (!w || race) return;
+    if (window.LUTSTrack) { LUTSTrack.enter('heist'); LUTSTrack.level('heist', mela ? 'mela' : calm ? 'calm' : day ? 'daily' : 'week'); }
     closeSheet();
-    race = { day: day || state.day, street: g.street, target, t0: null, mela: mela || null, found: -1, phase: 'keys', treasure: treasureOfWeek() }; tImg(race.treasure[0]); // (its picture ready for the vault) // (mela: a Mela Night room's live race, rooms.js)
+    // The same start for everyone: a 3-2-1 countdown, standing still, and the clock runs from GO (not from a first step,
+    // which let a player look around for the stashes first).
+    race = { day: day || state.day, street: g.street, target, calm, t0: calm ? clock : null, goAt: calm ? clock : clock + COUNT, shownCount: calm ? 0 : -1, mela: mela || null, found: -1, phase: 'keys', treasure: treasureOfWeek() }; tImg(race.treasure[0]); // (its picture ready for the vault) // (mela: a Mela Night room's live race, rooms.js)
     state.raceSaved = { taken: state.taken, left: state.left || {}, street: g.street }; // (back afterwards, even if the app is closed mid-race)
     state.taken = []; state.left = {}; save();
     flying = []; aim = null; chase = null; alert = 0; graceTo = clock + GRACE; atStart = true;
     w.goView(0); chosenView = -1;
     whenReady(); syncViews();
     hud.querySelector('.chor-race').hidden = false;
-    g.toast(target ? T(`Beat ${target.n || 'your friend'}: ${fmtT(target.t)}. Go!`) : T(`🗝 Find the 9 key pieces, then steal the ${race.treasure[1]}! The clock starts with your first step`), 3600);
+    g.toast(calm ? T(`🪔 Find the 9 key pieces, then steal the ${race.treasure[1]}. No clock: take your time`) : target ? T(`Beat ${target.n || 'your friend'}: ${fmtT(target.t)}. Go!`) : T(`🗝 Find the 9 key pieces, then steal the ${race.treasure[1]}!`), 3600);
+  }
+  const COUNT = 3; // seconds of 3-2-1 before a heist's clock starts
+  // The countdown's big number in the middle of the street (3, 2, 1, GO!); it fades on its own.
+  function countdown(text) {
+    let el = hud.querySelector('.chor-go321');
+    if (!el) { el = document.createElement('div'); el.className = 'chor-go321'; el.setAttribute('aria-live', 'assertive'); hud.append(el); }
+    el.textContent = text; el.classList.remove('go', 'pop'); void el.offsetWidth;
+    el.classList.add('pop'); if (!/^\d$/.test(text)) el.classList.add('go');
+    G().buzz(text.length === 1 ? 20 : 60);
   }
   function raceStep() {
     if (!race) return;
-    if (race.t0 === null && !atStart) race.t0 = clock;
+    if (race.t0 === null) {
+      const n = Math.ceil(race.goAt - clock);
+      if (n !== race.shownCount) { race.shownCount = n; countdown(n > 0 ? String(n) : T('GO!')); }
+      if (n <= 0) { race.t0 = race.goAt; atStart = false; }
+    }
     const sec = race.t0 === null ? 0 : clock - race.t0, daily = stashes.filter((o) => typeof o.key === 'number');
     const left = daily.filter((o) => !isTaken(o)).length;
     const pill = hud.querySelector('.chor-race');
-    const stage = race.phase === 'escape' ? T('🚨 Run to the gate!') : race.phase === 'vault' ? `🔓 ${T('Open the vault')}` : `🗝 ${daily.length - left}/${daily.length}`;
-    const txt = `⏱ ${fmtT(sec)}${race.target ? ` · ${T('to beat')} ${fmtT(race.target.t)}` : ''} · ${stage}`;
+    const stage = race.story ? (race.phase === 'escape' ? T('🚨 Run to the temple steps!') : `${race.story.ch.ico} ${T('Clue')} ${Math.min(3, race.clue + 1)}/3 · ${T(race.story.ch.clues[Math.min(2, race.clue)][2])}`) : race.phase === 'escape' ? T('🚨 Run to the gate!') : race.phase === 'vault' ? `🔓 ${T('Open the vault')}` : `🗝 ${daily.length - left}/${daily.length}`;
+    const txt = race.story ? stage : race.calm ? `🪔 ${T('No clock')} · ${stage}` : `⏱ ${fmtT(sec)}${race.target ? ` · ${T('to beat')} ${fmtT(race.target.t)}` : ''} · ${stage}`;
     pill.classList.toggle('escape', race.phase === 'escape');
     if (pill.textContent !== txt) pill.textContent = txt;
     if (race.mela && race.found !== daily.length - left) { race.found = daily.length - left; race.mela.progress(race.found, daily.length, sec); }
@@ -1632,13 +1694,18 @@
   // The trophy room: every treasure there is to steal (one a week), how many times you've got away with each, this
   // week's, and the way to the Master Thief frame.
   function openTrophies() {
-    const now = treasureOfWeek(), got = state.trophies || {}, n = state.heists || 0;
-    const cards = TREASURES.map(([id, name]) => `<div class="chor-trophy${got[id] ? ' got' : ''}${id === now[0] ? ' now' : ''}"><i>${tPic([id])}</i><b>${T(name)}</b><small>${got[id] ? `×${got[id]}` : id === now[0] ? T('This week') : T('Not yet')}</small></div>`).join('');
+    const now = treasureOfWeek(), timed = state.trophies || {}, calm = state.calm || {}, n = state.heists || 0;
+    const got = {}; for (const [id] of TREASURES) got[id] = (timed[id] || 0) + (calm[id] || 0);
+    const times = (id) => `${timed[id] ? `×${timed[id]}` : ''}${timed[id] && calm[id] ? ' ' : ''}${calm[id] ? `🪔×${calm[id]}` : ''}`;
+    // Each one says when it comes: this week, in N days (the next), or in N weeks.
+    const days = Math.max(1, Math.ceil((nextChange() - Date.now()) / 864e5));
+    const when = (id) => { const k = weeksUntil(id); return k === 0 ? T('This week') : k === 1 ? (days === 1 ? T('Tomorrow') : T(`In ${days} days`)) : T(`In ${k} weeks`); };
+    const cards = TREASURES.map(([id, name, ico, pic]) => `<div class="chor-trophy${got[id] ? ' got' : ''}${id === now[0] ? ' now' : ''}"><i>${tPic([id, name, ico, pic])}</i><b>${T(name)}</b><small>${got[id] && id !== now[0] ? `${times(id)} · ${when(id)}` : got[id] ? times(id) : when(id)}</small></div>`).join('');
     sheet(`<b>🏆 ${T('Trophy room')}</b><p class="chor-cat-note">${T(`This week's treasure: ${now[1]}. Race any street: find the 9 key pieces, open the vault, get it to the gate.`)}</p>`
-      + `<div class="chor-trophies">${cards}</div>`
+      + `<div class="chor-trophies">${cards}</div><p class="chor-cat-note">${T('One treasure a week: come back every Monday to steal the next.')}</p>`
       + `<p class="chor-thief">${n >= THIEF_HEISTS ? T('🎭 Master Thief frame unlocked') : T(`🎭 Master Thief frame: ${n}/${THIEF_HEISTS} heists`)}</p>`
-      + `<div class="chor-card-btns"><button type="button" class="btn primary" data-kit="race-go">⏱ ${T('Start a heist')}</button></div>`, (act) => {
-      if (act === 'race-go') { closeSheet(); startRace(null); return true; }
+      + `<div class="chor-card-btns"><button type="button" class="btn primary" data-kit="race-go">${festival ? `🪔 ${T('Calm steal')}` : `⏱ ${T('Start a heist')}`}</button></div>`, (act) => {
+      if (act === 'race-go') { closeSheet(); startRace(null, null, null, festival); return true; }
       return true;
     });
     hud.querySelector('.chor-sheet').classList.add('catalog');
@@ -1660,26 +1727,52 @@
     if (!race || race.phase !== 'vault') return;
     empty(s); save();
     race.phase = 'escape';
-    if (!stashes.some((o) => o.gate)) { const v = (w.views && w.views[0]) || { x: 0, z: 8 }; stashes.push({ key: 'gate', gate: true, x: v.x, z: v.z }); }
+    if (!stashes.some((o) => o.gate)) { const v = race.story ? templeSteps(w) : (w.views && w.views[0]) || { x: 0, z: 8 }; stashes.push({ key: 'gate', gate: true, x: v.x, z: v.z }); }
     syncMarks();
     chase = { t: 0, lost: 0 }; alert = 100; graceTo = 0;
     w.notice('keeper', s.x, s.z);
     hud.classList.add('escaping');
     g.buzz(60); g.tick();
-    g.toast(T(`🚨 You have the ${race.treasure[1]}! RUN to the gate 🏁`), 4200);
+    g.toast(race.story ? T(race.story.ch.grab) : T(`🚨 You have the ${race.treasure[1]}! RUN to the gate 🏁`), 4200);
   }
-  // Caught with it: he snatches it back and it drops where you stand; grab it again.
-  function dropTreasure(w, me) {
+  // Caught with it: he snatches it back and it drops where you stand; grab it again. (held: the comeback sheet already
+  // counted the catch and he already wagged his finger.)
+  function dropTreasure(w, me, held) {
     const g = G(), s = stashes.find((o) => o.vault);
-    w.nab('keeper');
+    if (!held) w.nab('keeper');
     chase = null; alert = 0; graceTo = clock + 4;
     if (!s || !race) return;
+    if (race.story && !held) race.story.caught++;
     state.taken = state.taken.filter((k) => k !== 'vault');
     s.x = me.x; s.z = me.z;
     race.phase = 'vault';
     hud.classList.remove('escaping');
     syncMarks(); g.buzz(80);
-    g.toast(T('Seth-ji grabbed it! It fell at your feet. Snatch it back'), 3600);
+    g.toast(T(race.story ? 'Seth-ji thinks you stole it! It fell at your feet. Grab it and run' : 'Seth-ji grabbed it! It fell at your feet. Snatch it back'), 3600);
+  }
+  // The story's second chance: the first time Seth-ji grabs it on a run, hold on with Premium or a
+  // lucky charm and run on with a 3 s start, or let it fall as every later catch does. Nobody looks, and the stars'
+  // clock waits, while you choose. With neither Premium nor a charm there is
+  // nothing to choose, so it just falls.
+  const COMEBACK_GRACE = 3;
+  function comeback(w, me) {
+    const g = G(), r = race, premium = g.premium(), charm = (state.charm || 0) > 0, at = clock, spot = { x: me.x, z: me.z };
+    r.story.comeback = 1;
+    if (!premium && !charm) { dropTreasure(w, me); return; }
+    w.nab('keeper'); r.story.caught++;
+    chase = null; alert = 0; graceTo = clock + 60; // nobody looks while you decide
+    hud.classList.add('caught'); setTimeout(() => hud && hud.classList.remove('caught'), 1800);
+    g.buzz(80);
+    const held = (line) => { r.t0 += clock - at; closeSheet(); graceTo = clock + COMEBACK_GRACE; alert = 30; if (G().w3d) G().w3d.calm('keeper'); g.toast(T(line)); return true; };
+    sheet(`<b>${T('Seth-ji grabbed it! Keep running?')}</b><p>${T('Hold on to it and run for the temple steps, or let it fall at your feet.')}</p>`
+      + (premium ? `<button type="button" class="btn primary" data-caught="premium">👑 ${T('Keep it (Premium)')}</button>` : '')
+      + (charm ? `<button type="button" class="btn ${premium ? 'ghost' : 'primary'}" data-caught="charm">🍀 ${T('Use a lucky charm ({0} left)').replace('{0}', state.charm)}</button>` : '')
+      + `<button type="button" class="btn ghost" data-caught="fall">${T('Let it fall')}</button>`, async (act) => {
+      if (race !== r) { closeSheet(); return true; } // (the run ended under the sheet)
+      if (act === 'premium') return held('You held on! Run for the temple steps');
+      if (act === 'charm') { state.charm--; save(); return held('Your lucky charm held! Run for the temple steps'); }
+      r.t0 += clock - at; closeSheet(); dropTreasure(w, spot, true); return true;
+    });
   }
   // A heist done: the treasure goes in the trophy room; five heists earn the Master Thief frame.
   function awardTreasure(r) {
@@ -1691,21 +1784,510 @@
     if (state.heists === THIEF_HEISTS && window.LUTSBoards && LUTSBoards.earnFrame) LUTSBoards.earnFrame('thief');
     if (r.mela) setTimeout(() => g.toast(T(`🏆 The ${t[1]} is yours! It's in your trophy room`), 3800), 400); // (alone, the result card says it)
   }
+  // A calm steal (Festival Street): in the trophy room with a 🪔, never on the timed boards or toward Master Thief.
+  function awardCalm(r) {
+    const t = r.treasure || treasureOfWeek();
+    state.calm = state.calm || {};
+    state.calm[t[0]] = (state.calm[t[0]] || 0) + 1;
+    save();
+  }
+  function calmResult(r) {
+    const tr = r.treasure || treasureOfWeek();
+    sheet(`<b>🪔 ${T('A calm steal!')}</b><p class="chor-heist-prize"><i>${tPic(tr)}</i>${T(`You stole the ${tr[1]}!`)}</p><p class="chor-cat-note">${T('It’s in your trophy room. Race the clock in Street Heist to get on the weekly board.')}</p>`
+      + `<div class="chor-card-btns"><button type="button" class="btn ghost" data-kit="trophies">🏆 ${T('Trophy room')}</button><button type="button" class="btn primary" data-kit="race-timed">⏱ ${T('Street Heist')}</button></div>`, (act) => {
+      if (act === 'trophies') { openTrophies(); return true; }
+      if (act === 'race-timed') { closeSheet(); festival = false; syncViews(); startRace(null); return true; }
+      return true;
+    });
+  }
   function endRace(finished, sec) {
     const r = race; race = null;
     if (!r) return;
-    if (finished && window.LUTSGoals) LUTSGoals.tick('race');
-    if (finished) awardTreasure(r);
+    if (window.LUTSTrack) LUTSTrack.levelEnd(r.story ? 'story' : 'heist', finished ? 'win' : 'quit');
+    if (r.story) PatakaChor.onBang = r.story.hook;
+    if (finished && window.LUTSGoals && !r.story) LUTSGoals.tick('race');
+    if (finished && r.story) { const st = storyState(), id = r.story.ch.id; st[id] = (st[id] || 0) + 1; r.story.sec = clock - r.t0; r.story.score = storyStars(r); }
+    else if (finished) (r.calm ? awardCalm : awardTreasure)(r);
+    // My sky (a Mela Night race is kept by rooms.js)
+    if (finished && window.LUTSTimeline && !r.mela) {
+      const thumb = `assets/chor/thumb/${r.street}.webp`;
+      if (r.story) LUTSTimeline.add({ kind: 'story', icon: r.story.ch.ico, line: 'Story: {0} · chapter {1} done', args: [r.story.ch.name, CHAPTERS.indexOf(r.story.ch) + 1], thumb, key: `story:${r.story.ch.id}`, within: 60000 });
+      else LUTSTimeline.add({ kind: 'heist', icon: '🏃', line: r.calm ? 'Festival Street: a calm steal' : 'Street Heist in {0}', args: [fmtT(sec)], thumb });
+    }
     hud.classList.remove('escaping');
     const g = G();
     // What you'd found today comes back.
     if (state.raceSaved) { state.taken = state.raceSaved.taken || []; state.left = state.raceSaved.left || {}; delete state.raceSaved; }
     save();
-    hud.querySelector('.chor-race').hidden = true;
+    hud.querySelector('.chor-race').hidden = true; dashTo = 0; syncBag();
     syncViews(); whenReady();
     if (r.mela) { r.mela.done(finished, sec); return; } // the room shows its own result
     if (!finished) return;
-    heistFinale(r, () => raceResult(r, sec));
+    if (r.story) { pendStory(r); storyFinale(r, () => storyResult(r)); return; }
+    heistFinale(r, () => (r.calm ? calmResult(r) : raceResult(r, sec)));
+  }
+  // ---------- Nataraja Rescue: a story on the temple streets ----------
+  // On the eve of Karthigai Deepam thieves take the temple's bronze Nataraja. A heist run backwards: no clock, three
+  // clues instead of nine key pieces (their tracks, seen only once a cracker lights them; a bell they dropped; their
+  // cart, with the Nataraja under the sacks), then Seth-ji takes you for the thief and you run it to the temple steps,
+  // where the lamps are lit. The temple is the backdrop and the goal, never a target: the clues and the steps are on
+  // the street, and the finale's fountains stand on the street before them. Free, like every street.
+  const STORY_STREETS = ['chor-thanjavur', 'chor-meenakshi'];
+  // Each clue: its key, its sign, what the pill says to do, what finding it says, where it is (half: the stalls' distance from the middle).
+  const STORY_CLUES = [
+    ['tracks', '👣', 'Light up the dark patch', 'Ash footprints! The thieves went up the street', (h) => ({ x: -1.5, z: 10 })],
+    ['bell', '🔔', 'Find what they dropped', 'A temple bell, dropped in a hurry. They went this way', (h) => ({ x: -h + 3.5, z: -0.5 })],
+    ['cart', '🛒', 'Search their cart', 'Under the sacks in the cart: the bronze Nataraja!', (h) => ({ x: h - 4.4, z: -4.2 })],
+  ];
+  // Chapter 2's and 3's clues, each in its own spots on the street so the chapter plays differently, always on up the
+  // street towards the temple (the way you face): the peacock lamp's trail goes deep, so its run is short and the
+  // finding long; the Deepam lamp's cart stands near the corner, so its run is the whole street.
+  const PEACOCK_CLUES = [
+    ['petals', '🌼', 'Light up the jasmine trail', 'Jasmine petals! The thieves ran up the street with flowers on their feet', (h) => ({ x: 2, z: 2 })],
+    ['anklet', '🔔', 'Find what they dropped', 'A silver anklet bell, dropped on the run. They went this way', (h) => ({ x: -h + 3.5, z: -9 })],
+    ['basket', '🧺', 'Search the flower basket', 'Under the jasmine in a flower-seller’s basket: the silver peacock lamp!', (h) => ({ x: h - 4.4, z: -19 })],
+  ];
+  const DEEPAM_CLUES = [
+    ['drips', '💧', 'Light up the oil drips', 'Oil drips shining in the light! The thieves went up the street', (h) => ({ x: 2.5, z: 13 })],
+    ['wicks', '🧵', 'Find what they dropped', 'A bundle of cotton wicks, dropped in a hurry. They went this way', (h) => ({ x: -h + 3.6, z: 7 })],
+    ['oilcart', '🛢️', 'Search the oil merchant’s cart', 'Behind the oil tins in the merchant’s cart: the golden Deepam lamp!', (h) => ({ x: h - 4.4, z: 1.5 })],
+  ];
+  const LIGHT_R = 7; // metres from the dark tracks a cracker must go off to show them
+  const halfOf = (w) => (w.zone ? w.zone.x1 + 1 : 8.5);
+  const templeSteps = (w) => { const b = w.bounds || { z0: -39 }; return { x: 0, z: b.z0 + 3 }; };
+  // The story's markers for where it is: the clue to find next, or the Nataraja (where it lies) and the temple steps.
+  function storyMarks(w) {
+    const r = race, out = [];
+    if (r.phase === 'clues') {
+      const clues = r.story.ch.clues, [key, sign] = clues[r.clue], at = clues[r.clue][4](halfOf(w));
+      out.push({ key: `clue-${key}`, clue: true, sign, dark: r.clue === 0, ...at });
+    } else {
+      out.push({ key: 'vault', vault: true, x: r.story.at.x, z: r.story.at.z });
+      if (r.phase === 'escape') out.push({ key: 'gate', gate: true, ...templeSteps(w) });
+    }
+    return out;
+  }
+  function storyFound(s, w) {
+    const g = G(), r = race, clues = r.story.ch.clues, [, , , line] = clues[r.clue];
+    empty(s); save();
+    stashes = stashes.filter((o) => o !== s);
+    g.buzz(40); g.tick();
+    if (w.light) w.light('#ffd27a', 1.4, { x: s.x, y: 1, z: s.z });
+    pop({ x: s.x, y: 2.2, z: s.z }, `${r.story.ch.ico} ${T(line)}`, true);
+    g.toast(T(line), 3600);
+    if (++r.clue < clues.length) { stashes.push(...storyMarks(w)); syncMarks(); return; }
+    // The last clue: what they took is in your hands, and Seth-ji, seeing it, takes you for the thief.
+    r.phase = 'vault'; r.story.at = { x: s.x, z: s.z };
+    const v = { key: 'vault', vault: true, x: s.x, z: s.z };
+    stashes.push(v); syncMarks();
+    setTimeout(() => { if (race === r && r.phase === 'vault') grabTreasure(v, w); }, 1400);
+  }
+  function storyClue(s, w) {
+    if (!race || !race.story) return;
+    if (s.dark) { G().toast(T('Too dark to see. Light a cracker right here')); return; }
+    storyFound(s, w);
+  }
+  // A cracker went off at (x, z): near enough to the dark tracks, it shows them.
+  function storyBang(x, z) {
+    const r = race, w = G() && G().w3d;
+    if (!r || !r.story || r.phase !== 'clues' || r.clue !== 0 || !w) return;
+    const s = stashes.find((o) => o.clue && o.dark);
+    if (s && Math.hypot(s.x - x, s.z - z) <= LIGHT_R) { s.dark = false; setTimeout(() => { if (race === r && stashes.includes(s)) storyFound(s, w); }, 700); }
+  }
+  // The picker's chapters strip: each chapter's picture, name, best stars, and what opens it when it is shut.
+  function storyCard() {
+    const st = storyState();
+    const cards = CHAPTERS.map((ch, i) => {
+      const open = chapterOpen(i), best = st.stars[ch.id] || 0;
+      const lock = open === 'open' ? '' : open === 'locked' ? `🔒 ${T('Finish chapter {0} first').replace('{0}', i)}` : `💎${ch.gems} · 👑 ${T('Premium')}`;
+      return `<button type="button" class="chor-pheist chor-pstory${open === 'open' ? '' : ' shut'}" data-pick-story="${ch.id}"><i aria-hidden="true">${tPic(ch.tr)}</i><span><small><strong class="chor-pbadge">${T('Story')}</strong> ${T('Chapter {0}').replace('{0}', i + 1)}${best ? ` · ${starRow(best)}` : st[ch.id] ? ' · ✓' : ''}</small><b>${T(ch.name)}</b><em class="chor-pline">${T(ch.card || ch.line)} ›</em>${lock ? `<em class="chor-plock">${lock}</em>` : ''}</span></button>`;
+    }).join('');
+    return `<div class="chor-pchaps">${cards}</div><div class="chor-pstory-links"><button type="button" class="chor-pstory-alt" data-pick-wall>🛕 ${T('Wall of honour')} ›</button><button type="button" class="chor-pstory-alt" data-pick-story="${CHAPTERS[0].id}" data-story-street="${STORY_STREETS[1]}">📍 ${T('Play the story in Madurai')} ›</button></div>`;
+  }
+  // A chapter tapped in the picker: an open one starts, a shut one says what opens it (the chapter before, or once that
+  // is done, the gems or Premium sheet). Said in a sheet over the picker, where a toast would sit under it.
+  function chapterPick(id, street) {
+    const i = CHAPTERS.findIndex((c) => c.id === id), ch = CHAPTERS[i], open = chapterOpen(i);
+    if (!ch) return;
+    if (open === 'open') { closePicker(); storyFromPicker(id, street); return; }
+    if (open === 'locked') { pickerSheet(`<b>🔒 ${T(ch.name)}</b><p class="chor-heist-prize"><i>${tPic(ch.tr)}</i>${T(ch.line)}</p><p class="chor-cat-note">${T('Finish chapter {0} first').replace('{0}', i)}</p>`, () => {}); return; }
+    chapterOffer(ch, pickerSheet, () => { const b = picker && picker.querySelector('.chor-psheet'); if (b) b.hidden = true; });
+  }
+  // A small sheet over the picker (the street's own sheet sits under it).
+  function pickerSheet(html, onAct) {
+    let box = picker.querySelector('.chor-psheet');
+    if (!box) {
+      box = el('div', 'chor-psheet'); box.setAttribute('role', 'dialog'); picker.append(box);
+      box.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (e.target === box || e.target.closest('[data-close]')) { box.hidden = true; return; }
+        const b = e.target.closest('[data-kit]'); if (b && box.act) box.act(b.dataset.kit);
+      });
+    }
+    box.innerHTML = `<div class="chor-card">${html}<button type="button" class="chor-x" data-close aria-label="Close">✕</button></div>`;
+    box.act = onAct; box.hidden = false;
+    const first = box.querySelector('button.btn'); if (first) first.focus();
+  }
+  // What opens a chapter once the one before is done: its gems once (kept for good, through the game's own gem spend,
+  // which opens the gem shop when short), or Premium, which opens every chapter. Only here, the result and the picker:
+  // never mid-chase.
+  function chapterOffer(ch, show, close) {
+    const g = G();
+    show(`<b>${ch.ico} ${T(ch.name)}</b><p class="chor-heist-prize"><i>${tPic(ch.tr)}</i>${T(ch.line)}</p><p class="chor-cat-note">${T('Unlock this chapter for good with {0} gems (you have {1}), or play every chapter with Premium.').replace('{0}', ch.gems).replace('{1}', g.gems())}</p>`
+      + `<div class="chor-card-btns"><button type="button" class="btn ghost" data-kit="ch-premium"><i class="crown-ico" aria-hidden="true"></i>${T('Premium')}</button><button type="button" class="btn primary" data-kit="ch-gems">${T('Unlock')} · ${ch.gems} 💎</button></div>`, (act) => {
+      close();
+      if (act === 'ch-premium') { closePicker(); g.openPremium(); return true; }
+      if (act !== 'ch-gems') return true;
+      if (!g.spend(ch.gems, T(ch.name))) { closePicker(); return true; } // (short: the gem shop opens, the picker makes way)
+      storyState().unlocked[ch.id] = 1; save(); g.tick();
+      g.toast(T('{0} is unlocked!').replace('{0}', T(ch.name)));
+      closePicker(); storyFromPicker(ch.id);
+      return true;
+    });
+  }
+  // The story's opening: four cards, Skip on each; the street loads behind them.
+  const STORY_INTRO = [
+    [['🛕', '🌙', '🪔'], 'Karthigai Deepam eve', 'The town is getting ready to light a thousand lamps at the temple tonight.'],
+    [['🔱', '🥷', '💨'], 'The Nataraja is gone!', 'Thieves have taken the bronze Nataraja from the temple and slipped into the dark streets.'],
+    [['🧨', '👣', '🔔'], 'Light the way', 'Light crackers to see in the dark. Follow the clues: their tracks, a dropped bell, their cart.'],
+    [['🏃', '🛕', '✨'], 'Bring it home', 'Find the Nataraja and carry it back to the temple steps before the lamps are lit.'],
+  ];
+  // The story's chapters, in order, one row each: what is taken (its picture), where, the cards, the clues and the
+  // lines. Chapter 1 is free; each later one opens once the one before is done, with Premium or its gems once.
+  // lamps: the finale's fountains along the steps (pairs); sky: shells over the street; more: ms the finale runs longer.
+  const CHAPTERS = [
+    { id: 'nataraja', name: 'Nataraja Rescue', ico: '🔱', tr: [TREASURES[1][0], TREASURES[1][1], '🔱'], streets: STORY_STREETS, gems: 0, intro: STORY_INTRO, clues: STORY_CLUES,
+      line: 'Thieves took the temple’s bronze Nataraja. Light the dark streets and bring it home',
+      card: 'Light the dark streets and bring the Nataraja home',
+      start: '🔱 The bronze Nataraja is gone! Light a cracker by the dark patch to find the thieves’ tracks',
+      grab: '🚨 Seth-ji thinks YOU are the thief! Run the Nataraja to the temple steps 🛕',
+      home: 'The Nataraja is home!', glow: 'The temple lamps glow for Karthigai Deepam 🪔',
+      told: 'You followed the tracks, the bell and the cart, and brought the bronze Nataraja back to the temple steps for Karthigai Deepam.',
+      brag: 'I brought the bronze Nataraja home for Karthigai Deepam in Fireworks Street!', tags: '#KarthigaiDeepam #Nataraja', file: 'nataraja-rescue', lamps: 8, sky: 8, more: 0 },
+    { id: 'peacock', name: 'The Silver Peacock Lamp', ico: '🦚', tr: ['peacock', 'Silver Peacock Lamp', '🦚'], streets: ['chor-meenakshi'], gems: 60, clues: PEACOCK_CLUES,
+      intro: [
+        [['🛕', '🦚', '🪔'], 'Lamps for Madurai', 'Madurai’s temple street is full of lamps tonight, and the silver peacock lamp is the brightest.'],
+        [['🦚', '🥷', '💨'], 'The peacock lamp is gone!', 'Thieves have taken the silver peacock lamp and slipped into the flower market.'],
+        [['🧨', '🌼', '🔔'], 'Follow the jasmine', 'Light crackers to see in the dark. Follow the clues: jasmine petals, an anklet bell, a flower basket.'],
+        [['🏃', '🛕', '✨'], 'Bring it back', 'Find the peacock lamp and carry it back to the temple steps before the lamps are lit.'],
+      ],
+      line: 'Thieves took the temple’s silver peacock lamp. Follow the jasmine trail and bring it back',
+      card: 'Follow the jasmine trail to the silver peacock lamp',
+      start: '🦚 The silver peacock lamp is gone! Light a cracker by the dark patch to find the jasmine trail',
+      grab: '🚨 Seth-ji thinks YOU are the thief! Run the peacock lamp to the temple steps 🛕',
+      home: 'The peacock lamp is home!', glow: 'The temple’s lamps shine on the silver peacock again 🪔',
+      told: 'You followed the jasmine petals, the anklet bell and the flower basket, and brought the silver peacock lamp back to the temple steps.',
+      brag: 'I brought the silver peacock lamp home to the temple in Fireworks Street!', tags: '#Madurai #TempleLamps', file: 'peacock-lamp-rescue', lamps: 8, sky: 8, more: 0 },
+    { id: 'deepam', name: 'The Golden Deepam Lamp', ico: '🪔', tr: ['diya', 'Golden Deepam Lamp', '🪔'], streets: ['chor-thanjavur'], gems: 80, clues: DEEPAM_CLUES,
+      intro: [
+        [['🛕', '🪔', '🌙'], 'The great lamp', 'Tonight the great golden lamp is to be lit for Karthigai Deepam, for the whole town to see.'],
+        [['🪔', '🥷', '💨'], 'The Deepam lamp is gone!', 'Thieves have taken the golden lamp, still dripping with oil, into the dark streets.'],
+        [['🧨', '💧', '🧵'], 'Follow the oil', 'Light crackers to see in the dark. Follow the clues: oil drips, a dropped bundle of wicks, the oil merchant’s cart.'],
+        [['🏃', '🛕', '✨'], 'Light the Deepam', 'Find the golden lamp and run it the whole street back to the temple steps.'],
+      ],
+      line: 'Thieves took the great lamp for the Deepam. Follow the oil drips and bring it back for the lighting',
+      card: 'Follow the oil drips to the golden Deepam lamp',
+      start: '🪔 The golden Deepam lamp is gone! Light a cracker by the dark patch to find the oil drips',
+      grab: '🚨 Seth-ji thinks YOU are the thief! Run the Deepam lamp to the temple steps 🛕',
+      home: 'The Deepam lamp is home!', glow: 'The great lamp is lit and the whole street glows for Karthigai Deepam 🪔',
+      told: 'You followed the oil drips, the wicks and the oil merchant’s cart, and brought the golden lamp back in time to light the Deepam.',
+      brag: 'I brought the golden Deepam lamp home for Karthigai Deepam in Fireworks Street!', tags: '#KarthigaiDeepam #Deepam', file: 'deepam-lamp-rescue', lamps: 12, sky: 12, more: 1800 },
+  ];
+  // The story's saves: rescues per chapter (st[id]; chapter 1's is the old st.nataraja), best stars per chapter, the
+  // chapters opened with gems. Stars were kept per street before chapters: the best of those is chapter 1's.
+  function storyState() {
+    const st = state.story = state.story || {}, s = st.stars = st.stars || {};
+    STORY_STREETS.forEach((k) => { if (k in s) { s.nataraja = Math.max(s.nataraja || 0, s[k] || 0); delete s[k]; } });
+    st.unlocked = st.unlocked || {};
+    return st;
+  }
+  // 'open', 'locked' (the chapter before is not done yet) or 'buy' (it is: gems once, or Premium).
+  function chapterOpen(i) {
+    if (!i) return 'open';
+    const st = storyState(), ch = CHAPTERS[i];
+    if (!ch || !st[CHAPTERS[i - 1].id]) return 'locked';
+    return st.unlocked[ch.id] || (G() && G().premium()) ? 'open' : 'buy';
+  }
+  function storyIntro(ch, then) {
+    if (!tut) { tut = document.createElement('div'); tut.className = 'chor-tut'; tut.setAttribute('role', 'dialog'); tut.setAttribute('aria-modal', 'true'); document.body.appendChild(tut); }
+    let i = 0;
+    const done = () => { tut.hidden = true; tut.onclick = tut.onpointerdown = tut.onpointerup = null; then(); };
+    const draw = () => {
+      const intro = ch.intro, [art, title, line] = intro[i], last = i === intro.length - 1;
+      tut.innerHTML = `<div class="chor-tcard story">
+          <button type="button" class="chor-tskip" data-t="skip">${T('Skip')}</button>
+          <div class="chor-tart find" aria-hidden="true">${art.map((e, k) => `<span class="a${k + 1}">${e}</span>`).join('')}</div>
+          <small class="chor-tstep">${ch.ico} ${T(ch.name)}</small>
+          <b>${T(title)}</b><p>${T(line)}</p>
+          <div class="chor-tdots">${intro.map((_, k) => `<i class="${k === i ? 'on' : ''}"></i>`).join('')}</div>
+          <div class="chor-tbtns">${i ? `<button type="button" class="chor-tprev" data-t="prev">‹</button>` : ''}<button type="button" class="chor-tnext" data-t="${last ? 'done' : 'next'}">${T(last ? 'Start the rescue' : 'Next')}</button></div>
+        </div>`;
+      tut.querySelector('.chor-tnext').focus({ preventScroll: true });
+    };
+    tut.onclick = (e) => { const b = e.target.closest('[data-t]'); if (!b) return; const t = b.dataset.t; if (t === 'next') { i++; draw(); } else if (t === 'prev') { i--; draw(); } else done(); };
+    let x0 = null;
+    tut.onpointerdown = (e) => { x0 = e.clientX; };
+    tut.onpointerup = (e) => { if (x0 == null) return; const dx = e.clientX - x0; x0 = null; if (Math.abs(dx) < 50) return; if (dx < 0 && i < ch.intro.length - 1) { i++; draw(); } else if (dx > 0 && i) { i--; draw(); } };
+    draw(); tut.hidden = false;
+  }
+  // Home's story card: the story one tap from home (it sat two screens deep), on the next chapter not yet done, with
+  // its chapter number, best stars and a New chip until the story is first started.
+  function nextChapter() { const st = storyState(), i = CHAPTERS.findIndex((c) => !st[c.id]); return i < 0 ? CHAPTERS.length - 1 : i; }
+  function syncHomeStory() {
+    const b = document.getElementById('homeStory'), tile = document.getElementById('btnChor');
+    if (!b) return;
+    const intro = document.getElementById('intro');
+    if (!tile || tile.hidden) { b.hidden = true; if (intro) intro.classList.remove('has-story'); return; }
+    const st = storyState(), i = nextChapter(), ch = CHAPTERS[i], best = st.stars[ch.id] || 0, fresh = !st.started && !st[CHAPTERS[0].id];
+    b.innerHTML = `<i class="hs-art" aria-hidden="true">${tPic(ch.tr)}</i><span class="hs-text"><small><strong class="chor-pbadge">${T('Story')}</strong>${T('Chapter {0} of {1}').replace('{0}', i + 1).replace('{1}', CHAPTERS.length)}${best ? ` · ${starRow(best)}` : ''}</small>`
+      + `<b>${T(CHAPTERS[0].name)}</b><em>${T(ch.card || ch.line)}</em></span>${fresh ? `<em class="hs-new">${T('New')}</em>` : ''}<span class="hs-go" aria-hidden="true">›</span>`;
+    b.setAttribute('aria-label', `${T('Story')}: ${T(CHAPTERS[0].name)} · ${T('Chapter {0} of {1}').replace('{0}', i + 1).replace('{1}', CHAPTERS.length)}`);
+    b.classList.toggle('fresh', fresh);
+    b.hidden = false;
+    if (intro) intro.classList.add('has-story');
+  }
+  // Tapped: an open chapter starts at its intro; a shut one opens the picker on what opens it.
+  function storyFromHome() {
+    const i = nextChapter(), ch = CHAPTERS[i];
+    if (chapterOpen(i) === 'open') { storyFromPicker(ch.id); return; }
+    festival = true; openPicker(false); chapterPick(ch.id);
+  }
+  // A chapter (its first street unless one is given); an older call passing a street plays chapter 1 there. A shut
+  // chapter does not start (the picker offers what opens it).
+  function storyFromPicker(id = CHAPTERS[0].id, street) {
+    if (STORY_STREETS.includes(id)) { street = id; id = CHAPTERS[0].id; }
+    const i = CHAPTERS.findIndex((c) => c.id === id), ch = CHAPTERS[i];
+    if (!ch || chapterOpen(i) !== 'open') return false;
+    street = ch.streets.includes(street) ? street : ch.streets[0];
+    festival = false; tutDone = true; // (the story's cards are its how-to)
+    const sst = storyState(); if (!sst.started) { sst.started = 1; save(); syncHomeStory(); } // (home's New chip goes)
+    if (race) endRace(false);
+    const g = G();
+    if (g && g.on) { if (g.street !== street) goStreet(street); } else start(street);
+    storyIntro(ch, () => {
+      let tries = 0;
+      const go = () => { const g = G(); if (g && g.on && g.w3d && stashes && stashes.length) startStory(ch); else if (++tries < 150) setTimeout(go, 200); };
+      go();
+    });
+    return true;
+  }
+  function startStory(ch = CHAPTERS[0]) {
+    const g = G(), w = g && g.w3d;
+    if (!w || race) return;
+    if (window.LUTSTrack) { LUTSTrack.enter('story'); LUTSTrack.level('story', ch.id); }
+    closeSheet();
+    const hook = window.PatakaChor.onBang;
+    race = { day: state.day, street: g.street, target: null, calm: true, t0: clock, goAt: clock, shownCount: 0, mela: null, found: -1, phase: 'clues', clue: 0, treasure: ch.tr, story: { ch, hook, at: null, caught: 0, slowTo: 0, cueAt: -99 } }; tImg(ch.tr[0]);
+    window.PatakaChor.onBang = (type, x, z) => { storyBang(x, z); heroStun(x, z); if (hook) hook(type, x, z); };
+    state.raceSaved = { taken: state.taken, left: state.left || {}, street: g.street };
+    state.taken = []; state.left = {};
+    // The temple's priest hands you two flowerpots to light the way.
+    for (let k = 0; k < 2; k++) if (roomFor('flowerpot') > 0) state.bag.push('flowerpot');
+    // And the hero powers: one of each you have none of (so they are always earned free), one more of each with Premium
+    // once a day (not on every start, so leaving and restarting adds nothing), and one more of each for every three-star
+    // rescue not yet spent.
+    const pw = powers(), st = storyState(), prem = g.premium() && st.premGiven !== state.day;
+    const more = (prem ? 1 : 0) + (st.earned || 0);
+    if (prem) st.premGiven = state.day;
+    POWERS.forEach(([id]) => { pw[id] = Math.max(pw[id] || 0, 1) + more; });
+    st.earned = 0;
+    save();
+    flying = []; aim = null; chase = null; alert = 0; graceTo = clock + GRACE; atStart = true;
+    w.goView(0); chosenView = -1;
+    whenReady(); syncViews(); syncBag();
+    hud.querySelector('.chor-race').hidden = false;
+    g.toast(T(ch.start), 4600);
+  }
+  // Hero stars: one for the rescue, one for never being caught by Seth-ji, one for beating the par time. A chapter's best
+  // is kept; the first three-star run of a chapter earns a hero power (state.story.earned, spent elsewhere), and the
+  // first rescue of a chapter on a street each day pays a few gems, the same for free and Premium.
+  const STORY_PAR = 120, STORY_GEMS = 10; // seconds for the third star; gems for a chapter's first rescue on a street a day
+  const starRow = (n) => '★'.repeat(n) + '☆'.repeat(3 - n);
+  function storyStars(r) {
+    const sec = clock - r.t0, miss = [];
+    if (r.story.caught) miss.push(T('Seth-ji caught you on the run'));
+    if (sec > STORY_PAR) miss.push(`${T('Bring it home in under {0}').replace('{0}', fmtT(STORY_PAR))} (${fmtT(sec)})`);
+    const n = 3 - miss.length, st = storyState(), id = r.story.ch.id, best = st.stars[id] || 0;
+    const first3 = n === 3 && best < 3;
+    if (n > best) st.stars[id] = n;
+    const bt = st.best = st.best || {}; if (!bt[id] || sec < bt[id]) bt[id] = sec;
+    if (first3) st.earned = (st.earned || 0) + 1;
+    const paid = st.paid = st.paid || {}, key = `${id}:${r.street}:${state.day}`, g = G();
+    const gems = paid[key] || !g || !g.addGems ? 0 : STORY_GEMS;
+    if (gems) { Object.keys(paid).forEach((k) => { if (!k.endsWith(`:${state.day}`)) delete paid[k]; }); paid[key] = 1; g.addGems(gems); }
+    save();
+    return { n, miss, first3, gems };
+  }
+  // The hero's moment on the run: Seth-ji close behind, a cue to light a cracker up the street (away from him, like any
+  // decoy), and he slows a beat to give you the time (his chase only; the game's clock runs on). At most one cue every 6 s.
+  const HERO_NEAR = 5, HERO_SAFE = 6, HERO_FAR = 20, HERO_STUN = 3, HERO_SLOW = 0.45;
+  function heroCue(w, k, d) {
+    const s = race.story;
+    if (d > HERO_NEAR || clock < s.slowTo || clock - s.cueAt < 6 || clock < graceTo) return;
+    s.cueAt = clock; s.slowTo = clock + 1.2;
+    const e = el('div', 'chor-hero-cue', `🧨 ${T('Light a cracker up the street to turn him!')}`);
+    hud.append(e); setTimeout(() => e.remove(), 2200);
+    G().buzz(30);
+  }
+  // A cracker going off up the street on the run turns him to look, like a decoy: never one near him (under 6 m it does
+  // nothing, so a burst at a person is never rewarded), and no points for it, only the breather.
+  function heroStun(x, z) {
+    const g = G(), w = g && g.w3d;
+    if (!race || !race.story || race.phase !== 'escape' || !w || clock < graceTo) return;
+    const k = w.watchers.find((o) => o.name === 'keeper');
+    const d = k && Math.hypot(k.x - x, k.z - z);
+    if (!k || d < HERO_SAFE || d > HERO_FAR) return;
+    w.lure(x, z); w.calm('keeper'); chase = null; graceTo = clock + HERO_STUN;
+    pop({ x: k.x, y: 2.2, z: k.z }, T('Seth-ji turns to look'), true);
+    g.buzz(50);
+  }
+  // Hero powers, for the story only (a small row while it runs): Flare Vision lights every clue like a stash ping, Vayu
+  // Dash is three seconds at a sprint, Smoke Decoy is a decoy with its own count. At 0 a tap only says so: no shop
+  // mid-chase (the Kit sells more, and the result sheet links to it).
+  const POWERS = [['vision', '🔥', 'Flare Vision'], ['dash', '💨', 'Vayu Dash'], ['smoke', '🌫️', 'Smoke Decoy']], DASH = 3;
+  const powers = () => (state.powers = state.powers || {});
+  function syncPowers() {
+    const box = hud && hud.querySelector('.chor-powers');
+    if (!box) return;
+    box.hidden = !(race && race.story); box.setAttribute('aria-label', T('Hero powers'));
+    if (box.hidden) return;
+    const pw = powers();
+    box.innerHTML = POWERS.map(([id, ico, name]) => `<button type="button" class="chor-power${pw[id] > 0 ? '' : ' out'}" data-power="${id}" aria-label="${T(name)}"><i aria-hidden="true">${ico}</i><small>${T(name)}</small><em>${pw[id] || 0}</em></button>`).join('');
+  }
+  function usePower(id) {
+    const g = G(), pw = powers(), p = POWERS.find((o) => o[0] === id);
+    if (!p || !race || !race.story || !g.w3d) return;
+    if (!(pw[id] > 0)) { g.toast(T('Out of {0}').replace('{0}', T(p[2]))); return; }
+    pw[id]--; save(); g.buzz(25);
+    if (id === 'vision') { pingTo = clock + PING; g.toast(`🔥 ${T('Flare Vision! Every clue glows')}`); }
+    else if (id === 'dash') { dashTo = clock + DASH; g.toast(`💨 ${T('Vayu Dash!')}`); }
+    else { decoy(true); g.toast(`🌫️ ${T('Smoke Decoy! Seth-ji turns to look')}`); }
+    syncBag();
+  }
+  // The rescue card to share: the chapter, the street, the stars and the time. A free player's card carries the app's
+  // mark, a Premium player's none; the text gets the Play link from D.share (src) and the search words people use.
+  function shareStory(r) {
+    const D = window.LUTSDuel, g = G();
+    if (!D) return;
+    const ch = r.story.ch, sc = r.story.score || { n: 1 }, sec = (r.story.sec || 0), street = T((STREETS.find((t) => t.id === r.street) || STREETS[0]).name);
+    const text = `${ch.ico} ${T(ch.name)}: ${T(ch.brag)} ${starRow(sc.n)} · ${street} · ${fmtT(sec)}\n${ch.tags} #DiwaliFireworksGame #CrackersGame #Diwali`;
+    const blob = D.card({ art: `assets/chor/thumb/${r.street}.webp`, kicker: T(ch.name), title: `${ch.ico} ${T(ch.home)}`, big: starRow(sc.n), line: `${street} · ${fmtT(sec)}`, mark: !(g && g.premium()) });
+    D.share({ title: T(ch.name), text, blob, name: `${ch.file}.png`, src: 'story' });
+  }
+  // The ending, filmed for a Short: low by the corner looking up the street to the temple. What was taken rises in the
+  // light, fountains light up along the temple steps one by one from both sides, like the Deepam lamps, then the sky.
+  // About twelve seconds (the last chapter's, with more lamps and shells, a little longer); a tap skips it.
+  let finaleOff = null; // the running story finale's cancel (film gone, held toasts out, no sheet), for stop()
+  // A phone short of memory (the WebView's renderer killed mid-film, the app reloading home) never loses the result: it is
+  // written down before the film (already paid: storyStars ran in endRace) and cleared once the card shows; on the next
+  // load within 10 minutes the card opens over the street picker, showing the gems paid, never paying them again.
+  const PEND = 'luts:storyPending', PEND_MS = 10 * 60 * 1000;
+  function pendStory(r) {
+    const sc = r.story.score || {};
+    try { localStorage.setItem(PEND, JSON.stringify({ ch: r.story.ch.id, street: r.street, sec: r.story.sec || 0, n: sc.n || 1, miss: sc.miss || [], first3: !!sc.first3, gems: sc.gems || 0, caught: r.story.caught || 0, at: Date.now() })); } catch (e) { /* storage full or off */ }
+  }
+  const unpend = () => { try { localStorage.removeItem(PEND); } catch (e) { /* ignore */ } };
+  function recoverStory(tries = 0) {
+    let p = null;
+    try { p = JSON.parse(localStorage.getItem(PEND) || 'null'); } catch (e) { /* ignore */ }
+    const ch = p && CHAPTERS.find((c) => c.id === p.ch);
+    if (!ch || !(Date.now() - p.at < PEND_MS) || Date.now() < p.at) { if (p) unpend(); return; }
+    const g = G();
+    if (!g || (g.on && race)) { if (tries < 60) setTimeout(() => recoverStory(tries + 1), 250); return; }
+    const r = { street: p.street, treasure: ch.tr, story: { ch, sec: p.sec, caught: p.caught, score: { n: p.n, miss: p.miss, first3: p.first3, gems: p.gems } } };
+    if (g.on && hud) { storyResult(r); return; }
+    openPicker(false); storyResult(r, pickerSheet, () => { const b = picker && picker.querySelector('.chor-psheet'); if (b) b.hidden = true; });
+  }
+  // A small phone (the WebView with 4 GB or less, or the game's lowest 3D tier) gets a lighter film: half the lamps and
+  // shells, a small last volley, no glow filters or blur over the whole screen (chromium's tiles ran out on one).
+  const liteFilm = () => { const g = G(); return !!((g && g.lowEnd && g.lowEnd()) || (navigator.deviceMemory && navigator.deviceMemory <= 4)); };
+  function storyFinale(r, then) {
+    const g = G(), w = g && g.w3d, tr = r.treasure, ch = r.story.ch, more = ch.more, lite = liteFilm();
+    const LAMPS = Array.from({ length: lite ? Math.min(4, ch.lamps) : ch.lamps }, (_, i) => (i % 2 ? 'anar' : 'flowerpot'));
+    if (!w || !hud) { then(); return; }
+    // Nothing over the film: no banner, and toasts (an achievement's too) wait for its end.
+    const release = () => { if (finaleOff !== release) return; finaleOff = null; if (g.holdToasts) g.holdToasts(false); };
+    if (finaleOff) finaleOff();
+    finaleOff = release; if (g.holdToasts) g.holdToasts(true);
+    const box = document.createElement('div');
+    box.className = `chor-finale story${lite ? ' lite' : ''}`;
+    box.innerHTML = `<div class="chor-finale-bar"></div><div class="chor-finale-reveal"><i>${tPic(tr)}</i><b></b><small></small></div><div class="chor-finale-bar"></div>`;
+    box.querySelector('b').textContent = T(ch.home);
+    box.querySelector('small').textContent = T(ch.glow);
+    document.body.append(box);
+    hud.classList.add('cinema'); document.body.classList.add('chor-cinema');
+    // The street's walkers (Thanjavur's elephant, the patrols) step off stage so nothing crosses the temple in the film.
+    if (w.setCast) w.setCast(false);
+    const timers = [];
+    let done = false;
+    const finish = quit => {
+      if (done) return;
+      done = true; timers.forEach(clearTimeout); if (finaleOff === cancel) finaleOff = release;
+      box.classList.add('gone'); setTimeout(() => box.remove(), lite ? 0 : 500);
+      hud.classList.remove('cinema'); document.body.classList.remove('chor-cinema');
+      if (w.setCast) w.setCast(true);
+      release();
+      if (quit === true) { unpend(); return; } // left the street mid-film: no result sheet, none to recover
+      try { if (w.goView) w.goView(0); } finally { then(); }
+    };
+    const cancel = () => finish(true); finaleOff = cancel;
+    box.addEventListener('click', () => finish());
+    try {
+    const b = w.bounds || { x0: -8, x1: 8, z0: -39, z1: 20 }, steps = templeSteps(w);
+    g.buzz && g.buzz(120); g.tick && g.tick();
+    if (w.showCam) { w.showCam(0, b.z1 - 14, 'burst'); timers.push(setTimeout(() => w.showCam(0, b.z1 - 26, 'burst'), 6400)); }
+    // The first frames bright (they are a clip's thumbnail): the temple washed gold at once, the treasure steps down
+    // soon, the lamps start within a beat and two shells open over the temple straight away.
+    if (w.light) w.light('#ffc04a', 2.2, { x: 0, y: 3, z: steps.z + 2 });
+    timers.push(setTimeout(() => box.classList.add('low'), 1600));
+    (lite ? [0] : [0, 1]).forEach((i) => timers.push(setTimeout(() => remoteBang(FINALE_SHELLS[i ? 1 : 0], i ? b.x1 - 3 : b.x0 + 3, steps.z + 6), 350 + i * 450)));
+    // The lamps: pairs from the edges in to the middle along the steps.
+    const n = LAMPS.length, span = b.x1 - b.x0 - 3;
+    LAMPS.forEach((type, i) => {
+      const k = i >> 1, x = (i % 2 ? 1 : -1) * (span / 2 - k * (span / n)), z = steps.z + 1.5;
+      timers.push(setTimeout(() => { remoteBang(type, x, z); if (w.light) w.light('#ffc04a', 1.2, { x, y: 1.2, z }); }, 150 + i * 300));
+    });
+    // Then the sky over the street.
+    FINALE_SHELLS.slice(0, lite ? Math.min(4, ch.sky) : ch.sky).forEach((type, i) => timers.push(setTimeout(() => remoteBang(type, i % 2 ? b.x1 - 2 : b.x0 + 2, steps.z + 8 + (i >> 1) * 4), 2600 + i * (lite ? 700 : 420))));
+    const last = lite ? 3 : 6; // (the last volley all at once: the heaviest moment)
+    timers.push(setTimeout(() => { for (let i = 0; i < last; i++) remoteBang(FINALE_SHELLS[(i * 5) % FINALE_SHELLS.length], b.x0 + 2 + (i / (last - 1)) * (b.x1 - b.x0 - 4), steps.z + 10); }, 8400 + more));
+    timers.push(setTimeout(finish, 12200 + more));
+    } catch (e) { finish(); } // (never stuck in the film, nor without the banner)
+  }
+  function storyResult(r, show = sheet, close = closeSheet) {
+    unpend();
+    const home = show !== sheet, sc = r.story.score || storyStars(r), why = sc.miss.map((m) => `<li>☆ ${m}</li>`).join('');
+    const gift = (sc.first3 ? `<p class="chor-hero-gift">⚡ ${T('You earned a hero power')}</p>` : '') + (sc.gems ? `<p class="chor-cat-note">+${sc.gems} 💎 ${T('for today’s rescue on this street')}</p>` : '');
+    // The next chapter, when there is one: straight in when it is open, else what opens it (gems once, or Premium).
+    const ch = r.story.ch, at = CHAPTERS.indexOf(ch), next = CHAPTERS[at + 1];
+    // The way on first (the next chapter, its treasure's picture as the teaser), Share beside the replay, then the
+    // quieter three in one small row.
+    show(`<b>${ch.ico} ${T(ch.home)}</b><p class="chor-stars" aria-label="${sc.n}/3">${starRow(sc.n)}</p>${why ? `<ul class="chor-stars-why">${why}</ul>` : ''}${gift}<p class="chor-heist-prize"><i>${tPic(r.treasure)}</i>${T(ch.told)}</p>`
+      + (next ? `<div class="chor-card-btns"><button type="button" class="btn primary chor-next" data-kit="story-next"><i>${tPic(next.tr)}</i><span>${next.ico} ${T('Next chapter: {0}').replace('{0}', T(next.name))} ›</span></button></div>` : '')
+      + `<div class="chor-card-btns"><button type="button" class="btn ${next ? 'ghost' : 'primary'}" data-kit="story-share">📤 ${T('Share')}</button><button type="button" class="btn ghost" data-kit="story-again">${ch.ico} ${T('Play the story again')}</button></div>`
+      + `<div class="chor-card-btns chor-small-btns"><button type="button" class="btn ghost" data-kit="story-wall">🛕 ${T('Wall of honour')}</button>${home ? '' : `<button type="button" class="btn ghost" data-kit="story-powers">⚡ ${T('Get more powers')}</button>`}<button type="button" class="btn ghost" data-kit="story-free">${T('Keep playing')}</button></div>`, (act) => {
+      // (home: the card brought back after a reload, over the street picker; the Kit is the street's, so not offered)
+      if (act === 'story-again') { close(); if (home) closePicker(); storyFromPicker(ch.id, r.street); return true; }
+      if (act === 'story-next') { if (chapterOpen(at + 1) === 'open') { close(); if (home) closePicker(); storyFromPicker(next.id); } else chapterOffer(next, show, close); return true; }
+      if (act === 'story-share') { shareStory(r); return true; }
+      if (act === 'story-wall') { wallOfHonour(home ? show : (html, onAct) => { sheet(html, onAct); hud.querySelector('.chor-sheet').classList.add('catalog'); }, () => { close(); storyResult(r, show, close); }); return true; }
+      if (act === 'story-powers') { openKit(); return true; }
+      close(); return true;
+    });
+  }
+  // The temple's wall of honour: every chapter's treasure in a frame, lit once you have brought it home (best stars, best
+  // time, how many times), an empty frame till then saying what opens it. show: the street's sheet or the picker's;
+  // back: from the result card, the way back to it.
+  function wallOfHonour(show, back) {
+    const st = storyState(), best = st.best || {};
+    const frames = CHAPTERS.map((ch, i) => {
+      const n = st[ch.id] || 0, open = chapterOpen(i);
+      if (n) return `<div class="chor-trophy got" data-wall="${ch.id}"><i>${tPic(ch.tr)}</i><b>${T(ch.name)}</b><small aria-label="${st.stars[ch.id] || 0}/3">${starRow(st.stars[ch.id] || 0)}</small><small>${n === 1 ? T('Brought home once') : T('Brought home {0} times').replace('{0}', n)}</small>${best[ch.id] ? `<small>${T('Best time {0}').replace('{0}', fmtT(best[ch.id]))}</small>` : ''}</div>`;
+      const how = open === 'locked' ? T('Finish chapter {0} first').replace('{0}', i) : open === 'buy' ? T('Open it with {0} gems once, or with Premium').replace('{0}', ch.gems) : T('Not brought home yet');
+      return `<div class="chor-trophy empty" data-wall="${ch.id}"><i aria-hidden="true">${open === 'open' ? ch.ico : '🔒'}</i><b>${T(ch.name)}</b><small>${how}</small></div>`;
+    }).join('');
+    show(`<b>🛕 ${T('Wall of honour')}</b><p class="chor-cat-note">${T('Every treasure you bring home to the temple hangs here.')}</p><div class="chor-trophies chor-wall">${frames}</div>`
+      + (back ? `<div class="chor-card-btns"><button type="button" class="btn ghost" data-kit="wall-back">${T('Back')}</button></div>` : ''), (act) => { if (act === 'wall-back' && back) back(); return true; });
   }
   // The heist's ending, like a film's: letterbox bars, the treasure lifted into the light with its name, and a fireworks
   // volley up the street filmed low and looking up, the way fireworks are filmed. About ten seconds; a tap skips it.
@@ -1813,9 +2395,12 @@
     setTimeout(go, 600);
   }
   function stop() {
+    if (window.LUTSTrack) { LUTSTrack.levelEnd('street', 'quit'); LUTSTrack.home(); }
+    if (finaleOff) finaleOff();
     if (race) endRace(false);
+    syncHomeStory(); // (home's story card shows the chapter now next)
     cancelAnimationFrame(raf); raf = 0; shownView = -1; aim = null; flying = []; keys.clear(); stick.on = false;
-    if (hud) { hud.hidden = true; hud.classList.remove('aiming', 'soot'); closeSheet(); }
+    if (hud) { hud.hidden = true; hud.classList.remove('aiming', 'soot'); closeSheet(); const mc = hud.querySelector('.chor-mcv'); if (mc) mc.width = mc.height = 0; } // (the markers' full-screen canvas: its memory back)
     if (G()) G().stop();
   }
   // The game calls this in its frame, right before the 3D view eases and draws, so each step lands on a drawn frame
@@ -1824,6 +2409,7 @@
   function walk(dt) { const g = G(), w = g && g.w3d; if (!hud || !w) return; walkDriven = true; walkStep(Math.min(0.1, dt), w); }
   // From the home screen's Challenges row: the street opens and the race starts as soon as its stashes are laid out
   function raceFromHome(street = 'chor-street', day = null, mela = null) {
+    festival = false;
     start(street);
     let tries = 0;
     const go = () => { const g = G(); if (g && g.on && g.w3d && stashes && stashes.length) startRace(null, day, mela); else if (++tries < 150) setTimeout(go, 200); };
@@ -1836,17 +2422,20 @@
     window.PatakaChor.quiet = true;
     try { const h = g.ride(type, x, 0, z); if (h) h.fire(); else g.bang(x, 0.3, z, 1); } finally { window.PatakaChor.quiet = false; }
   }
-  window.PatakaChor = { treasure: () => treasureOfWeek(), /* nav: where you stand and face, and the day's stashes still out (for tests that play by touch) */ get nav() { const w = G() && G().w3d; if (!w) return null; const c = w.camera(); return { x: c.x, z: c.z, h: w.heading, aerial: w.aerial, walking: w.walking, goal: (() => { const o = race && (race.phase === 'vault' ? stashes.find((x) => x.vault) : race.phase === 'escape' ? stashes.find((x) => x.gate) : null); return o ? { x: o.x, z: o.z, kind: race.phase } : null; })(), left: stashes.filter((o) => typeof o.key === 'number' && !isTaken(o)).map((o) => ({ x: o.x, z: o.z, rare: !!o.rare, heist: !!o.heist, delivery: !!o.delivery, ware: !!o.ware })) }; }, onBang: null, quiet: false, remoteBang, start, stop, raceFromHome, quitRace: () => endRace(false), back, openPicker, openTutorial, place: placeMarks, walk, startRace, get race() { return race; }, finishRace: (sec) => endRace(true, sec), /* (finishRace: for tests) */ get hits() { return hits.map((h) => ({ ...h })); }, /* (hits: for tests) */ get on() { return !!(G() && G().on); } };
+  window.PatakaChor = { treasure: () => treasureOfWeek(), treasureAt: (ms) => treasureOfWeek(ms), nextChange: () => nextChange(), /* nav: where you stand and face, and the day's stashes still out (for tests that play by touch) */ get nav() { const w = G() && G().w3d; if (!w) return null; const c = w.camera(); return { x: c.x, z: c.z, h: w.heading, aerial: w.aerial, walking: w.walking, goal: (() => { const o = race && (race.phase === 'clues' ? stashes.find((x) => x.clue) : race.phase === 'vault' ? stashes.find((x) => x.vault) : race.phase === 'escape' ? stashes.find((x) => x.gate) : null); return o ? { x: o.x, z: o.z, kind: race.phase } : null; })(), left: stashes.filter((o) => typeof o.key === 'number' && !isTaken(o)).map((o) => ({ x: o.x, z: o.z, rare: !!o.rare, heist: !!o.heist, delivery: !!o.delivery, ware: !!o.ware })) }; }, onBang: null, quiet: false, remoteBang, start, stop, raceFromHome, storyFromPicker, storyFromHome, syncHomeStory, quitRace: () => endRace(false), back, openPicker, openTutorial, place: placeMarks, walk, startRace, get race() { return race; }, finishRace: (sec) => endRace(true, sec), /* (finishRace: for tests) */ nabOnRun: () => { const w = G() && G().w3d; if (w && race && race.phase === 'escape') (race.story && !race.story.comeback ? comeback : dropTreasure)(w, where(w, w.camera())); }, /* (nabOnRun: Seth-ji's catch on the run, for tests) */ get hits() { return hits.map((h) => ({ ...h })); }, /* (hits: for tests) */ get on() { return !!(G() && G().on); }, get festival() { return festival; }, set festival(v) { festival = !!v; } };
   document.addEventListener('DOMContentLoaded', () => {
-    wrapRemote();
+    wrapRemote(); setTimeout(recoverStory, 800);
     const btn = document.getElementById('btnChor');
-    if (btn) btn.addEventListener('click', () => openPicker(false));
+    if (btn) btn.addEventListener('click', () => { festival = true; openPicker(false); });
+    const hs = document.getElementById('homeStory');
+    if (hs) { hs.addEventListener('click', storyFromHome); syncHomeStory(); window.addEventListener('load', syncHomeStory); }
     // The week's treasure, said where people choose what to play: it's the reason to race
-    const tr = treasureOfWeek(), tile = document.getElementById('tileChor'), ch = document.querySelector('#btnChRace small');
-    if (tile) tile.textContent = `${tr[2]} ${T(`This week: steal the ${tr[1]}`)}`;
+    const tr = treasureOfWeek(), ch = document.querySelector('#btnChRace small');
+    const heist = document.getElementById('tileHeist'); if (heist) heist.textContent = `${tr[2]} ${T(`This week: steal the ${tr[1]}`)}`;
+    const hArt = document.querySelector('#btnHeist .heist-art'); if (hArt) hArt.innerHTML = tPic(tr);
+    const hBtn = document.getElementById('btnHeist'); if (hBtn) hBtn.addEventListener('click', () => { const c = document.getElementById('btnChRace'); if (c) c.click(); });
     if (ch) ch.textContent = T(`Steal the ${tr[1]}`);
     const chIcon = document.querySelector('#btnChRace > i'); if (chIcon) chIcon.innerHTML = tPic(tr); // the home Challenges card shows the week's treasure
-    const badge = btn && btn.querySelector('.tile-badge'); if (badge) badge.textContent = T('Heist');
     // On the home screen: this week's best heist on the Bazaar (a real player's time from the street board) to beat
     const rival = document.getElementById('homeRival');
     const showRival = () => {

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#070b24">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<!-- Event Sky gallery (build spec §3.8, §4.15, §4.21). The gallery key travels in the #fragment and never reaches a
+     server. Scripts come from this page's own origin only (face/face-search.js is bundled), also inside the app, where
+     the page has the native bridge. The selfie-search model's data (library and weights, SHA-256 checked, run only in
+     a Worker) is fetched from the website (faceBase), so connect-src allows it. The one inline script is i18n.js's
+     LUTSLang._start(). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://light-up-the-skies-default-rtdb.asia-southeast1.firebasedatabase.app https://stalinpusparaj.github.io; img-src 'self' data: blob:; media-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-b7q+fF00IZDELNdt9wvRgAhQwYOib/HHxXzNiOoXE/I='; object-src 'none'; base-uri 'self'; form-action 'none'">
+<title>Photos from the evening</title>
+<link rel="icon" href="assets/icons/icon-192.png">
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+<link rel="stylesheet" href="event-sky.css">
+<link rel="stylesheet" href="event-gallery.css">
+</head>
+<body class="es es-gallery">
+<header class="g-head">
+  <img id="gLogo" class="g-logo" alt="" hidden>
+  <h1 id="gTitle">Photos from the evening</h1>
+  <p id="gNames" class="g-names" data-no-i18n hidden></p>
+  <div id="gKeep" class="g-keep small"></div>
+</header>
+
+<main id="gMain" class="g-main">
+  <!-- Loading, missing key, ended, password: one card at a time -->
+  <section id="gGate" class="g-gate card" aria-live="polite">
+    <p id="gGateMsg" class="g-gate-msg">Loading photos…</p>
+    <form id="gPw" class="g-pw" hidden>
+      <label for="gPwIn">Enter the password</label>
+      <input id="gPwIn" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" minlength="1" maxlength="80" required>
+      <p id="gPwErr" class="g-err" role="alert" hidden>Wrong password</p>
+      <button id="gPwGo" class="es-btn" type="submit">Open</button>
+    </form>
+    <button id="gRetry" class="es-btn ghost" type="button" hidden>Try again</button>
+  </section>
+
+  <div id="gBanner" class="g-banner" role="status" hidden></div>
+
+  <div id="gBody" hidden>
+    <nav id="gAlbums" class="g-albums" role="tablist" aria-label="Albums"></nav>
+    <div id="gTools" class="g-tools">
+      <button id="gFind" class="g-tool" type="button" hidden>Find my photos</button>
+      <button id="gShare" class="g-tool" type="button">Share the gallery</button>
+      <button id="gZip" class="g-tool" type="button" hidden>Download favourites (ZIP)</button>
+    </div>
+    <p id="gEmpty" class="g-empty" hidden>No photos here yet</p>
+    <ul id="gGrid" class="g-grid" aria-label="Photos"></ul>
+    <div id="gMore" class="g-more">
+      <button id="gMoreBtn" class="es-btn ghost" type="button" hidden>Show more photos</button>
+    </div>
+  </div>
+
+  <!-- Host and co-host only (on their own device): gallery length within the plan -->
+  <section id="gHost" class="g-host card" hidden>
+    <h2 id="gHostH">Keep the gallery for</h2>
+    <div id="gDays" class="g-days" role="radiogroup" aria-labelledby="gHostH"></div>
+    <p id="gHostNote" class="small" hidden>Full-size photos are kept for 14 days; after that your 300 highlights stay full size and the rest stay as small previews.</p>
+    <p id="gHostMsg" class="small" role="status"></p>
+  </section>
+
+  <footer class="g-foot">
+    <label class="g-lang"><span>Language</span> <select id="gLang"></select></label>
+    <a id="gPlay" class="g-play" href="#" target="_blank" rel="noopener" hidden>Get it on Google Play</a>
+  </footer>
+</main>
+
+<!-- Lightbox -->
+<div id="gLb" class="g-lb" role="dialog" aria-modal="true" aria-labelledby="gLbCount" hidden>
+  <div class="g-lb-top">
+    <span id="gLbCount" class="g-lb-count"></span>
+    <button id="gLbClose" class="g-icon" type="button" aria-label="Close">✕</button>
+  </div>
+  <div class="g-lb-stage">
+    <button id="gLbPrev" class="g-icon g-lb-nav prev" type="button" aria-label="Previous photo">‹</button>
+    <img id="gLbImg" alt="">
+    <video id="gLbVid" playsinline muted controls preload="none" hidden></video>
+    <button id="gLbPlay" class="g-act g-play-btn" type="button" hidden>Play video</button>
+    <div id="gLbSpin" class="g-spin" hidden></div>
+    <button id="gLbNext" class="g-icon g-lb-nav next" type="button" aria-label="Next photo">›</button>
+  </div>
+  <p id="gLbNote" class="g-lb-note small" hidden></p>
+  <div class="g-lb-meta">
+    <span id="gLbName" data-no-i18n></span>
+    <span id="gLbCap" data-no-i18n></span>
+    <span id="gLbMission"></span>
+  </div>
+  <div class="g-lb-actions">
+    <button id="gLbFav" class="g-icon g-fav" type="button" aria-pressed="false" aria-label="Favourite">♥</button>
+    <div id="gLbRx" class="g-rx" role="group" aria-label="Reactions">
+      <button type="button" data-e="h" aria-label="Love it" aria-pressed="false"><span aria-hidden="true">😍</span> <b>0</b></button>
+      <button type="button" data-e="f" aria-label="Fire" aria-pressed="false"><span aria-hidden="true">🔥</span> <b>0</b></button>
+      <button type="button" data-e="w" aria-label="Wow" aria-pressed="false"><span aria-hidden="true">😮</span> <b>0</b></button>
+      <button type="button" data-e="c" aria-label="Clap" aria-pressed="false"><span aria-hidden="true">👏</span> <b>0</b></button>
+    </div>
+    <button id="gLbDl" class="g-act" type="button">Download</button>
+    <button id="gLbReport" class="g-act ghost" type="button">Report this photo</button>
+  </div>
+</div>
+
+<!-- Report -->
+<div id="gRep" class="g-sheet" role="dialog" aria-modal="true" aria-labelledby="gRepH" hidden>
+  <form id="gRepForm" class="g-sheet-card">
+    <h2 id="gRepH">Report this photo</h2>
+    <label class="g-radio"><input type="radio" name="why" value="me"> <span>It's me and I want it removed</span></label>
+    <label class="g-radio"><input type="radio" name="why" value="rude"> <span>It's rude or unkind</span></label>
+    <label class="g-radio"><input type="radio" name="why" value="child"> <span>It shows a child who shouldn't be shown</span></label>
+    <label class="g-radio"><input type="radio" name="why" value="other"> <span>Something else</span></label>
+    <p id="gRepErr" class="g-err" role="alert" hidden>Pick a reason</p>
+    <div class="g-row">
+      <button id="gRepCancel" class="es-btn ghost" type="button">Cancel</button>
+      <button id="gRepSend" class="es-btn" type="submit">Send</button>
+    </div>
+  </form>
+</div>
+
+<!-- Selfie search -->
+<div id="gFace" class="g-sheet" role="dialog" aria-modal="true" aria-labelledby="gFaceH" hidden>
+  <div class="g-sheet-card g-face">
+    <h2 id="gFaceH">Find my photos</h2>
+    <p class="small">Selfie search looks for your face in the event photos, on this phone only. Nothing about your face is sent or stored.</p>
+    <label id="gFaceTake" class="es-btn g-take" for="gFaceFile">Take a selfie</label>
+    <input id="gFaceFile" class="g-vh" type="file" accept="image/*" capture="user">
+    <p id="gFaceStatus" class="g-face-status" role="status"></p>
+    <progress id="gFaceProg" max="1" value="0" hidden></progress>
+    <section id="gFaceLikely" class="g-found" hidden><h3>Likely you</h3><ul></ul></section>
+    <section id="gFaceMaybe" class="g-found" hidden><h3>Maybe you</h3><ul></ul></section>
+    <button id="gFaceClose" class="es-btn ghost" type="button">Close</button>
+  </div>
+</div>
+
+<!-- Confirm (big downloads) -->
+<div id="gAsk" class="g-sheet" role="alertdialog" aria-modal="true" aria-labelledby="gAskMsg" hidden>
+  <div class="g-sheet-card">
+    <p id="gAskMsg"></p>
+    <div class="g-row">
+      <button id="gAskNo" class="es-btn ghost" type="button">Cancel</button>
+      <button id="gAskYes" class="es-btn" type="button">Download</button>
+    </div>
+  </div>
+</div>
+
+<div id="gToast" class="g-toast" role="status" aria-live="polite" hidden></div>
+
+<!-- event-gallery.js runs first only to point i18n.js at the event dictionaries (luts:es-lang, i18n/event/); the
+     gallery itself starts on DOMContentLoaded, after every script below has loaded. -->
+<script src="event-config.js"></script>
+<script src="event-gallery.js"></script>
+<script src="i18n.js"></script>
+<script src="event-sky.js"></script>
+<script src="event-media.js"></script>
+<script src="event-zip.js"></script>
+<script src="tv.js"></script>
+</body>
+</html>

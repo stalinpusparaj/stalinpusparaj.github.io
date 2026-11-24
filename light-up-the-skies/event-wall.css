@@ -1,0 +1,108 @@
+/* Event Sky wall (event-wall.html): the big screen at the venue, a second screen, a TV, or a phone propped up.
+   Loaded after event-sky.css (shared tokens and base components); every token has a fallback here, so the wall still
+   reads right if the shared file changes. Sizes are in vh/vmin so one layout works from a 360 px phone to a 1080p TV. */
+.es-wall {
+  --w-navy: var(--navy, #070b24);
+  --w-gold: var(--gold, #f5c451);
+  --w-gold2: var(--gold2, #ffe7a3);
+  --w-ink: var(--ink, #f4f1e8);
+  --w-muted: var(--muted, #a9acc4);
+  --w-glass: rgba(7, 11, 36, .72);
+  --w-line: rgba(245, 196, 81, .45);
+  --w-pad: clamp(8px, 2vmin, 28px);
+  --w-qr: 18vh;
+  margin: 0; height: 100%; overflow: hidden; background: #03040d; color: var(--w-ink);
+  font-family: Outfit, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", sans-serif;
+  -webkit-tap-highlight-color: transparent; user-select: none;
+}
+html.es-wall-html { height: 100%; background: #03040d; }
+.es-wall [hidden] { display: none !important; }
+.es-wall .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- the sky ---------- */
+#wBg { position: fixed; inset: 0; background: #05040f center 40% / cover no-repeat; filter: brightness(.62) saturate(1.05); transition: opacity 1.2s ease; }
+#wSky { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#wVid { position: fixed; left: 0; top: 0; object-fit: contain; border-radius: 6px; box-shadow: 0 0 40px rgba(0, 0, 0, .6); opacity: 0; transition: opacity .7s ease; pointer-events: none; background: #000; }
+#wVid.on { opacity: 1; }
+#wVid.dim { filter: brightness(.5) saturate(0); }
+
+/* ---------- header and counter ---------- */
+.w-head { position: fixed; top: 0; left: 0; right: 0; padding: var(--w-pad) 12vw 0; text-align: center; pointer-events: none; }
+.w-head h1 { margin: 0; font-family: Cinzel, "Noto Sans Devanagari", serif; font-weight: 800; font-size: clamp(20px, 5.2vmin, 64px); line-height: 1.15; color: var(--w-gold); text-shadow: 0 0 18px rgba(245, 196, 81, .6), 0 2px 4px rgba(0, 0, 0, .8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-head p { margin: .2em 0 0; font-size: clamp(14px, 2.8vmin, 34px); color: var(--w-gold2); text-shadow: 0 1px 4px rgba(0, 0, 0, .9); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-count { position: fixed; top: var(--w-pad); left: var(--w-pad); margin: 0; padding: .35em .9em; border-radius: 999px; background: var(--w-glass); border: 1px solid var(--w-line); color: var(--w-gold2); font-size: clamp(12px, 2vmin, 24px); font-variant-numeric: tabular-nums; pointer-events: none; }
+.w-count:empty { display: none; }
+
+/* ---------- announcement ticker (banner) ---------- */
+.w-ticker { position: fixed; top: 0; left: 0; right: 0; z-index: 4; overflow: hidden; background: linear-gradient(180deg, #ffe7a3, #f5c451); color: #241500; box-shadow: 0 4px 24px rgba(245, 196, 81, .45); font-weight: 700; font-size: clamp(16px, 3.6vmin, 44px); line-height: 1.9; white-space: nowrap; animation: w-drop .6s ease both; }
+.w-ticker span { display: inline-block; padding-left: 100%; animation: w-tick 14s linear infinite; }
+.w-ticker.short span { padding-left: 0; display: block; text-align: center; animation: none; }
+@keyframes w-tick { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+@keyframes w-drop { from { transform: translateY(-100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .w-ticker span { padding-left: 0; display: block; text-align: center; animation: none; white-space: normal; } .w-ticker { animation: none; } }
+
+/* ---------- QR box (corner, size s/m/l = 12/18/26 vh) ---------- */
+.w-qr { position: fixed; z-index: 3; display: flex; flex-direction: column; align-items: center; gap: .3vh; padding: 1vh; border-radius: 1.6vh; background: var(--w-glass); border: 1px solid var(--w-line); box-shadow: 0 0 24px rgba(0, 0, 0, .5); transition: opacity .4s ease; max-width: 46vw; }
+.w-qr canvas { display: block; height: var(--w-qr); width: var(--w-qr); max-width: 40vw; max-height: 40vw; image-rendering: pixelated; border-radius: .8vh; background: #fff; }
+.w-qr.s { --w-qr: 12vh; } .w-qr.m { --w-qr: 18vh; } .w-qr.l { --w-qr: 26vh; }
+.w-qr.br { right: var(--w-pad); bottom: var(--w-pad); } .w-qr.bl { left: var(--w-pad); bottom: var(--w-pad); }
+.w-qr.tr { right: var(--w-pad); top: var(--w-pad); } .w-qr.tl { left: var(--w-pad); top: var(--w-pad); }
+.w-scan { margin: 0; color: var(--w-gold2); font-size: clamp(11px, calc(var(--w-qr) * .09), 26px); font-weight: 600; text-align: center; max-width: calc(var(--w-qr) * 1.4); }
+.w-code { margin: 0; color: #fff; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-weight: 700; letter-spacing: .12em; font-size: clamp(14px, calc(var(--w-qr) * .16), 44px); }
+/* Before the event opens the QR is the whole point of the screen */
+.es-wall.pre .w-qr { --w-qr: 34vh; left: 50%; right: auto; top: 52%; bottom: auto; transform: translate(-50%, -50%); }
+
+/* ---------- retention line, status, toasts ---------- */
+.w-keep { position: fixed; left: var(--w-pad); bottom: var(--w-pad); margin: 0; max-width: min(54vw, 760px); color: rgba(244, 241, 232, .78); font-size: clamp(10px, 1.45vmin, 17px); line-height: 1.35; text-shadow: 0 1px 3px rgba(0, 0, 0, .9); pointer-events: none; }
+.w-qr.bl ~ .w-keep { left: auto; right: var(--w-pad); text-align: right; }
+.w-status { position: fixed; left: 50%; bottom: calc(var(--w-pad) * 3.2); transform: translateX(-50%); margin: 0; padding: .5em 1.2em; border-radius: 999px; background: rgba(7, 11, 36, .86); border: 1px solid var(--w-line); color: var(--w-gold2); font-size: clamp(13px, 2.3vmin, 28px); white-space: nowrap; max-width: 92vw; overflow: hidden; text-overflow: ellipsis; }
+.w-toast { position: fixed; left: 50%; top: 18vh; transform: translateX(-50%); z-index: 6; margin: 0; padding: .55em 1.3em; border-radius: 999px; background: rgba(7, 11, 36, .9); border: 1px solid var(--w-gold); color: var(--w-gold2); font-size: clamp(14px, 2.6vmin, 30px); max-width: 90vw; text-align: center; }
+.w-opens { position: fixed; left: 0; right: 0; top: 23vh; margin: 0; text-align: center; color: var(--w-gold2); font-size: clamp(18px, 4.6vmin, 56px); font-weight: 700; text-shadow: 0 0 16px rgba(245, 196, 81, .5); font-variant-numeric: tabular-nums; pointer-events: none; }
+.w-special { position: fixed; left: 0; right: 0; top: 13vh; margin: 0; text-align: center; color: var(--w-gold2); font-size: clamp(16px, 3.4vmin, 40px); font-weight: 700; text-shadow: 0 0 12px rgba(0, 0, 0, .9); pointer-events: none; }
+
+/* ---------- touch controls (a phone or a laptop without a keyboard) ---------- */
+.w-bar { position: fixed; left: 50%; bottom: calc(var(--w-pad) * 2); transform: translateX(-50%); z-index: 7; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 8px; border-radius: 26px; background: rgba(7, 11, 36, .92); border: 1px solid var(--w-line); max-width: 96vw; }
+.w-btn { min-width: 44px; min-height: 44px; padding: 0 16px; border-radius: 22px; border: 1px solid var(--w-gold); background: transparent; color: var(--w-gold); font: inherit; font-weight: 700; font-size: 15px; cursor: pointer; }
+.w-btn.primary { background: linear-gradient(180deg, var(--w-gold2), var(--w-gold)); color: #1b1300; border: 0; }
+.w-btn:focus-visible, .w-btn.tv-focus { outline: 3px solid #fff; outline-offset: 3px; }
+.w-tap { position: fixed; inset: 0; z-index: 2; background: transparent; border: 0; padding: 0; margin: 0; cursor: default; }
+
+/* ---------- sheets: help, code entry, not linked, pairing ---------- */
+.w-sheet { position: fixed; inset: 0; z-index: 8; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(3, 4, 13, .72); }
+.w-card { width: min(560px, 100%); max-height: 100%; overflow: auto; padding: clamp(16px, 3vmin, 32px); border-radius: 20px; background: rgba(12, 18, 52, .96); border: 1px solid var(--w-line); box-shadow: 0 10px 50px rgba(0, 0, 0, .6); text-align: center; }
+.w-card h2 { margin: 0 0 .5em; color: var(--w-gold); font-family: Cinzel, serif; font-size: clamp(20px, 3.4vmin, 36px); }
+.w-card p { margin: .5em 0; color: var(--w-ink); font-size: clamp(14px, 2vmin, 22px); line-height: 1.45; }
+.w-card .small { color: var(--w-muted); font-size: clamp(12px, 1.7vmin, 18px); }
+.w-card .w-row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 16px; }
+.w-card input { width: 100%; min-height: 52px; margin-top: 10px; padding: 8px 14px; border-radius: 14px; border: 1px solid #3b437a; background: #0b1035; color: var(--w-ink); font: inherit; font-size: 24px; letter-spacing: .2em; text-align: center; text-transform: uppercase; }
+.w-card .err { color: #ffb4a8; min-height: 1.4em; }
+.w-keys { margin: 10px auto 0; border-collapse: collapse; text-align: left; font-size: clamp(14px, 2vmin, 20px); }
+.w-keys th { padding: 4px 14px 4px 0; color: var(--w-gold2); font-family: ui-monospace, Menlo, Consolas, monospace; white-space: nowrap; }
+.w-keys td { padding: 4px 0; }
+.w-card .w-pin { white-space: nowrap; margin: 14px 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: clamp(28px, 7vmin, 96px); font-weight: 800; letter-spacing: .12em; color: #fff; text-shadow: 0 0 24px rgba(245, 196, 81, .55); }
+.w-wait { color: var(--w-gold2); }
+.w-wait::after { content: ''; display: inline-block; width: .6em; height: .6em; margin-left: .5em; border-radius: 50%; border: 2px solid var(--w-gold); border-top-color: transparent; animation: w-spin 1s linear infinite; vertical-align: -.05em; }
+@keyframes w-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .w-wait::after { animation: none; } }
+
+/* ---------- small screens: a phone used as the wall ---------- */
+@media (max-width: 520px), (max-height: 420px) {
+  .w-head { padding-left: 64px; padding-right: 64px; }
+  .w-count { display: none; }
+  .w-bar { display: grid; grid-template-columns: repeat(3, auto); bottom: 12px; }
+  .w-bar .w-btn { padding: 0 10px; font-size: 14px; }
+  .w-qr { padding: 6px; }
+  .w-qr canvas { max-width: 30vw; max-height: 30vw; }
+  .w-keep { max-width: 60vw; }
+  .es-wall.pre .w-qr { --w-qr: 30vh; }
+  .es-wall.pre .w-qr canvas { max-width: 62vw; max-height: 62vw; }
+}
+/* ---------- TV: nothing hovers, focus rings are big ---------- */
+html.tv .w-btn { min-height: 56px; font-size: 20px; padding: 0 24px; }
+html.tv .w-card { width: min(980px, 100%); }
+html.tv .w-card p { font-size: clamp(18px, 2.6vmin, 30px); }
+html.tv .w-card .w-pin { font-size: clamp(36px, 8vmin, 120px); }
+.w-card .w-pin-qr { display: block; margin: 0 auto 12px; width: clamp(120px, 22vmin, 220px); height: auto; background: #fff; padding: 8px; border-radius: 8px; image-rendering: pixelated; }
+.w-card .w-pin-qr[hidden] { display: none; }
+.w-pair-ask p { font-size: 1.3em; margin: 12px 0; }
+html.tv .w-btn:focus, html.tv .w-btn.tv-focus { outline: 4px solid #fff; outline-offset: 4px; }

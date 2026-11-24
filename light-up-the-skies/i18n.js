@@ -6,20 +6,21 @@
     ['auto', 'Phone language'], ['en', 'English'], ['hi', 'हिन्दी'], ['bn', 'বাংলা'], ['mr', 'मराठी'], ['te', 'తెలుగు'],
     ['ta', 'தமிழ்'], ['gu', 'ગુજરાતી'], ['kn', 'ಕನ್ನಡ'], ['ml', 'മലയാളം'], ['pa', 'ਪੰਜਾਬੀ'],
   ];
-  const KEY = 'luts:lang';
+  const KEY = window.LUTS_I18N_KEY || 'luts:lang'; // Event Sky pages keep their own choice (luts:es-lang)
   const codes = LANGS.slice(1).map(([c]) => c);
   // English until you choose: a language you pick (or "Phone language") is stored and kept from then on.
   let saved = 'en';
   try { saved = localStorage.getItem(KEY) || 'en'; } catch (e) { /* storage blocked: English */ }
   const phone = (navigator.languages || [navigator.language || 'en']).map((l) => String(l).toLowerCase().split('-')[0]).find((l) => codes.includes(l)) || 'en';
-  const lang = codes.includes(saved) ? saved : phone;
+  const forced = codes.includes(window.LUTS_I18N_LANG) ? window.LUTS_I18N_LANG : ''; // an event page's default (?l=, the game's)
+  const lang = codes.includes(saved) ? saved : (forced || phone);
   window.LUTSLang = { langs: LANGS, chosen: codes.includes(saved) ? saved : 'auto', lang,
     choose(code) { try { localStorage.setItem(KEY, code); } catch (e) { /* not saved */ } location.reload(); },
     t: (s) => s };
   document.documentElement.lang = lang;
   if (lang === 'en') return;
   // Synchronous, so the dictionary is there before game.js runs and the page is first drawn.
-  document.write(`<script src="i18n/${lang}.js"><\/script><script>LUTSLang._start()<\/script>`);
+  document.write(`<script src="${window.LUTS_I18N_DIR || 'i18n/'}${lang}.js"><\/script><script>LUTSLang._start()<\/script>`);
 
   const ATTRS = ['aria-label', 'placeholder', 'title', 'alt', 'data-cap'];
   const cache = new Map();

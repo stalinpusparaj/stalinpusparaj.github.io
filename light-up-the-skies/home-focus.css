@@ -1,0 +1,81 @@
+/* A quieter home: useful actions first, optional discoveries and offers below. */
+.home-shop { display: none; }
+html:not(.tv) #intro.home-focused .intro-inner { display: flex; flex-direction: column; align-items: stretch; gap: 14px; max-width: 620px; text-align: left; padding-bottom: calc(110px + var(--safe-b, 0px)); }
+html:not(.tv) #intro.home-focused .intro-icon { width: 52px; height: 52px; margin: 0 auto; order: -10; }
+html:not(.tv) #intro.home-focused .title { order: -9; margin: 0; font-size: clamp(1.8rem, 6vw, 2.6rem); line-height: 1.1; text-align: center; animation: none; }
+html:not(.tv) #intro.home-focused .lead { display: block; order: -8; margin: 0; font-size: .9rem; text-align: center; color: #f2e9da; }
+html:not(.tv) #intro.home-focused .intro-actions { order: -7; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; max-width: none; gap: 10px; }
+html:not(.tv) #intro.home-focused .intro-actions > .btn { min-width: 0; min-height: 56px; padding: 12px; font-size: 1rem; line-height: 1.35; white-space: normal; }
+html:not(.tv) #intro.home-focused #btnStart .btn-ico, html:not(.tv) #intro.home-focused #btnIntroCard .card-pic { height: 82px !important; aspect-ratio: auto; margin: 0 0 8px; }
+html:not(.tv) #intro.home-focused #homeWatch { grid-column: 1 / -1; color: #fff4dc; background: #251c45; }
+html:not(.tv) #intro.home-focused .home-shop { order: -7; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: 100%; }
+html:not(.tv) #intro.home-focused .home-shop button { display: flex; align-items: center; gap: 9px; min-width: 0; min-height: 64px; padding: 9px 11px; border: 1px solid rgba(255, 214, 130, .65); border-radius: 16px; color: #fff4dc; background: rgba(24, 17, 48, .94); text-align: left; font: inherit; cursor: pointer; }
+html:not(.tv) #intro.home-focused .home-shop button[hidden] { display: none; }
+html:not(.tv) #intro.home-focused .home-shop button > span:first-child { font-size: 1.3rem; }
+html:not(.tv) #intro.home-focused .home-shop button > span:last-child { min-width: 0; }
+html:not(.tv) #intro.home-focused .home-shop b, html:not(.tv) #intro.home-focused .home-shop small { display: block; overflow-wrap: anywhere; }
+html:not(.tv) #intro.home-focused .home-shop b { font-size: .9rem; }
+html:not(.tv) #intro.home-focused .home-shop small { margin-top: 2px; color: #e9d8ba; font-size: .72rem; line-height: 1.25; }
+html:not(.tv) #intro.home-focused .home-shop button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+html:not(.tv) #intro.home-focused .home-return { order: -6; display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 10px; }
+.home-return-card { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 5px; min-height: 76px; min-width: 0; padding: 12px 14px; border-radius: 18px; border: 1px solid #857454; color: #fff4dc; background: #201a39; text-align: left; font: inherit; cursor: pointer; }
+.home-return-card small { font-size: .8rem; color: #ffda8c; }
+.home-return-card b { font-size: .95rem; overflow-wrap: anywhere; }
+.home-return-card[hidden] { display: none; }
+html:not(.tv) #intro.home-focused :is(.home-story, .home-today, .home-pass, .home-rival) { width: 100%; max-width: none; margin: 0; }
+html:not(.tv) #intro.home-focused .home-sec { width: 100%; max-width: none; margin: 0; }
+html:not(.tv) #intro.home-focused .home-utilities { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px; background: #19142e; border-radius: 18px; }
+html:not(.tv) #intro.home-focused .home-utilities .home-side { position: static; display: flex; flex-direction: row; flex: 1 1 150px; gap: 8px; }
+html:not(.tv) #intro.home-focused .home-utilities .side-btn { flex: 1; width: auto; min-width: 0; min-height: 64px; padding: 6px; }
+html:not(.tv) #intro.home-focused .home-utilities .side-btn > span { font-size: .8rem; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+html:not(.tv) #intro.home-focused .home-bar { width: calc(100% - 24px); max-width: 620px; bottom: calc(8px + var(--safe-b, 0px)); }
+html:not(.tv) #intro.home-focused .home-bar button { min-width: 0; min-height: 56px; flex-direction: column; padding: 6px 2px; gap: 3px; font-size: .72rem; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; }
+html:not(.tv) #intro.home-focused .home-bar button i img { width: 28px; height: 28px; }
+.diya-tools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.diya-tool { min-width: 0; padding: 8px; flex-wrap: wrap; white-space: normal; overflow-wrap: anywhere; }
+.diya-tool svg { flex-shrink: 0; }
+.diya-tools .diya-peek { grid-column: 1; }
+#hint { color: #fff4dc; text-shadow: 0 1px 3px #000; }
+.home-return-card:focus-visible, #homeWatch:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+@media (min-width: 700px) { .diya-tools { grid-template-columns: repeat(5, minmax(0, 1fr)); } .diya-tools .diya-peek { grid-column: auto; } }
+@media (prefers-reduced-motion: reduce) { html:not(.tv) #intro.home-focused #btnStart .btn-ico img { animation: none !important; } }
+
+/* Prices, billing terms and restore are a single decision, ahead of the optional catalogue. */
+#premiumPanel .premium-hero { height: 96px; }
+#premiumPanel .premium-body { margin-top: 0; padding: 0 18px 24px; }
+#premiumPanel .premium-body h2 { font-size: 1.4rem; }
+#premiumPanel .premium-sub { font-size: .9rem; line-height: 1.5; }
+#premiumPanel .premium-close { position: sticky; top: 8px; float: right; margin: 8px 8px -56px 0; z-index: 4; }
+.premium-highlights { display: flex; flex-wrap: wrap; list-style: none; gap: 8px; padding: 0; margin: 12px 0; }
+.premium-highlights li { padding: 6px 10px; border-radius: 12px; background: #28213f; color: #ffdf9b; font-size: .82rem; }
+.premium-details { border-top: 1px solid rgba(255, 214, 130, .3); margin-top: 16px; }
+.premium-details > summary { min-height: 48px; padding: 14px 0; color: #ffe2a8; cursor: pointer; font-weight: 700; }
+#premiumPanel .premium-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; }
+#premiumPanel .premium-links > * { min-height: 48px; display: inline-flex; align-items: center; }
+#premiumPanel .premium-fine { margin: 10px 0; }
+
+html:not(.tv) #intro.home-focused .intro-actions > #homeWatch { display: flex; flex-direction: row; justify-content: center; align-items: center; gap: 12px; }
+html:not(.tv) #intro.home-focused .intro-actions > #homeWatch::before,
+html:not(.tv) #intro.home-focused .intro-actions > #homeWatch::after { content: none !important; }
+/* Long localized offers reflow instead of squeezing the message beside a price. */
+html:not(.tv) #intro.home-focused .home-pass { display: grid; grid-template-columns: auto minmax(0, 1fr); order: 2; }
+html:not(.tv) #intro.home-focused .home-pass .hp-text { min-width: 0; overflow-wrap: anywhere; }
+html:not(.tv) #intro.home-focused .home-pass .hp-go { grid-column: 2; justify-self: start; white-space: normal; }
+html:not(.tv) #intro.home-focused .home-utilities { order: 3; display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); align-items: stretch; }
+html:not(.tv) #intro.home-focused .home-utilities .home-side { display: contents; }
+html:not(.tv) #intro.home-focused .home-utilities .side-btn { justify-content: center; text-align: center; }
+html:not(.tv) #intro.home-focused .home-utilities .side-btn > span { display: block; width: 100%; text-align: center; }
+html:not(.tv) #intro.home-focused .home-utilities .side-btn > em { top: 4px; right: auto; left: calc(50% + 10px); }
+@media (orientation: landscape) and (max-height: 640px) {
+  html:not(.tv) #intro.home-focused .intro-inner { max-width: 760px; gap: 8px; padding-bottom: calc(76px + var(--safe-b, 0px)); }
+  html:not(.tv) #intro.home-focused .intro-icon { display: none; }
+  html:not(.tv) #intro.home-focused .title { font-size: 1.55rem; line-height: 1.05; }
+  html:not(.tv) #intro.home-focused .title br { display: none; }
+  html:not(.tv) #intro.home-focused .intro-actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  html:not(.tv) #intro.home-focused .intro-actions > .btn { min-height: 74px; padding: 7px; font-size: .83rem; }
+  html:not(.tv) #intro.home-focused #btnStart .btn-ico, html:not(.tv) #intro.home-focused #btnIntroCard .card-pic { height: 34px !important; margin-bottom: 2px; }
+  html:not(.tv) #intro.home-focused #homeWatch { grid-column: auto; }
+  html:not(.tv) #intro.home-focused .home-shop button { min-height: 48px; }
+  html:not(.tv) #intro.home-focused .home-bar { width: min(620px, calc(100% - 24px)); }
+  html:not(.tv) #intro.home-focused .home-bar button { min-height: 42px; flex-direction: row; font-size: .68rem; }
+}
