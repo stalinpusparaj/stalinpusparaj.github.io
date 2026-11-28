@@ -51,10 +51,26 @@
     <div class="eh-step" id="wTpl" data-step="1">
       <h2 class="eh-h2">What are you celebrating?</h2>
       <div class="eh-tpls" id="tplList" role="radiogroup" aria-label="What are you celebrating?">
-        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="wedding"><span class="eh-tpl-ico" aria-hidden="true">💍</span><b>Wedding</b></button>
+        <h3 class="eh-tpl-group">Everyday</h3>
         <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="birthday"><span class="eh-tpl-ico" aria-hidden="true">🎂</span><b>Birthday</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="anniversary"><span class="eh-tpl-ico" aria-hidden="true">💞</span><b>Anniversary</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="wedding"><span class="eh-tpl-ico" aria-hidden="true">💍</span><b>Wedding</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="proposal"><span class="eh-tpl-ico" aria-hidden="true">💌</span><b>Proposal</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="graduation"><span class="eh-tpl-ico" aria-hidden="true">🎓</span><b>Graduation</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="getwell"><span class="eh-tpl-ico" aria-hidden="true">💐</span><b>Get well soon</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="thanks"><span class="eh-tpl-ico" aria-hidden="true">🙏</span><b>Thank you</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="sorry"><span class="eh-tpl-ico" aria-hidden="true">🫶</span><b>Sorry</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="missyou"><span class="eh-tpl-ico" aria-hidden="true">✈️</span><b>Miss you</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="justbecause"><span class="eh-tpl-ico" aria-hidden="true">💛</span><b>Just because</b></button>
         <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="party"><span class="eh-tpl-ico" aria-hidden="true">🎆</span><b>Party</b></button>
         <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="corporate"><span class="eh-tpl-ico" aria-hidden="true">🏢</span><b>Office event</b></button>
+        <h3 class="eh-tpl-group">Holidays</h3>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="christmas"><span class="eh-tpl-ico" aria-hidden="true">🎄</span><b>Christmas</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="newyear"><span class="eh-tpl-ico" aria-hidden="true">✨</span><b>New Year</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="valentine"><span class="eh-tpl-ico" aria-hidden="true">💘</span><b>Valentine's Day</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="mothersday"><span class="eh-tpl-ico" aria-hidden="true">🌷</span><b>Mother's Day</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="fathersday"><span class="eh-tpl-ico" aria-hidden="true">👔</span><b>Father's Day</b></button>
+        <button class="eh-tpl" type="button" role="radio" aria-checked="false" data-tpl="diwali"><span class="eh-tpl-ico" aria-hidden="true">🪔</span><b>Diwali</b></button>
       </div>
     </div>
 
@@ -378,18 +394,34 @@
     <!-- ---------- Downloads ---------- -->
     <div class="eh-panel" id="pDownloads" role="tabpanel" aria-labelledby="t-downloads" hidden>
       <section class="eh-card">
-        <h3>All photos and videos (ZIP)</h3>
-        <label class="eh-field"><span>Photos</span><select id="dlOnly"></select></label>
-        <button class="es-btn" id="dlZip" type="button">Download</button>
-      </section>
-      <section class="eh-card">
         <h3>Best-of video (about 60 s)</h3>
         <p class="eh-muted" id="dlVidFree" hidden>Free events get a 30-second video with the Light Up the Skies mark.</p>
+        <label class="eh-field"><span>Style</span><select id="dlStyle">
+          <option value="cinema">Cinematic trailer</option><option value="classic">Classic</option></select></label>
+        <details class="eh-pick" id="dlPickBox" hidden><summary id="dlPickSum">Choose the wishes</summary><div id="dlPick"></div></details>
+        <label class="eh-field"><span>Music</span><select id="dlMusic">
+          <option value="birthday">Birthday tune</option><option value="tune">Celebration tune</option>
+          <option value="file">A song from this phone</option><option value="none">No music</option></select></label>
+        <input id="dlSong" type="file" accept="audio/*" hidden>
+        <p class="eh-muted eh-small" id="dlSongName" data-no-i18n hidden></p>
         <div class="eh-row wrap">
           <button class="es-btn" id="dlVid916" type="button">Vertical (WhatsApp status)</button>
           <button class="es-btn ghost" id="dlVid169" type="button">Wide (TV)</button>
         </div>
         <label class="eh-toggle"><input id="dlCalm" type="checkbox"><span>Calmer fireworks</span></label>
+        <p class="eh-muted eh-small" id="dlVidNote" role="status" hidden></p>
+        <div class="eh-reel" id="dlReel" hidden>
+          <h4>Wish Reel</h4>
+          <p class="eh-muted">Every wish in one video: no mark, Full HD, up to 3 minutes.</p>
+          <p class="eh-live" id="dlReelMsg" role="status"></p>
+          <button class="es-btn" id="dlReelBuy" type="button" hidden></button>
+          <button class="es-btn ghost" id="dlReelUse" type="button" hidden>Use a Wish Reel you bought earlier</button>
+        </div>
+      </section>
+      <section class="eh-card">
+        <h3>All photos and videos (ZIP)</h3>
+        <label class="eh-field"><span>Photos</span><select id="dlOnly"></select></label>
+        <button class="es-btn" id="dlZip" type="button">Download</button>
       </section>
       <section class="eh-card" id="dlBookBox">
         <h3>Photo book (PDF, up to 300 photos)</h3>
@@ -545,6 +577,7 @@
 <script src="drone-show.js"></script>
 <script src="event-fx.js"></script>
 <script src="event-print.js"></script>
+<script src="event-cine.js"></script>
 <script src="event-export.js"></script>
 <script src="event-stats.js"></script>
 <script src="tv.js"></script>

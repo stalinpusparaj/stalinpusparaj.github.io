@@ -288,7 +288,7 @@
       </div>
       <img class="intro-icon" src="assets/icons/icon-192.png" alt="" width="88" height="88">
       <h1 class="title">Light Up<br>the Skies</h1>
-      <p class="lead">Fireworks over India’s landmarks, and wishes written in the sky.</p>
+      <p class="lead" id="homeLead">Fireworks over India’s landmarks, and wishes written in the sky.</p>
       <!-- Diwali Pass offer, first on home while it's on sale and the player has no Premium (game.js syncPassOffer) -->
       <button type="button" class="home-pass" id="homePass" hidden><span class="hp-ico" aria-hidden="true">🪔</span><span class="hp-text"><b>Diwali Pass</b><small></small></span><span class="hp-go" id="homePassPrice">Get it</span></button>
       <!-- Nataraja Rescue one tap from home: the next chapter's intro (chor.js syncHomeStory fills it); on a
@@ -381,7 +381,7 @@
           <picture class="tile-ico tile-art" aria-hidden="true"><img src="assets/menu/thumb-eventsky.webp" alt="" width="40" height="40" decoding="async"></picture>
           <span class="tile-text"><b>Event Sky</b><small>Guest check-in and a live photo wall for your event</small></span>
         </button>
-        <!-- Diwali week: a challenge each day from Dhanteras to Bhai Dooj (game.js renderFest) -->
+        <!-- Diwali week (Dhanteras to Bhai Dooj) or Holiday Nights (18 Dec to 6 Jan): a challenge each day (game.js renderFest) -->
         <button class="home-tile wide fest-tile" id="btnFest" type="button" hidden>
           <span class="tile-ico tile-art" aria-hidden="true"><img src="assets/menu/glyphs/diwali.webp" alt="" width="40" height="40" decoding="async"></span>
           <span class="tile-text"><b>Diwali week</b><small id="tileFest"></small></span>
@@ -526,6 +526,9 @@
         <label class="set-row" for="setLang"><span>Language <small>भाषा · மொழி · ভাষা</small></span>
           <select id="setLang" data-no-i18n></select>
         </label>
+        <label class="set-row" for="setCountry"><span>Celebrating in <small>Greetings, skyline and share apps</small></span>
+          <select id="setCountry" data-no-i18n></select>
+        </label>
       </div>
 
       <div class="set-group">
@@ -533,7 +536,7 @@
         <button class="world-entry" id="btnWorlds" type="button" aria-haspopup="dialog" aria-controls="worldPanel">
           <img class="world-entry-thumb" id="worldEntryThumb" src="assets/worlds/thumb/default-night-sky.webp" alt="" width="64" height="44">
           <span class="world-entry-text">
-            <span class="world-entry-label">Worlds of India</span>
+            <span class="world-entry-label" id="worldEntryLabel">Worlds of India</span>
             <b id="worldEntryName">Default Night Sky</b>
           </span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
@@ -652,7 +655,7 @@
       <header class="world-head">
         <div>
           <h2 id="worldTitle">Choose Your World</h2>
-          <p>Light up the skies above India’s landmarks.</p>
+          <p id="worldSub">Light up the skies above India’s landmarks.</p>
         </div>
         <button class="icon-btn" id="btnCloseWorlds" type="button" aria-label="Close world selector">
           <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -1031,6 +1034,9 @@
         <li><span aria-hidden="true">🧨</span><span><b>Ground and Sparkler</b><small>Light crackers on the street or write with a sparkler, from the tabs at the bottom.</small></span></li>
         <li><span aria-hidden="true">💌</span><span><b>Send a wish</b><small>Tap Create a love card on the home screen to write their name in fireworks, then save the video for WhatsApp.</small></span></li>
       </ul>
+      <label class="welcome-country" for="welcomeCountry"><span>🌍 Where are you celebrating?</span>
+        <select id="welcomeCountry" data-no-i18n></select>
+      </label>
       <button type="button" class="btn primary" id="btnWelcome">Let’s go</button>
     </div>
   </div>
@@ -1678,6 +1684,7 @@
     </div>
   </div>
 
+  <script src="country.js"></script>
   <script src="i18n.js"></script>
   <script src="particle-sky.js"></script>
   <script src="launch-controller.js"></script>
@@ -1693,6 +1700,7 @@
   <script src="timeline.js"></script>
   <script src="scene-layout.js"></script>
   <script src="mela-night.js"></script>
+  <script src="midnight-wave.js"></script>
   <script src="game.js"></script>
   <script src="duel.js"></script>
   <script src="wishes.js"></script>

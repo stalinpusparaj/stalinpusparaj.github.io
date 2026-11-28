@@ -208,6 +208,10 @@
     // Not a landmark: a country house and its garden, built only in code; in 3D its evening turns to night.
     { id: 'golden-manor', name: 'Golden Manor', place: 'Garden estate', image: 'golden-manor', scene: true, sceneRoof: 0.3,
       preset: { name: 'Golden hour', colors: ['#ffd36b', '#ffb070', '#fff1c9', '#ff8fb8', '#c9a6ff'] } },
+    // Not a landmark either: a made-up harbour city at night, the free countdown skyline outside India (country.js sky()).
+    // global: left out of the daily landmark and the Daily Rocket rotation, so those stay the same on every version.
+    { id: 'harbour-city', name: 'Harbour City', place: 'Midnight skyline', image: 'harbour-city', scene: true, sceneRoof: 0.36, global: true,
+      preset: { name: 'Midnight harbour', colors: ['#ffd36b', '#7fd4ff', '#ff6fae', '#fff4e0', '#b58cff'] } },
   ];
   const WORLD_ROOF = 0.36, WORLD_SPAN = [0.02, 0.98]; // where every landmark picture has its roofline (of its height) and its width
   const WORLD_BY_ID = Object.fromEntries(WORLDS.map((w) => [w.id, w]));
@@ -226,11 +230,26 @@
   let reviewerAccess = false;
   try { reviewerAccess = localStorage.getItem('luts:reviewer') === '1'; } catch (e) { /* storage unavailable */ }
   if (reviewerAccess) premium.active = true;
-  // Diwali Pass (₹49, Play product diwali_pass, bought like a gem pack): everything Premium gives until the end of 15 Nov.
-  const PASS = { id: 'diwali_pass', until: new Date(2026, 10, 16).getTime(), sellUntil: new Date(2026, 10, 15).getTime() };
-  const passActive = () => { try { return localStorage.getItem('luts:pass') === '1' && Date.now() < PASS.until; } catch (e) { return false; } };
+  // The festival passes (Play one-time products, bought like a gem pack): everything Premium gives until the end of the
+  // festival. The Diwali Pass (diwali_pass, ₹49) ran to 15 Nov; the New Year Pass (newyear_pass) is on sale from 18 Dec
+  // to 6 Jan and lasts to the end of 7 Jan. PASS is the one for now: on sale, or the last one (whose dates have passed).
+  // luts:pass holds the bought pass's id ('1': the Diwali Pass, as the first version saved it).
+  const PASSES = [
+    { id: 'diwali_pass', name: 'Diwali Pass', icon: '🪔', sellFrom: new Date(2026, 9, 20).getTime(), sellUntil: new Date(2026, 10, 15).getTime(), until: new Date(2026, 10, 16).getTime(), upto: '15 Nov', hello: 'Happy Diwali ✨ Your Diwali Pass is on: every cracker free until 15 Nov' },
+    { id: 'newyear_pass', name: 'New Year Pass', icon: '🎆', sellFrom: new Date(2026, 11, 18).getTime(), sellUntil: new Date(2027, 0, 7).getTime(), until: new Date(2027, 0, 8).getTime(), upto: '7 Jan', hello: 'Happy holidays ✨ Your New Year Pass is on: every cracker and show free until 7 Jan' },
+  ];
+  const passFor = (t = Date.now()) => PASSES.find((x) => t >= x.sellFrom && t < x.until) || [...PASSES].reverse().find((x) => t >= x.sellFrom) || PASSES[0];
+  const PASS = passFor();
+  const passActive = () => {
+    try { const v = localStorage.getItem('luts:pass'), x = PASSES.find((q) => q.id === (v === '1' ? 'diwali_pass' : v)); return !!x && Date.now() < x.until; } catch (e) { return false; }
+  };
+  // Holiday streak amulets: missing 24 or 25 Dec, or 31 Dec or 1 Jan, never breaks a streak and uses up no forgiven day.
+  const AMULET_DAYS = ['12-24', '12-25', '12-31', '01-01'];
+  const amuletDay = (key) => typeof key === 'string' && AMULET_DAYS.includes(key.slice(5));
   if (passActive()) premium.active = true;
   const worldLocked = () => false;
+  // Numbers in the player's own style (1,00,000 in India; 100,000 or 100.000 elsewhere): country.js.
+  const numFmt = (n) => (window.LUTSCountry ? LUTSCountry.num(n) : Number(n).toLocaleString('en-IN'));
   // Streaks forgive one missed day a week; Premium forgives one every 3 days (up to two a week).
   const graceDays = () => (premium.active ? 3 : 7);
   const CROWN_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18h18l-1.6-10-4.6 4.2L12 5l-2.8 7.2L4.6 8z"/></svg>';
@@ -1678,6 +1697,9 @@
     if (s.sparkler) { sparklerWrite(x, y, s); return; }
     const target = Math.min(1500, 950 * Q().count);
     const { pts, step, width } = textPoints(s.text, W * 0.9, s.textH, target);
+    // In random order: when the sky's star budget runs short (a weak phone, another word still up) the whole word comes
+    // out a little sparser, instead of its last rows (descenders, the bottom of every letter) never appearing.
+    for (let i = pts.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [pts[i], pts[j]] = [pts[j], pts[i]]; }
     const k = 3.2, hold = s.hold || 2.8;
     const cols = palette;
     const w = clamp(step * 0.6, 1.3, 3.4);
@@ -3947,6 +3969,33 @@
     toast('Settings reset');
   });
 
+  // ---------- Where you're celebrating (country.js): Settings and the welcome sheet ----------
+  function fillCountry(sel) {
+    if (!sel || !window.LUTSCountry) return;
+    sel.textContent = '';
+    for (const x of LUTSCountry.list()) sel.add(new Option(`${x.f} ${x.n}`, x.c));
+    sel.value = LUTSCountry.code();
+    sel.addEventListener('change', () => {
+      if (!LUTSCountry.set(sel.value)) return;
+      for (const other of [$('#setCountry'), $('#welcomeCountry')]) if (other && other !== sel) other.value = sel.value;
+      localOccasions();
+      track('country', { c: sel.value });
+      toast(`Celebrating in ${LUTSCountry.flag()} ${LUTSCountry.name()}`);
+    });
+  }
+  fillCountry($('#setCountry')); fillCountry($('#welcomeCountry'));
+  // Outside India the world list isn't "of India": Harbour City leads and India's landmarks follow (worldOrder).
+  function countryWords() {
+    const india = !window.LUTSCountry || LUTSCountry.india(), t = (x) => (window.LUTSLang ? LUTSLang.t(x) : x); // (inLang comes later)
+    $('#worldEntryLabel').textContent = t(india ? 'Worlds of India' : 'Worlds');
+    const lead = $('#homeLead');
+    if (lead) lead.textContent = t(india ? 'Fireworks over India’s landmarks, and wishes written in the sky.' : 'Fireworks at midnight, and wishes written in the sky.');
+    $('#worldSub').textContent = t(india ? 'Light up the skies above India’s landmarks.' : 'Light up a midnight skyline, or the skies above India’s landmarks.');
+  }
+  countryWords();
+  window.addEventListener('luts:country', countryWords);
+  try { if (window.LUTSCountry) track.user('country', LUTSCountry.code()); } catch (e) { /* none */ }
+
   function openDrawer() { track.screen('settings'); updateHomeTiles(); drawer.classList.add('open'); drawer.setAttribute('aria-hidden', 'false'); }
   function closeDrawer() { if (drawer.classList.contains('open')) track.back(); drawer.classList.remove('open'); drawer.setAttribute('aria-hidden', 'true'); }
   $('#btnIntroSettings').addEventListener('click', openDrawer); // the home screen's own way in
@@ -4151,25 +4200,47 @@
     facebook: ['Facebook', '#1877f2', 'f'], fbpage: ['Facebook Page', '#0866ff', '⚑'], threads: ['Threads', '#111', '@'], youtube: ['YouTube Shorts', '#ff0000', '▶'],
     snapchat: ['Snapchat', '#fffc00', '👻'], x: ['X', '#000', 'X'], telegram: ['Telegram', '#229ed9', '✈'],
     moj: ['Moj', '#ff3d6e', 'M'], sharechat: ['ShareChat', '#ff6b00', 'S'], josh: ['Josh', '#7b2ff7', 'J'],
+    messenger: ['Messenger', 'linear-gradient(135deg,#00b2ff,#a033ff)', 'm'], line: ['LINE', '#06c755', 'L'], kakao: ['KakaoTalk', '#fee500', 'K'],
+    zalo: ['Zalo', '#0068ff', 'Z'], viber: ['Viber', '#7360f2', 'V'],
+  };
+  // The installed apps with the country's own messengers first (Messenger in the Philippines, LINE in Japan…), then
+  // the rest in the app's order (country.js messengers()).
+  const shareOrder = (keys) => {
+    const first = (window.LUTSCountry ? LUTSCountry.messengers() : []).filter((k) => keys.includes(k));
+    return [...first, ...keys.filter((k) => !first.includes(k))];
   };
   // A ready-made post for each network: a title, the player's own message, keywords and hashtags (YouTube shows the
   // first three hashtags above the title and searches the description; tags can't be set from outside, so they go in
   // as hashtags), and the Play link. The app also copies it, for apps that ignore shared text (Facebook, Instagram).
+  // The words follow the season and the country: Christmas until 25 Dec, New Year from 26 Dec to 7 Jan, and the rest of
+  // the year Diwali in India and plain fireworks elsewhere. The local greeting (country.js) joins the keywords.
+  function shareSeason(now = new Date()) {
+    const m = now.getMonth(), d = now.getDate(), y = m === 11 ? now.getFullYear() + 1 : now.getFullYear();
+    const C = window.LUTSCountry, india = !C || C.india(), loc = (k) => (C && C.greet(k) ? ` · ${C.greet(k)}` : '');
+    if (m === 11 && d <= 25) return { title: 'Christmas fireworks in the sky 🎄 Merry Christmas wishes', words: `Christmas fireworks game · Merry Christmas wishes video · Christmas greeting with name · Christmas lights${loc('christmas')}`,
+      tags: ['#MerryChristmas', '#Christmas', '#ChristmasWishes', '#Fireworks', '#ChristmasLights', '#HappyHolidays', '#NewYear' + y, '#LightUpTheSkies'] };
+    if (m === 11 || (m === 0 && d <= 7)) return { title: `New Year ${y} fireworks 🎆 Happy New Year wishes`, words: `New Year fireworks game · Happy New Year ${y} wishes with name · New Year countdown · virtual fireworks${loc('newyear')}`,
+      tags: [`#HappyNewYear${y}`, '#HappyNewYear', '#NewYear', '#NYE', '#Fireworks', '#NewYearCountdown', '#NewYearWishes', '#LightUpTheSkies'] };
+    if (india) return { title: 'Diwali fireworks in the sky 🎆 Happy Diwali wishes', words: SHARE_WORDS, tags: SHARE_TAGS };
+    return { title: 'Fireworks in the sky 🎆 fireworks greeting with name', words: 'Fireworks game · virtual fireworks · fireworks greeting with name · sparkler name · celebration video',
+      tags: ['#Fireworks', '#FireworksShow', '#Celebration', '#VirtualFireworks', '#Sparkler', '#LightUpTheSkies'] };
+  }
   const SHARE_WORDS = 'Diwali fireworks game · sparkler name · Diwali wishes video · online patakhe · Deepavali greetings';
   const SHARE_TAGS = ['#Diwali', '#HappyDiwali', '#Diwali2026', '#Fireworks', '#DiwaliFireworks', '#Patakhe', '#Deepavali', '#DiwaliWishes', '#FestivalOfLights', '#LightUpTheSkies'];
   function shareTemplate(key) {
     const short = key === 'youtube' || key === 'moj' || key === 'josh' || key === 'instagram';
-    const title = 'Diwali fireworks in the sky 🎆 Happy Diwali wishes' + (short ? ' #Shorts' : '');
+    const season = shareSeason(), SHARE_TAGS = season.tags, SHARE_WORDS = season.words;
+    const title = season.title + (short ? ' #Shorts' : '');
     const tags = (key === 'youtube' ? ['#Shorts', ...SHARE_TAGS] : key === 'x' || key === 'threads' ? SHARE_TAGS.slice(0, 4) : SHARE_TAGS).join(' ');
     const words = SHARE_WORDS;
     const own = (shareCaption || '').trim();
     const link = playLink(key);
-    const text = [own || 'I lit up the sky for Diwali with Light Up the Skies ✨', own.includes('play.google.com') ? '' : `Make yours free: ${link}`, words, tags].filter(Boolean).join('\n\n');
+    const text = [own || (/Diwali/.test(season.title) ? 'I lit up the sky for Diwali with Light Up the Skies ✨' : 'I lit up the sky with Light Up the Skies ✨'), own.includes('play.google.com') ? '' : `Make yours free: ${link}`, words, tags].filter(Boolean).join('\n\n');
     return { title, text };
   }
   const closeShareApps = () => { $('#shareApps').hidden = true; };
   window.addEventListener('luts:videoready', (event) => {
-    const keys = (Array.isArray(event.detail) ? event.detail : []).filter((k) => SHARE_APPS[k]);
+    const keys = shareOrder((Array.isArray(event.detail) ? event.detail : []).filter((k) => SHARE_APPS[k]));
     const row = $('#shareAppsRow');
     row.textContent = '';
     for (const key of [...keys, 'more']) {
@@ -4512,6 +4583,19 @@
     { id: 'feel', label: 'Feelings', ids: ['love', 'thanks', 'sorry', 'missyou', 'getwell', 'congrats', 'justbecause'] },
     { id: 'days', label: 'Special days', ids: ['mothersday', 'fathersday', 'independence', 'friendship', 'teachersday', 'valentine'] },
   ];
+  // Where the player is celebrating reorders the festivals: New Year and Christmas lead from 1 Dec to 7 Jan everywhere,
+  // and all year outside India; India's own Independence Day (with "Jai Hind") is offered in India only. Saved cards
+  // and links with any occasion still play (OCC_BY_ID keeps every one).
+  const OCC_BASE = OCC_CATS.map((k) => k.ids.slice());
+  function localOccasions(now = new Date()) {
+    const C = typeof window !== 'undefined' ? window.LUTSCountry : null, india = !C || C.india();
+    const season = now.getMonth() === 11 || (now.getMonth() === 0 && now.getDate() <= 7);
+    const fest = OCC_BASE[0], lead = season || !india ? ['newyear', 'christmas'] : [];
+    if (!india) lead.push('eid', 'diwali', 'holi');
+    OCC_CATS[0].ids = [...lead, ...fest.filter((id) => !lead.includes(id))];
+    OCC_CATS[3].ids = india ? OCC_BASE[3].slice() : OCC_BASE[3].filter((id) => id !== 'independence');
+  }
+  localOccasions();
   const SHOW_DEFAULT = ['chrysanthemum', 'chrysanthemum', 'kamuro', 'heart']; // Thank you, Custom and Light someone up
   const TEMPLATE_HEADS = new Set(OCCASIONS.map((o) => o.head));
   const TEMPLATE_MSGS = new Set(OCCASIONS.map((o) => o.msg));
@@ -5973,8 +6057,10 @@
   }
   // A card's midnight on this device's own clock (each recipient's local 00:00, wherever they are), or null.
   const cdOf = (c) => (c && c.o === 'newyear' && nyYear(c.d) ? new Date(nyYear(c.d), 0, 1, 0, 0, 0, 0) : null);
-  // A free player's countdown plays on the night sky or one of these 3 landmarks; Premium has every one.
-  const COUNTDOWN_FREE = new Set(['default', 'gateway-of-india', 'india-gate', 'mysore-palace']);
+  // A free player's countdown plays on the night sky, the harbour city or one of these 3 landmarks; Premium has every one.
+  const COUNTDOWN_FREE = new Set(['default', 'harbour-city', 'gateway-of-india', 'india-gate', 'mysore-palace']);
+  // The free skyline a countdown starts on: the harbour city, or Gateway of India for a player in India (country.js).
+  const cdFreeSky = () => (window.LUTSCountry ? LUTSCountry.sky() : 'gateway-of-india');
   // The creator's landmark tiles a free player's countdown card can't use: crowned, and a tap opens Premium.
   const cdLocked = (id) => !!card.d && !premium.active && !COUNTDOWN_FREE.has(id);
   // For tests and the WebView inspector (the countdown screen adds state()).
@@ -6102,7 +6188,7 @@
     const y = on ? countdownYear() : 0;
     card.d = y ? nyCode(y) : '';
     card.dr = y && premium.active ? 1 : 0;
-    if (y && !premium.active && !COUNTDOWN_FREE.has(world.pending || world.id)) selectWorld('gateway-of-india', { silent: true });
+    if (y && !premium.active && !COUNTDOWN_FREE.has(world.pending || world.id)) selectWorld(cdFreeSky(), { silent: true });
   }
   // The countdown's switch (New Year while it is offered), the free tier's note, the Scene step's drone row and the
   // landmark crowns, as the draft has them.
@@ -6352,7 +6438,7 @@
     card.w = world.pending || world.id; // the background picker drives the live scene; the card takes whatever it shows
     if (card.d && countdownYear()) card.d = nyCode(countdownYear()); // a saved countdown sent again next December: the coming midnight
     // Made sure of: a free player's countdown keeps to its 3 landmarks and has no drone finale.
-    if (card.d && !premium.active) { if (!COUNTDOWN_FREE.has(card.w)) card.w = 'gateway-of-india'; card.dr = 0; }
+    if (card.d && !premium.active) { if (!COUNTDOWN_FREE.has(card.w)) card.w = cdFreeSky(); card.dr = 0; }
   }
   function updatePreview() {
     readForm();
@@ -6976,7 +7062,7 @@
   // at New Year, before the link and the Play line. Its Play link counts installs under the countdown.
   const CD_PLAY = { campaign: 'countdown', content: 'newyear' };
   function cdShareText(c) {
-    return `⏳ ${c.f || 'Someone'} sent you a New Year countdown. It plays at your midnight 🎆\n${cdWords(nyYear(c.d))}`;
+    return `⏳ ${cdGreet(nyYear(c.d))}${c.f || 'Someone'} sent you a New Year countdown. It plays at your midnight 🎆\n${cdWords(nyYear(c.d))}`;
   }
   // A countdown sent from the app (the website makes none), and again when it goes out on New Year's Eve before 11 pm.
   function cdSent() {
@@ -7290,8 +7376,14 @@
     after(Z, () => cdFinal(0), tag); // midnight: the countdown's screen leaves the sky to the show
     after(Z - riseTo(py), () => { for (const x of [0.25, 0.75]) go({ x: W * x, y: py, type: 'peony', size: 1.3, c1: '#ffcf6b', c2: '#fff1c9', fast: 1 }); }, tag); // (fast 1: no hang)
     after(Z + 0.2, () => words(String(year), H * 0.16, 0.16, 2.6), tag);
-    after(Z + 3, () => words(head, H * 0.26, 0.12, 2.6), tag);
-    if (name) after(Z + 5.6, () => words(name, nameY(), 0.2, 4), tag);
+    // The greeting on two lines when it's long: one line is shrunk to the sky's width, its letters too thin to read.
+    const hw = String(head || '').trim().split(/\s+/);
+    let cut = 0;
+    if (hw.length > 1 && head.length > 10) for (let k = 1, best = Infinity; k < hw.length; k++) { const d = Math.abs(hw.slice(0, k).join(' ').length - hw.slice(k).join(' ').length); if (d < best) { best = d; cut = k; } }
+    const lines = cut ? [hw.slice(0, cut).join(' '), hw.slice(cut).join(' ')] : [head];
+    // (two lines: under the year, which is still up, so neither covers the other; no head: the year, then the name)
+    if (head) after(Z + 3, () => lines.forEach((l, i) => words(l, H * (lines.length > 1 ? 0.28 + i * 0.08 : 0.28), lines.length > 1 ? 0.08 : 0.1, 2.6)), tag);
+    if (name) after(head ? Z + 6.2 : Z + 4.6, () => words(name, nameY(), 0.2, 4), tag); // (once the greeting, or the year, has faded: each word gets the sky's whole star budget)
     const types = ['peony', 'chrysanthemum', 'willow', 'kamuro', 'palm', 'ring', 'heart', CD_ENDS.includes(end) ? end : 'kamuro'];
     types.forEach((type, i) => after(Z + 7.4 + i * gap, () => go({ x: W * X[i % 3], y: fy, type, size: 1 }), tag));
     const last = Z + 7.4 + (types.length - 1) * gap + riseTo(fy) + 0.26; // the finale's last burst, at the latest
@@ -7539,10 +7631,18 @@
   // ----- The midnight clip: Save video on a countdown, its 5-4-3-2-1, the climax and the card, shaped 9:16 -----
   // From the canvas wherever the browser makes MP4 (the Android app's WebView too), cover-cropped from the screen; else the
   // app's screen recorder, the phone's own shape. A free player's carries the mark and the closing card; Premium's, none.
-  const cdWords = (y) => `Happy New Year ${y} wishes with name · New Year countdown card · fireworks greeting · नया साल मुबारक · புத்தாண்டு வாழ்த்துகள் #HappyNewYear${y} #NewYearCountdown`;
+  // The search words under a countdown: English everywhere, the player's own greeting from country.js (and Tamil too in
+  // India), then the hashtags.
+  const cdWords = (y) => {
+    const C = window.LUTSCountry, local = C ? C.greet('newyear') : 'नया साल मुबारक';
+    const own = [local, !C || C.india() ? 'புத்தாண்டு வாழ்த்துகள்' : ''].filter(Boolean).map((w) => ` · ${w}`).join('');
+    return `Happy New Year ${y} wishes with name · New Year countdown card · fireworks greeting${own} #HappyNewYear${y} #NewYearCountdown`;
+  };
+  // The greeting a share opens with: the local one first where there is one ("Feliz Año Nuevo 2027! · Happy New Year").
+  const cdGreet = (y) => { const g = window.LUTSCountry ? LUTSCountry.greet('newyear') : ''; return g ? `${g} ${y}! ` : ''; };
   function recordCountdownClip(c) {
     const year = nyYear(c.d), clean = premium.active;
-    setShareCaption(`🎆 Happy New Year ${year}! My midnight countdown, made with Light Up the Skies\nMake one for someone: ${appLink()}\n${cdWords(year)}${getApp('countdown', CD_PLAY)}`);
+    setShareCaption(`🎆 ${cdGreet(year)}Happy New Year ${year}! My midnight countdown, made with Light Up the Skies\nMake one for someone: ${appLink()}\n${cdWords(year)}${getApp('countdown', CD_PLAY)}`);
     if (!nativeRecorder || (canRecord() && MediaRecorder.isTypeSupported('video/mp4;codecs=avc1'))) {
       if (rec) { if (rec.quiet) discardRecording(); else stopRecording(); }
       const end = playCountdownClimax(c, 'clip');
@@ -8052,12 +8152,13 @@
   const DIWALI_BOX = { id: 'gems_diwali', name: 'Diwali box', gems: 720, from: '11-06', to: '11-25' };
   const MINI = { id: 'gems_mini', name: 'Mini pack', gems: 40 };
   // Diwali sale (India, until the end of 15 Nov): the Play prices were lowered; the old ones show struck through.
-  const SALE = { until: new Date(2026, 10, 16).getTime(), was: { gems_pouch: 29, gems_box: 79, gems_chest: 199, gems_vault: 499, gems_diwali: 79, lifetime: 999 } };
+  // cur: the currency the old prices are in; a store price in any other currency shows no struck-through price.
+  const SALE = { until: new Date(2026, 10, 16).getTime(), cur: '₹', was: { gems_pouch: 29, gems_box: 79, gems_chest: 199, gems_vault: 499, gems_diwali: 79, lifetime: 999 } };
   // While the sale is on, the pre-sale rupee price struck through before the store's (already in el). True when shown.
   function salePrice(el, key, price) {
     const was = SALE.was[key], now = parseFloat(String(price).replace(/[^\d.]/g, ''));
-    if (!was || Date.now() >= SALE.until || !/₹/.test(price) || !(now < was)) return false;
-    const s = document.createElement('s'); s.className = 'sale-was'; s.textContent = `₹${was}`;
+    if (!was || Date.now() >= SALE.until || !String(price).includes(SALE.cur) || !(now < was)) return false;
+    const s = document.createElement('s'); s.className = 'sale-was'; s.textContent = `${SALE.cur}${was}`;
     el.prepend(s, ' ');
     return true;
   }
@@ -8075,12 +8176,13 @@
     gems_pouch: { name: 'Diya bundle', hints: 5 },
     gems_mini: { name: 'Mini bundle' },
   };
-  const bundleEnd = (combo) => (combo.pass ? PASS.sellUntil : DOUBLE.until);
+  // Bundles with a pass were the Diwali sale's (the New Year Pass is sold on its own).
+  const bundleEnd = (combo) => (combo.pass ? PASSES[0].sellUntil : DOUBLE.until);
   const PAY_HOLD = 4 * 864e5; // how long a payment Google Play calls pending can stay open
   const passDaysLeft = () => Math.max(1, Math.ceil((PASS.sellUntil - Date.now()) / 864e5));
   // The Pass as Google Play sells it here (its live price), while it is on sale to this player; else nothing. One test for
   // every place that offers it, so all of them stop together after the sale.
-  const passOnSale = () => (nativeGems() && !document.documentElement.classList.contains('tv') && !premium.active && !passActive() && Date.now() < PASS.sellUntil && gemStore.packs.find((x) => x.id === PASS.id)) || null;
+  const passOnSale = () => (nativeGems() && !document.documentElement.classList.contains('tv') && !premium.active && !passActive() && Date.now() >= PASS.sellFrom && Date.now() < PASS.sellUntil && gemStore.packs.find((x) => x.id === PASS.id)) || null;
   function buyPass() {
     if (!nativeGems()) { window.open(playLink('pass'), '_blank', 'noopener'); return; }
     funnel('pass_buy_tap'); track('purchase_start', { sku: PASS.id });
@@ -8088,7 +8190,7 @@
     window.LUTSNative.premium('gems-buy', PASS.id);
   }
   function startPass(note) {
-    try { localStorage.setItem('luts:pass', '1'); } catch (e) { /* storage unavailable */ }
+    try { localStorage.setItem('luts:pass', PASS.id); } catch (e) { /* storage unavailable */ }
     funnel('pass_purchased');
     const was = premium.active;
     premium.active = true;
@@ -8096,7 +8198,7 @@
     syncGems();
     closeSheet($('#gemModal')); closePremium();
     renderPaywall(); syncWorldUi(); syncPremiumRow(); syncLaunchUi(); syncPassOffer();
-    toast(note || 'Happy Diwali ✨ Your Diwali Pass is on: every cracker free until 15 Nov', 4200);
+    toast(note || PASS.hello, 4200);
     celebrate();
   }
   // The home screen's Diwali Pass card: while it's on sale, for players without Premium.
@@ -8109,7 +8211,8 @@
     // Home's card leads with Buy 1 Get 1 Free while it's on (from the smallest pack); the Pass stays in the gem sheet.
     const offer = !premium.active && nativeGems() && !document.documentElement.classList.contains('tv') && gemStore.packs.filter((x) => doubleOpen(x.id))[0];
     card.classList.toggle('offer', !!offer);
-    card.querySelector('b').textContent = offer ? 'Buy 1 Get 1 Free' : 'Diwali Pass';
+    card.querySelector('b').textContent = offer ? 'Buy 1 Get 1 Free' : PASS.name;
+    card.querySelector('.hp-ico').textContent = offer ? '🎁' : PASS.icon;
     if (offer) { card.hidden = false; card.querySelector('small').textContent = offerLeft(); $('#homePassPrice').textContent = inLang('From {0}').replace('{0}', offer.price); funnelOnce('gems_home_offer_seen'); }
   }
   // Where buyers drop off: one mark per player per step per day (paywall seen, plan tapped, purchase started,
@@ -8177,7 +8280,7 @@
     if (homePremium) homePremium.hidden = premium.active;
     if (gain > 0) { const pill = $('#btnGems'); pill.classList.remove('gain'); void pill.offsetWidth; pill.classList.add('gain'); }
   }
-  const fmtGems = (n) => Math.max(0, Math.floor(n)).toLocaleString('en-IN');
+  const fmtGems = (n) => numFmt(Math.max(0, Math.floor(n)));
   const GEM_SOURCES = [['watching', 'video'], ['gift', 'daily_gift'], ['sharing', 'share'], ['added', 'purchase'], ['festival', 'festival'], ['chest', 'chest']];
   function addGems(n, why) {
     if (!Number.isFinite(n) || !(n > 0)) return;
@@ -8208,7 +8311,14 @@
     if (wallet.day === today) return;
     const ago = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return dayKey(d); };
     let saved = false;
+    // Missed only holiday amulet days (24/25 Dec, 31 Dec/1 Jan) since the last gift: the streak carries on, nothing used up.
+    const onlyAmulets = (() => {
+      if (!wallet.day || wallet.day >= ago(1)) return false;
+      for (let i = 1; i <= 3; i++) { const k = ago(i); if (k <= wallet.day) return true; if (!amuletDay(k)) return false; }
+      return false;
+    })();
     if (wallet.day === ago(1)) wallet.streak = (wallet.streak || 0) + 1;
+    else if (onlyAmulets) { wallet.streak = (wallet.streak || 0) + 1; saved = true; }
     else if (wallet.day === ago(2) && !(wallet.grace > ago(graceDays()))) { wallet.streak = (wallet.streak || 0) + 1; wallet.grace = today; saved = true; }
     else wallet.streak = 1;
     wallet.day = today;
@@ -8226,6 +8336,7 @@
     $('#giftAmount').textContent = `+${fmtGems(wallet.gift || giftFor(day))}`;
     $('#giftSaved').hidden = !saved;
     $('#giftFest').hidden = !festToday();
+    if (festToday()) $('#giftFest').textContent = inLang(festSeason().id === 'holiday' ? '🎄 Holiday Nights: today’s gift is doubled' : '🪔 Diwali week: today’s gift is doubled');
     const ask = askNotify();
     $('#giftRemind').hidden = !ask; $('#btnGiftCollect').hidden = ask;
     const row = $('#giftDays');
@@ -8286,8 +8397,10 @@
       wallet.tx.push(c.tx);
       delete wallet.waiting[c.pack];
       track('purchase_done', { sku: c.pack || 'gems' });
-      if (c.pack === PASS.id) { pass = true; late = Date.now() - at < PAY_HOLD; continue; } // the Diwali Pass is Premium for the festival, not gems
-      if (combo && combo.pass && !premium.active) { pass = true; late = Date.now() - at < PAY_HOLD; comboName = combo.name; }
+      // A pass is Premium for its festival, not gems: only the pass on sale now starts (an old one replayed after a
+      // reinstall has ended); a bundle's pass is the one on sale when it was bought.
+      if (PASSES.some((x) => x.id === c.pack)) { if (c.pack === PASS.id) { pass = true; late = Date.now() - at < PAY_HOLD; } continue; }
+      if (combo && combo.pass && !premium.active && passFor(at).id === PASS.id) { pass = true; late = Date.now() - at < PAY_HOLD; comboName = combo.name; }
       else if (gave) comboName = combo.name; // (nothing new, as for a Premium player: just the pack)
       if (combo && !wallet.got[c.pack]) { // the extras that get used up, once per pack
         wallet.got[c.pack] = c.tx;
@@ -8311,7 +8424,7 @@
     if (pass) { // (saved now: a Pass alone adds no gems, and only the wallet remembers it was credited)
       saveWallet();
       if (Date.now() < PASS.until) startPass(note);
-      else if (late) toast(inLang('Your Diwali Pass payment came through after it ended. Please write to us for a refund.'), 6000); // (else a reinstall, long after)
+      else if (late) toast(inLang(PASS.id === 'diwali_pass' ? 'Your Diwali Pass payment came through after it ended. Please write to us for a refund.' : 'Your New Year Pass payment came through after it ended. Please write to us for a refund.'), 6000); // (else a reinstall, long after)
     } else if (note) toast(note, 4200);
     if (granted) { saveWallet(); renderGemSheet(); }
   }
@@ -8365,7 +8478,7 @@
     if (!combo || Date.now() >= bundleEnd(combo) || Date.now() < DOUBLE.from || subscribed || document.documentElement.classList.contains('tv')) return lines;
     if (wallet.got[id] || (DOUBLE.packs.includes(id) && !doubleOpen(id))) return lines;
     const pass = gemStore.packs.find((x) => x.id === PASS.id);
-    if (combo.pass && !passActive()) lines.push(['👑', 'Diwali Pass ', ...(pass ? struck(pass.price) : []), 'free · every cracker to 15 Nov']);
+    if (combo.pass && !passActive() && PASS.id === 'diwali_pass') lines.push(['👑', 'Diwali Pass ', ...(pass ? struck(pass.price) : []), 'free · every cracker to 15 Nov']);
     const slots = SIDES.reduce((sum, side) => sum + SLOT_GEMS.slice(rack.bought[side]).reduce((a, b) => a + b, 0), 0);
     if (combo.slots && slots && !rack.classic) lines.push(['🧨', 'Every cracker slot, kept for good ', ...struck(`💎${fmtGems(slots)}`), 'free']);
     if (combo.shows && LIVE_SHOWS.some((x) => !LIVE_FREE_SHOWS.has(x.id) && !liveOwned(x.id))) lines.push(['📺', inLang('All {0} light shows, kept for good').replace('{0}', LIVE_SHOWS.length), ' ', ...struck(`💎${LIVE_ALL_GEMS}`), 'free']);
@@ -8444,13 +8557,14 @@
       if (live) comboRow(id, GEM_PACKS.find((p) => p.id === id).gems, perksOf[id], live, id);
     }
     // The Diwali Pass first, while it's on sale: Premium until 15 Nov for one small price.
-    const passLive = store && !passActive() && !premium.active && Date.now() < PASS.sellUntil && store.find((x) => x.id === PASS.id);
+    const passLive = store && !passActive() && !premium.active && Date.now() >= PASS.sellFrom && Date.now() < PASS.sellUntil && store.find((x) => x.id === PASS.id);
     if (passLive) {
       const b = document.createElement('button');
       b.type = 'button'; b.className = 'gem-pack pass'; b.dataset.pack = PASS.id;
-      b.innerHTML = '<span class="gem-ico pass-ico" aria-hidden="true">🪔</span><span class="gem-text"><b></b><small></small></span><span class="gem-price"></span>';
-      b.querySelector('b').textContent = 'Diwali Pass';
-      b.querySelector('small').textContent = `Every cracker free, everything Premium · until 15 Nov · ${passDaysLeft()} days left`;
+      b.innerHTML = '<span class="gem-ico pass-ico" aria-hidden="true"></span><span class="gem-text"><b></b><small></small></span><span class="gem-price"></span>';
+      b.querySelector('.pass-ico').textContent = PASS.icon;
+      b.querySelector('b').textContent = PASS.name;
+      b.querySelector('small').textContent = `Every cracker free, everything Premium · until ${PASS.upto} · ${passDaysLeft()} days left`;
       b.querySelector('.gem-price').textContent = passLive.price;
       b.disabled = gemStore.status === 'purchasing';
       b.addEventListener('click', () => buyPass());
@@ -8540,6 +8654,7 @@
   const FEST_GOALS = {
     lights: { text: 'Light 10 crackers', n: 10 }, joy: { text: 'Light someone up', n: 1 }, finale: { text: 'Launch a grand finale', n: 1 },
     daily: { text: 'Play today’s Daily Sky', n: 1 }, rockets: { text: 'Launch 5 rockets', n: 5 }, card: { text: 'Make a love card', n: 1 },
+    greet: { text: 'Send someone a holiday card', n: 1 }, wave: { text: 'Watch the Midnight Wave', n: 1 },
   };
   const FEST_SOON = 21; // the Home tile counts down from three weeks before
   const addDays = (key, n) => { const [y, m, d] = key.split('-').map(Number); return dayKey(new Date(y, m - 1, d + n)); };
@@ -8553,17 +8668,44 @@
     days.push({ key: addDays(dooj, -1), name: 'Govardhan Puja', goal: 'rockets', gems: 50 }, { key: dooj, name: 'Bhai Dooj', goal: 'card', gems: 50 });
     return days;
   }
-  const festToday = () => festDays().find((d) => d.key === dayKey()) || null;
+  // Holiday Nights: a challenge each night from 18 Dec to 6 Jan (hy: the year the nights start in), the same tile, sheet,
+  // double daily gifts and morning reminders as Diwali week.
+  function holidayDays(hy) {
+    const named = {
+      '12-18': ['Holiday Nights begin', 'lights', 50], '12-24': ['Christmas Eve', 'joy', 50], '12-25': ['Christmas Day', 'greet', 100],
+      '12-26': ['Boxing Day', 'daily', 50], '12-31': ['New Year’s Eve', 'wave', 100], '01-01': ['New Year’s Day', 'greet', 100],
+      '01-06': ['Three Kings’ Day', 'rockets', 50],
+    };
+    const cycle = ['daily', 'joy', 'rockets', 'finale', 'lights'], days = [];
+    for (let k = `${hy}-12-18`, i = 0; k <= `${hy + 1}-01-06`; k = addDays(k, 1), i++) {
+      const [name, goal, gems] = named[k.slice(5)] || ['Holiday night', cycle[i % cycle.length], 50];
+      days.push({ key: k, name, goal, gems, icon: k.slice(5) <= '12-26' && k.slice(5) >= '12-01' ? '🎄' : '🎆' });
+    }
+    return days;
+  }
+  // The festival on now (or in the 3 weeks before it): Diwali week, else Holiday Nights; none: { id: '', days: [] }.
+  function festSeason(now = new Date()) {
+    const today = dayKey(now), y = now.getFullYear();
+    const near = (days) => days.length && today >= addDays(days[0].key, -FEST_SOON) && today <= days[days.length - 1].key;
+    const dw = festDays(y);
+    if (near(dw)) return { id: 'diwali', days: dw, title: 'Diwali week', sub: 'A festival challenge every day, and double daily gifts all week.', glyph: 'assets/menu/glyphs/diwali.webp', starts: '🪔 Diwali week starts tomorrow', last: 'Done · Happy Diwali!' };
+    const hd = holidayDays(now.getMonth() === 0 ? y - 1 : y);
+    if (near(hd)) return { id: 'holiday', days: hd, title: 'Holiday Nights', sub: 'A challenge every night from 18 Dec to 6 Jan, and double daily gifts.', glyph: 'assets/menu/glyphs/lantern.webp', starts: '🎄 Holiday Nights start tomorrow', last: 'Done · Happy New Year!' };
+    return { id: '', days: [] };
+  }
+  const seasonDays = () => festSeason().days;
+  const festToday = () => seasonDays().find((d) => d.key === dayKey()) || null;
   function festProgress(d) {
     if (d.goal === 'joy') { try { return wallet.joy === d.key || joys.some((j) => j.d === d.key) ? 1 : 0; } catch (e) { return 0; } } // lit someone up, shared or not
     if (d.goal === 'daily') { const st = loadRush(); return st.days && st.days[d.key] !== undefined ? 1 : 0; }
-    if (d.goal === 'card') return myCards.some((e) => e.kind === 'made' && dayKey(new Date(e.created)) === d.key) ? 1 : 0;
+    if (d.goal === 'card' || d.goal === 'greet') return myCards.some((e) => e.kind === 'made' && dayKey(new Date(e.created)) === d.key) ? 1 : 0;
+    if (d.goal === 'wave') return wallet.fest.c[d.key] ? 1 : 0; // (counted by the Midnight Wave show, waveWatched)
     return Math.min(FEST_GOALS[d.goal].n, wallet.fest.c[d.key] || 0);
   }
   // Crackers the player lit (by type), counted toward today's challenge when it is about launches.
   function festLaunched(types) {
     for (const t of types) track.once('cracker_fire', { cracker: t, mode: playMode }, t); // once per cracker a session
-    if (!chor.on && !rush.on && !live.on) { coach.act(playMode); celebrateFirst('burst', 'Your first firework! Happy Diwali ✨'); }
+    if (!chor.on && !rush.on && !live.on) { coach.act(playMode); celebrateFirst('burst', seasonHello('Your first firework!')); }
     const d = festToday();
     if (!d || wallet.fest.done[d.key]) return;
     const hits = types.filter((t) => d.goal === 'lights' || (d.goal === 'rockets' && /^rocket/.test(t)) || (d.goal === 'finale' && t === 'finale')).length;
@@ -8579,8 +8721,20 @@
     }
     renderFest();
   }
+  // A line with the season's wish: Merry Christmas to 25 Dec, Happy New Year to 7 Jan, Happy Diwali in Diwali week.
+  function seasonHello(line, now = new Date()) {
+    const m = now.getMonth(), d = now.getDate();
+    const wish = m === 11 && d <= 25 ? 'Merry Christmas 🎄' : (m === 11 || (m === 0 && d <= 7)) ? 'Happy New Year 🎆' : festSeason(now).id === 'diwali' || !window.LUTSCountry || LUTSCountry.india() ? 'Happy Diwali ✨' : '✨';
+    return `${line} ${wish}`;
+  }
   function renderFest() {
-    const days = festDays(), today = dayKey(), tile = $('#btnFest');
+    const season = festSeason(), days = season.days, today = dayKey(), tile = $('#btnFest');
+    if (season.id) {
+      tile.querySelector('.tile-text b').textContent = inLang(season.title);
+      const img = tile.querySelector('.tile-ico img'); if (img && !img.src.endsWith(season.glyph)) img.src = season.glyph;
+      $('#festTitle').textContent = inLang(season.title);
+      const sub = $('#festTitle').nextElementSibling; if (sub) sub.textContent = inLang(season.sub);
+    }
     const first = days[0], last = days[days.length - 1];
     const soon = first && today < first.key && addDays(today, FEST_SOON) >= first.key;
     tile.hidden = !(soon || (first && today >= first.key && today <= last.key));
@@ -8595,7 +8749,7 @@
     } else if (d) {
       const done = !!wallet.fest.done[d.key], g = FEST_GOALS[d.goal];
       part(d.name); small.append(': ');
-      if (done) part(d === last ? 'Done · Happy Diwali!' : 'Done · come back tomorrow');
+      if (done) part(d === last ? season.last : 'Done · come back tomorrow');
       else { part(g.text); small.append(g.n > 1 ? ` · ${festProgress(d)}/${g.n} · 💎${d.gems}` : ` · 💎${d.gems}`); }
       badge.textContent = done ? '✓' : 'Today';
     } else { part('Festival night'); badge.textContent = 'Today'; }
@@ -8606,12 +8760,12 @@
   function renderFestSheet() {
     const list = $('#festDays'), today = dayKey();
     list.innerHTML = '';
-    for (const d of festDays()) {
+    for (const d of seasonDays()) {
       const done = !!wallet.fest.done[d.key], g = FEST_GOALS[d.goal], [, m, dd] = d.key.split('-').map(Number);
       const li = document.createElement('li');
       li.className = 'sheet-row fest-day' + (d.key === today ? ' soon' : '') + (done ? ' done' : d.key < today ? ' missed' : '');
       li.innerHTML = '<span class="row-avatar" aria-hidden="true"></span><span class="row-text"><b></b><small></small></span><span class="fest-reward"></span>';
-      li.querySelector('.row-avatar').textContent = done ? '✓' : '🪔';
+      li.querySelector('.row-avatar').textContent = done ? '✓' : d.icon || '🪔';
       li.querySelector('b').textContent = d.name;
       const when = document.createElement('span'), what = document.createElement('span'); // each part translated alone
       when.textContent = `${dd} ${MONTHS[m - 1].slice(0, 3)}`; what.textContent = g.text;
@@ -8624,22 +8778,23 @@
   function openFest() { renderFestSheet(); openSheet($('#festModal')); }
   // Festival mornings on the phone, through the card reminders (which ring at 9 am the day before the date sent).
   function festReminderLines() {
-    const flat = (s) => String(s).replace(/[\t\r\n]+/g, ' ').trim(), today = dayKey(), days = festDays(), lines = [];
+    const flat = (s) => String(s).replace(/[\t\r\n]+/g, ' ').trim(), today = dayKey(), season = festSeason(), days = season.days, lines = [];
     const at = (id, key, title, body) => {
       if (key < today) return;
       const [y, m, d] = addDays(key, 1).split('-').map(Number);
       lines.push(['#card', id, m, d, y, flat(title), flat(body)].join('\t'));
     };
-    if (days.length) at('fest-start', addDays(days[0].key, -1), inLang('🪔 Diwali week starts tomorrow'), inLang(`${days.length} festival challenges and double daily gifts`));
+    if (days.length) at('fest-start', addDays(days[0].key, -1), inLang(season.starts), inLang(`${days.length} festival challenges and double daily gifts`));
     // Monday morning: the week's new treasure is in Seth-ji's vault (the street heist)
     if (window.PatakaChor && PatakaChor.nextChange) {
       const ms = PatakaChor.nextChange() + 3600e3, tr = PatakaChor.treasureAt(ms);
       at(`fest-heist-${dayKey(new Date(ms))}`, dayKey(new Date(ms)), inLang(`${tr[2]} The ${tr[1]} is in Seth-ji's vault`), inLang('Find the 9 key pieces and steal it this week'));
     }
-    for (const d of days) at(`fest-${d.key}`, d.key, `🪔 ${inLang(d.name)}: ${inLang('today’s festival challenge is ready')}`, `${inLang(FEST_GOALS[d.goal].text)} · 💎${d.gems}`);
+    for (const d of days) at(`fest-${d.key}`, d.key, `${d.icon || '🪔'} ${inLang(d.name)}: ${inLang('today’s festival challenge is ready')}`, `${inLang(FEST_GOALS[d.goal].text)} · 💎${d.gems}`);
     return lines;
   }
-  $('#btnFest').addEventListener('click', openFest);
+  // On New Year's Eve the tile goes straight to the Midnight Wave while it is on (its challenge is to watch it).
+  $('#btnFest').addEventListener('click', () => { const d = festToday(); if (d && d.goal === 'wave' && window.LUTSWave && LUTSWave.active()) openWave(); else openFest(); });
   $('#festBack').addEventListener('click', () => closeSheet($('#festModal')));
   $('#btnFestPremium').addEventListener('click', () => { closeSheet($('#festModal')); openPremium({ diwali: true }); });
 
@@ -9222,7 +9377,7 @@
   const REASON_BY_ID = Object.fromEntries(REASONS.map((r) => [r.id, r]));
   const reasonOf = (j) => REASON_BY_ID[j.r] || REASON_BY_ID.grateful;
   // Everyone lights up the same landmark on the same day.
-  const LANDMARKS = WORLDS.filter((w) => w.image);
+  const LANDMARKS = WORLDS.filter((w) => w.image && !w.global);
   const todayLandmark = () => {
     const d = new Date(), n = Math.floor(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 864e5);
     return LANDMARKS.at(n % LANDMARKS.length);
@@ -9239,6 +9394,7 @@
     let n = 0, sinceGrace = 7;
     for (;;) {
       if (days.has(dayKey(dt))) { n++; sinceGrace++; }
+      else if (n > 0 && amuletDay(dayKey(dt))) { /* a holiday amulet day: skipped, nothing used up */ }
       else {
         const before = new Date(dt); before.setDate(before.getDate() - 1);
         if (n === 0 || sinceGrace < graceDays() || !days.has(dayKey(before))) break;
@@ -9496,11 +9652,11 @@
   const RUSH_SECS = 30, RUSH_KEY = 'luts:rush', LIGHTS_KEY = 'luts:lights';
   const DAILY_EPOCH = Date.UTC(2026, 9, 13); // Daily Sky #1
   const STARS = [300, 1000, 2000]; // points for one, two and three stars
-  const RUSH_WORLDS = WORLDS.filter((w) => w.image).map((w) => w.id);
+  const RUSH_WORLDS = WORLDS.filter((w) => w.image && !w.global).map((w) => w.id);
   const rush = { on: false, kind: 'free', seed: 0, world: '', t: 0, count: 4, plan: [], next: 0, live: [], pops: [], score: 0, combo: 0, best: 0, hits: 0, vs: null, ownWorld: null, last: null };
   const loadRush = () => { try { const v = JSON.parse(localStorage.getItem(RUSH_KEY) || '{}'); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; } };
   const saveRush = (v) => { try { localStorage.setItem(RUSH_KEY, JSON.stringify(v)); } catch (e) { /* storage full: the round still counts on screen */ } };
-  const fmt = (n) => Math.round(n).toLocaleString('en-IN');
+  const fmt = (n) => numFmt(Math.round(n));
   const starsFor = (score) => STARS.filter((s) => score >= s).length;
   const starText = (n) => '⭐'.repeat(n) + '☆'.repeat(3 - n);
   const dailyNo = (dt = new Date()) => Math.floor((Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate()) - DAILY_EPOCH) / 864e5) + 1;
@@ -9536,6 +9692,7 @@
     let n = 0, sinceGrace = 7;
     for (;;) {
       if (has(d)) { n++; sinceGrace++; }
+      else if (n > 0 && amuletDay(dayKey(d))) { /* a holiday amulet day: skipped, nothing used up */ }
       else {
         const before = new Date(d); before.setDate(before.getDate() - 1);
         if (n === 0 || sinceGrace < graceDays() || !has(before)) break;
@@ -10155,10 +10312,14 @@
   // the weeks before New Year and free for everyone. Calm rounds over a landmark each, the countdown to this screen's
   // own midnight in the sky, the midnight climax, then Endless Sky (cdLiveStart, cdCalm, cdLiveClimax).
   const COUNTDOWN_SHOW = { id: 'countdown', name: 'New Year countdown', line: 'Counts down to your midnight, then lights up the sky', mins: 0, world: '', countdown: true };
+  // The Midnight Wave (midnight-wave.js): on New Year's Eve, from Kiritimati's midnight to Samoa's, a New Year finale
+  // over the sky as each time zone reaches 1 January, with the next city counting down. Free for everyone, like the
+  // countdown; worked out from this phone's own clock, so it needs no server.
+  const WAVE_SHOW = { id: 'wave', name: 'Midnight Wave', line: 'Follow New Year’s midnight around the world: a finale for every city', mins: 0, world: '', wave: true };
   // A free player's shows: one of each kind open always (Royal Red is the first-launch show), one more of their choice
   // each day, and any show kept for good with gems (one, or all at once); Premium plays every show, all night.
   // Shows a player watched before the lock came stay theirs (luts:liveseen, read once into luts:liveowned).
-  const LIVE_FREE_SHOWS = new Set(['endless', 'royal', 'tricolour', 'countdown']); // most shows are Premium; free players keep these (and the New Year countdown), a daily pick and gem keeps
+  const LIVE_FREE_SHOWS = new Set(['endless', 'royal', 'tricolour', 'countdown', 'wave']); // most shows are Premium; free players keep these (and the New Year countdown), a daily pick and gem keeps
   const LIVE_OWN_KEY = 'luts:liveowned', LIVE_DAY_KEY = 'luts:liveday', LIVE_SHOW_GEMS = 15, LIVE_ALL_GEMS = 200;
   const liveJSON = (k) => { try { return JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch (e) { return {}; } };
   const liveSet = (k, v) => { try { localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); } catch (e) { /* storage unavailable */ } };
@@ -10228,7 +10389,9 @@
     }
     if (show && show.mins) live.played++;
     const pool = LIVE_WORLDS.filter((id) => id !== live.last && !(show && show.story && !(WORLDS.find((w) => w.id === id) || {}).image)); // (a story plays over a real LED-lit landmark)
-    const id = live.last = show && show.world && isWorld(show.world) ? show.world : pick(pool);
+    // The Midnight Wave outside India: Harbour City every other round, so the world's midnights aren't all over India's landmarks.
+    const globalWave = show && show.wave && window.LUTSCountry && !LUTSCountry.india() && live.last !== 'harbour-city';
+    const id = live.last = show && show.world && isWorld(show.world) ? show.world : globalWave ? 'harbour-city' : pick(pool);
     const round = ++live.round;
     liveVeil.classList.add('on');
     setTimeout(() => {
@@ -10268,6 +10431,7 @@
     liveAwake(true);
     live.cdDone = false;
     if (live.show.countdown) cdLiveStart();
+    if (live.show.wave) waveStart();
     liveRound();
     setTimeout(() => { if (live.on && document.documentElement.classList.contains('tv')) $('#btnLiveExit').focus(); }, 400);
   }
@@ -10283,8 +10447,53 @@
   document.addEventListener('visibilitychange', () => { if (document.hidden) liveMoment(); });
   addEventListener('pagehide', liveMoment);
   // keep: the show's landmark stays (the player lights the same sky themselves) instead of the world they had before.
+  // The wave's clock: the next city in the corner, and a finale the moment a time zone reaches midnight.
+  const waveBox = document.createElement('div');
+  waveBox.className = 'wave-box'; waveBox.hidden = true; waveBox.setAttribute('aria-live', 'polite');
+  document.body.append(waveBox);
+  function waveStart() {
+    const W8 = window.LUTSWave;
+    live.wave = { seen: new Set(W8 ? W8.passed().map((z) => z.o) : []) };
+    clearInterval(live.waveTick);
+    live.waveTick = setInterval(waveTick, 1000);
+    waveWatched();
+    waveTick();
+  }
+  function waveWatched() { // Holiday Nights: New Year's Eve's challenge is to watch the wave
+    const d = festToday();
+    if (d && d.goal === 'wave' && !wallet.fest.c[d.key]) { wallet.fest.c[d.key] = 1; saveWallet(); festCheck(); }
+  }
+  function waveTick() {
+    const W8 = window.LUTSWave;
+    if (!live.on || !live.show || !live.show.wave || !W8) { waveBox.hidden = true; clearInterval(live.waveTick); return; }
+    const now = Date.now(), nx = W8.next(now), mine = W8.mine(now);
+    for (const z of W8.passed(now)) {
+      if (live.wave.seen.has(z.o)) continue;
+      live.wave.seen.add(z.o);
+      if (now - z.at > 90e3 || paused || document.hidden) continue; // (a midnight missed while away isn't replayed)
+      const year = W8.yearOf(z.at), city = inLang(z.c[0]);
+      // An empty sky for the finale (a show's stickman or lantern left up would cover the year), and the city on a line
+      // of its own: one long greeting is shrunk to the sky's width, too small to read.
+      // The sky writes what it can write large (the year, then the city); the greeting is a caption, readable in every
+      // language, at the bottom (the badge steps aside while it shows).
+      clearScene(); live.round++; liveVeil.classList.remove('on');
+      const yours = z.o === mine.o, t = cdClimax({ tag: 'director', tap: true, year, head: '', name: yours ? '' : city });
+      $('#liveCaption').classList.add('low');
+      liveCaption(yours ? inLang('Happy New Year') : inLang('Happy New Year, {0}!').replace('{0}', city), 8000, 'big');
+      live.wave.quiet = now + 8500;
+      after(t + 2.9, () => $('#liveCaption').classList.remove('low'), 'live');
+      track('wave_midnight', { o: z.o });
+      after(t + 3, liveRound, 'live');
+    }
+    if (now < (live.wave.quiet || 0)) { waveBox.hidden = true; return; }
+    if (!nx) { waveBox.textContent = `🎆 ${inLang('The whole world is in {0}').replace('{0}', W8.yearOf(now))}`; waveBox.hidden = false; return; }
+    const who = nx.o === mine.o ? inLang('Your midnight') : nx.c.slice(0, 2).map(inLang).join(' · ');
+    waveBox.textContent = `${nx.f} ${who} · ${W8.clock(nx.at - now)}`;
+    waveBox.hidden = false;
+  }
   function stopLive(keep) {
     if (!live.on) return false;
+    clearInterval(live.waveTick); waveBox.hidden = true;
     liveMoment();
     live.on = false; live.round++; hideCaption();
     track.home();
@@ -10335,6 +10544,7 @@
     live.watched = (live.watched || 0) + 1; // (unpaused seconds of this show, for everyone: the coach waits 12)
     if (premium.active) return;
     if (live.show && live.show.countdown && !live.cdDone) return; // the New Year countdown is free to its climax (then Endless Sky's minute)
+    if (live.show && live.show.wave) return; // the Midnight Wave is free all night
     // A one-minute show always plays to its end card: on a slow phone its clock runs behind real seconds, so it could
     // outlast the free preview and meet the gate just before its finale.
     if (live.show && live.show.mins === 1) return;
@@ -10393,10 +10603,40 @@
     }
     cdb.hidden = !countdownYear();
     if (!cdb.hidden) cdb.querySelector('em').textContent = inLang('Countdown to {0}').replace('{0}', countdownYear());
+    let wvb = $('#btnLiveWave');
+    if (!wvb) {
+      wvb = document.createElement('button');
+      wvb.type = 'button'; wvb.className = 'live-special'; wvb.id = 'btnLiveWave';
+      wvb.innerHTML = '<i aria-hidden="true">🌍</i><span><b></b><small></small><em></em></span>';
+      wvb.querySelector('b').textContent = inLang(WAVE_SHOW.name);
+      wvb.querySelector('small').textContent = inLang(WAVE_SHOW.line);
+      wvb.addEventListener('click', () => openWave());
+      cdb.after(wvb); // (after the countdown: the countdown counts to this phone's midnight, the wave follows it on)
+    }
+    wvb.hidden = !waveSoon();
+    if (!wvb.hidden) wvb.querySelector('em').textContent = waveWhen();
     syncLiveLocks();
     openSheet($('#liveModal'));
   }
   $('#liveBack').addEventListener('click', () => closeSheet($('#liveModal')));
+  // From 26 Dec until the last midnight has passed: the wave on Home and in Live Sky.
+  const waveSoon = (now = Date.now()) => {
+    const W8 = window.LUTSWave; if (!W8) return false;
+    const w = W8.windowOf(W8.yearOf(now));
+    return now < w.to && now >= w.from - 6 * 864e5;
+  };
+  // "Live now · next: Tokyo in 12:05", or when it starts on this phone's clock.
+  function waveWhen(now = Date.now()) {
+    const W8 = window.LUTSWave, w = W8.windowOf(W8.yearOf(now)), nx = W8.next(now);
+    if (W8.active(now) && nx) return inLang('Live now · next: {0} in {1}').replace('{0}', inLang(nx.c[0])).replace('{1}', W8.clock(nx.at - now));
+    const at = new Date(w.from + 3600e3);
+    return inLang('Starts {0} at {1}').replace('{0}', `${at.getDate()} ${MONTHS[at.getMonth()].slice(0, 3)}`).replace('{1}', at.toTimeString().slice(0, 5));
+  }
+  function openWave() {
+    const W8 = window.LUTSWave;
+    if (!W8 || !W8.active()) { toast(`🌍 ${inLang('The Midnight Wave')} · ${waveWhen()}`, 3600); return; }
+    closeSheet($('#liveModal')); startLive(WAVE_SHOW);
+  }
   // The 👑 marks on locked shows, and today's free show, kept current each time the list opens or Premium changes.
   function syncLiveLocks() {
     for (const b of $('#liveList').querySelectorAll('.live-show')) {
@@ -16079,9 +16319,12 @@
 
   // Selector panel
   const worldPanel = $('#worldPanel'), worldGrid = $('#worldGrid'), worldPresetInput = $('#setWorldPreset');
+  // The lists' order: outside India the global skylines come straight after the plain night skies (country.js).
+  const worldOrder = () => (!window.LUTSCountry || LUTSCountry.india() ? WORLDS
+    : [...WORLDS.filter((w) => !w.image), ...WORLDS.filter((w) => w.global), ...WORLDS.filter((w) => w.image && !w.global)]);
   function buildWorldGrid() {
     if (worldGrid.childElementCount) return;
-    for (const cfg of WORLDS) {
+    for (const cfg of worldOrder()) {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'world-card';
@@ -16142,7 +16385,7 @@
   const worldStripList = $('#worldStripList'), cardWorldList = $('#cWorlds');
   let stripShown = '';
   function buildWorldMinis(list) {
-    for (const cfg of WORLDS) {
+    for (const cfg of worldOrder()) {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'world-mini';
@@ -16332,6 +16575,7 @@
     const tried = intent.tried && crackerName(intent.tried); // the Premium cracker or shell the player just lit for free
     const wanted = intent.sivakasi && crackerName(intent.sivakasi); // the one whose chip they tapped with no light left
     let pitch = tried ? [`You just lit ${tried}`, 'Keep it, and every other cracker, free with Premium, with 1,000 levels in each puzzle game.']
+      : (intent.diwali || (intent.moment && festToday())) && festSeason().id === 'holiday' ? ['Celebrate the holidays with Premium', 'Every cracker free, every Live Sky show and 1,000 levels in each puzzle game, all through the holidays.']
       : intent.diwali || (intent.moment && festToday()) ? ['Celebrate Diwali with Premium', 'Every cracker free and 1,000 levels in each puzzle game, all through the festival.']
       : intent.live ? ['Every light show, all night', 'All 36 Live Sky shows with no time limit, 23 star-mine crackers free, and no mark on wallpapers.']
       : intent.wishes ? ['Light up more names tonight', 'Publish up to 10 wishes a day in Wishes of India, with every cracker free.']
@@ -16347,12 +16591,19 @@
         : intent.archive ? ['Play every past daily puzzle', 'Missed a day? Premium opens every past Daily Diya and Daily Rocket.']
           : wanted ? [`Light the ${wanted} with Premium`, 'Unlock this cracker and every other Premium cracker whenever you like.']
           : intent.gems ? ['Every cracker free with Premium', 'Finales, cakes and rocket combos need no gems, with unlimited puzzle hints.']
+            : festSeason().id === 'holiday' ? ['Make this New Year unforgettable', 'Every cracker free, every Live Sky show, clean photos and videos, 3D landmarks, AR and 1,000 levels in each puzzle game.']
+            : window.LUTSCountry && !LUTSCountry.india() ? ['Make every celebration unforgettable', 'Every cracker free, clean photos and videos, 3D landmarks, AR and 1,000 levels in each puzzle game.']
             : ['Make this Diwali unforgettable', 'Every cracker free, clean photos and videos, 3D landmarks, AR and 1,000 levels in each puzzle game.'];
     if (tv) pitch = ['Every cracker. Every level.', 'Premium makes every cracker free and opens 1,000 levels each in Diya Path and Rocket Rush with unlimited hints.'];
     const passLive = passOnSale();
     $('#premiumPass').hidden = !passLive;
     $('#premiumPass').disabled = gemStore.status === 'purchasing';
-    if (passLive) { $('#premiumPassPrice').textContent = passLive.price; funnelOnce('paywall_pass_seen'); }
+    if (passLive) {
+      const pp = $('#premiumPass');
+      pp.querySelector('span').textContent = PASS.icon; pp.querySelector('b').textContent = inLang(PASS.name);
+      pp.querySelector('small').textContent = inLang(`Everything Premium until ${PASS.upto}, one payment`);
+      $('#premiumPassPrice').textContent = passLive.price; funnelOnce('paywall_pass_seen');
+    }
     // What the store offered this player: the free trial and the first-period discount are Play's to give.
     if (premium.plans.length) { const yr = premium.plans.find((x) => x.kind === 'annual') || premium.plans[0]; funnelOnce(yr.trial ? 'paywall_trial' : yr.intro ? 'paywall_intro' : 'paywall_no_offer'); }
     $('#premiumTitle').textContent = pitch[0];
@@ -16429,7 +16680,7 @@
   // just tried leads the stack.
   function renderValue(intent, tv, web) {
     const sum = ITEM_ORDER.reduce((n, t) => n + (GEM_COST[t] || 0), 0) + DOCK_ORDER.reduce((n, t) => n + (SHELL_GEM_COST[t] || 0), 0);
-    const gem = (n) => `💎\u2060${n.toLocaleString('en-IN')}`; // the word joiner keeps 💎 with its number
+    const gem = (n) => `💎\u2060${numFmt(n)}`; // the word joiner keeps 💎 with its number
     const month = (GEM_COST.finale + GEM_COST.cake) * 30; // the anchor: a grand finale and a wedding cake each evening
     const rows = [
       { id: 'premium5', ico: '🧨', b: 'Five Premium crackers', s: 'The thousand-cracker Hazaar ladi, saravedi, seven shot, double shot and Lakshmi vedi. One free try each.' },
@@ -16462,7 +16713,7 @@
     const packs = !web && gemStore.packs.filter((k) => k.gems > 0 && k.price && k.id !== PASS.id); // (the Pass carries 1 gem to be credited: not a price per gem)
     const per = packs && packs.length ? packs.map((k) => [moneyOf(k.price), k.gems]).filter(([m]) => m).map(([m, g]) => ({ rate: m.n / g, sym: m.sym })).sort((a, b) => a.rate - b.rate)[0] : null;
     $('#premiumTotal').textContent = per
-      ? `A grand finale and a wedding cake every evening for a month: ${gem(month)} (about ${per.sym}${Math.round(per.rate * month).toLocaleString('en-IN')} at gem-pack prices). With Premium they’re free, with everything above.`
+      ? `A grand finale and a wedding cake every evening for a month: ${gem(month)} (about ${per.sym}${numFmt(Math.round(per.rate * month))} at gem-pack prices). With Premium they’re free, with everything above.`
       : `A grand finale and a wedding cake every evening for a month: ${gem(month)}. With Premium they’re free, with everything above.`;
     // Proof from their own play: how many kinds they have already lit.
     const proof = $('#premiumProof');
@@ -16471,8 +16722,9 @@
     // Honest urgency: only the real date of Diwali this year (or that it is Diwali week now).
     const soon = $('#premiumSoon'), dw = festDays(), diwali = dw.find((d) => d.name === 'Diwali');
     const days = diwali ? Math.round((new Date(`${diwali.key}T00:00`) - new Date(`${dayKey()}T00:00`)) / 864e5) : -1;
-    soon.hidden = !(festToday() || (days > 0 && days <= 21));
-    soon.textContent = festToday() ? 'It’s Diwali week. Light the whole street.' : days === 1 ? 'Diwali is tomorrow. Light the whole street.' : `Diwali is in ${days} days. Light the whole street.`;
+    const dwNow = festToday() && festSeason().id === 'diwali';
+    soon.hidden = !(dwNow || (days > 0 && days <= 21));
+    soon.textContent = dwNow ? 'It’s Diwali week. Light the whole street.' : days === 1 ? 'Diwali is tomorrow. Light the whole street.' : `Diwali is in ${days} days. Light the whole street.`;
     // The safety net: Google Play's own refund window (Android app only).
     $('#premiumRefund').hidden = !(nativeApp && nativeApp.platform === 'android') || tv;
   }

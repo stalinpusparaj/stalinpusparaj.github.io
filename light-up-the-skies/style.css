@@ -1889,6 +1889,8 @@ html.tv .bcal-cell:focus, html.tv .bcal-up-row:focus { outline: 3px solid #fff3d
 .welcome-list b { display: block; font-weight: 600; }
 .welcome-list small { display: block; color: var(--ink-2); font-size: .88rem; line-height: 1.45; }
 .welcome-box .btn { width: 100%; min-height: 50px; }
+.welcome-country { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
+.welcome-country select { min-height: 44px; border-radius: 12px; padding: 0 12px; font: inherit; font-weight: 500; color: var(--ink); background: var(--glass-2); border: 1px solid var(--line, rgba(255,255,255,.18)); }
 
 /* ---------- Birthday nudge on the play screen ---------- */
 .nudge {
@@ -5654,3 +5656,8 @@ body.countdown-on #btnShareShow, body.countdown-on #btnRec { display: none; }
 .live-special b { font-size: .95rem; color: #ffd77e; }
 .live-special small { font-size: .8rem; color: var(--ink-2); }
 .live-special em { font-size: .72rem; font-style: normal; color: #ffb6d9; }
+
+/* Midnight Wave (game.js waveTick): the next city's midnight, top centre over Live Sky */
+/* At the bottom, above the brand mark: the top of the sky is where the finale writes the year and the greeting. */
+.wave-box { position: fixed; z-index: 40; bottom: calc(env(safe-area-inset-bottom, 0px) + 120px); left: 50%; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; background: rgba(10, 12, 34, .72); border: 1px solid rgba(255, 211, 107, .45); color: #fff4e0; font: 600 .92rem/1.2 var(--ui, system-ui); letter-spacing: .01em; white-space: nowrap; pointer-events: none; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); font-variant-numeric: tabular-nums; }
+.wave-box[hidden] { display: none; }

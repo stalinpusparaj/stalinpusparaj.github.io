@@ -24,6 +24,8 @@
    EFX.stage(canvas, {seed, dpr, tier:'tv'|'phone'|'laptop', reduced, role:'main'|'slides'|'mirror',
                       width?, height? (CSS px; else the canvas's client size, else its width/height),
                       bg? (a colour, or an image drawn to cover; default transparent), overlay?(ctx, w, h, t),
+                      insetBottom? (CSS px, or a function returning them: the screen's own text at the bottom; slide
+                      captions are written above it),
                       readback? (a CPU canvas, for exports and tests)}) → Stage
      Stage.render(t)            draws the frame for absolute time t
      Stage.add(act) → act       schedules an act (an act with the same id replaces the earlier one)
@@ -49,9 +51,10 @@
      full: the sky dims, the label and mm:ss, the last 10 s one big digit, then `finish` (default 3) gated bursts.
      corner: a ring with the time left and the label under it (label: the caller's translated, filled-in line).
    EFX.finale({t, title, names, date, photos:[bitmap], end:'kamuro', drones:true, shells=8, words=true}) → act
+     (the drones write the names; the date shows under them as text on a dark pill)
      cdClimax's timing: the pair of peonies bursts at 1.2 s; title words in sparks at +0.2 s, names at +3 s, the date at
      +5.6 s; 8 shells every 0.7 s (0.9 s reduced) from one height from +7.4 s; the photos gather into a heart meanwhile;
-     the drones' shell breaks 1.2 s after the last burst and LUTSDroneShow's player writes [names, date] in lights
+     the drones' shell breaks 1.2 s after the last burst and LUTSDroneShow's player writes [names] in lights
      (count 900 on a TV, else 1300; built when the act is added, so no frame waits for it).
    EFX.FlashGate (class; also used by tests and other packages): new FlashGate().place(t, n, spread) → {at, bright},
      FlashGate.verify(times) → {ok, minGap, maxInWindow}, FlashGate.lumaJumps(lumas, fps) → {ok, jumps, maxPerSecond}
@@ -337,14 +340,17 @@ Mission: {0}
         items.push(item('bu', off, LIFE_OF[kind], ui, { x, y: 0.22, kind, hue, size: 1, key: `${a.id}:s${i}`, want: true }));
       });
       const last = types.length ? first + (types.length - 1) * gap : Z;
-      const D = window.LUTSDroneShow, lines = [a.names.replace(/\n/g, ' '), a.date].filter(Boolean);
+      // The drones write the names alone, as big as they fit: a long date ("28 November 2026") squeezed into the drone
+      // mask broke its thin letters apart. The date is written under them as sharp text on a dark pill ('dc').
+      const D = window.LUTSDroneShow, lines = [a.names.replace(/\n/g, ' ')].filter(Boolean);
       const drones = a.drones && !!D && typeof D.player === 'function' && lines.length > 0;
       const droneAt = last + 1200, life = drones ? num(D.LIFE, DRONE_LIFE / 1000) * 1000 : 0;
       if (drones) {
         const ui = units.push(unit('drones', droneAt)) - 1;
         items.push(item('rk', droneAt - 1200, 1500, ui, { x0: 0.5, x1: 0.5, y1: 0.42, ms: 1200, comet: true, key: `${a.id}:dr` }));
         items.push(item('dr', droneAt, life, ui, { lines, cy: 0.42, count: s.tier === 'tv' ? 900 : 1300, key: `${a.id}:d`, player: undefined }));
-      }
+        if (a.date) items.push(item('dc', droneAt + 1800, Math.max(1200, life - 1800), -1, { text: String(a.date), cy: 0.42, key: `${a.id}:dc` }));
+      } else if (a.date) items.push(item('dc', last + 1400, 4200, -1, { text: String(a.date), cy: 0.42, key: `${a.id}:dc` }));
       if (a.photos.length) {
         const start = Z + 500, fadeAt = drones ? droneAt - 500 : last + 2600;
         items.push(item('ht', start, Math.max(1500, fadeAt + 900 - start), -1, { photos: a.photos, fadeOff: fadeAt - start, key: `${a.id}:h` }));
@@ -602,10 +608,12 @@ Mission: {0}
     const env = { seed, tier, reduced, role };
     let W = 1, H = 1, sx = 1, sy = 1, bg = opts.bg == null ? null : opts.bg, disposed = false;
     const overlay = typeof opts.overlay === 'function' ? opts.overlay : null;
+    // CSS px at the bottom that the screen's own text covers (a QR card, the retention line): slide captions stay above it
+    const insetB = typeof opts.insetBottom === 'function' ? opts.insetBottom : () => num(opts.insetBottom, 0);
     const entries = new Map(), loops = new Set();
     let order = [], dirty = false, history = [], shownTo = -Infinity; // shownTo: the latest time rendered
     const S = { bright: [], denied: 0, moved: 0, joined: 0, particles: 0, drones: 0, flare: 0, flareMax: 0, frames: 0 };
-    const L = { sl: [], mo: [], cd: [], dm: [], ht: [], rk: [], bu: [], tx: [], ph: [], dr: [] }, FL = [];
+    const L = { sl: [], mo: [], cd: [], dm: [], ht: [], rk: [], bu: [], tx: [], ph: [], dr: [], dc: [] }, FL = [];
 
     function resize(w, h) {
       const cw = num(w, 0) || canvas.clientWidth || canvas.width || 1, ch = num(h, 0) || canvas.clientHeight || canvas.height || 1;
@@ -729,6 +737,19 @@ Mission: {0}
       ctx.fillText(str, x, y);
       ctx.shadowBlur = 0;
     }
+    // The finale's date: under the drones' names, gold on a dark rounded pill, so it reads over a lit landmark too.
+    function drawDateCard(it, t) {
+      const a = t - it.at, al = sm(a / 600) * (1 - sm((a - it.dur + 600) / 600));
+      if (al <= 0.01) return;
+      const u = droneUnit(), px = Math.max(12, Math.min(W, H) * 0.045);
+      ctx.font = font(700, px);
+      const w = Math.min(W * 0.86, ctx.measureText(it.text).width + px * 1.6), hh = px * 1.7, x = W / 2, y = H * it.cy + u * 0.48;
+      ctx.save(); ctx.globalAlpha = al * 0.78; ctx.fillStyle = 'rgba(6,6,24,1)';
+      const r = hh / 2; ctx.beginPath(); ctx.moveTo(x - w / 2 + r, y - r); ctx.arcTo(x + w / 2, y - r, x + w / 2, y + r, r); ctx.arcTo(x + w / 2, y + r, x - w / 2, y + r, r); ctx.arcTo(x - w / 2, y + r, x - w / 2, y - r, r); ctx.arcTo(x - w / 2, y - r, x + w / 2, y - r, r); ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = al * 0.9; ctx.strokeStyle = 'rgba(255,214,140,0.85)'; ctx.lineWidth = Math.max(1, px * 0.06); ctx.stroke();
+      ctx.restore();
+      glowText(it.text, x, y + px * 0.04, px, 700, al, w - px, '#ffe3a3', 'rgba(255,170,60,0.85)');
+    }
     function fitLine(str, maxW) { // the line as it fits, with an ellipsis
       if (ctx.measureText(str).width <= maxW) return str;
       const a = Array.from(str);
@@ -795,10 +816,12 @@ Mission: {0}
       if (A.name) lines.push([fill('Photo by {0}', A.name), 0.03, '#ffd88a']);
       if (A.mission) lines.push([fill('Mission: {0}', A.mission), 0.028, '#ffd88a']);
       if (lines.length) {
-        const band = H * 0.2, gr = ctx.createLinearGradient(0, H - band, 0, H);
+        let ib = 0; try { ib = clamp(+insetB() || 0, 0, H * 0.4); } catch (e) { ib = 0; }
+        const band = H * 0.2, gr = ctx.createLinearGradient(0, H - ib - band, 0, H - ib);
         gr.addColorStop(0, 'rgba(4,3,14,0)'); gr.addColorStop(1, 'rgba(4,3,14,0.72)');
-        ctx.globalAlpha = al; ctx.fillStyle = gr; ctx.fillRect(0, H - band, W, band);
-        let y = H - M * 0.045 - lines.reduce((s, l) => s + l[1] * M * 1.35, 0) + lines[0][1] * M * 0.7;
+        ctx.globalAlpha = al; ctx.fillStyle = gr; ctx.fillRect(0, H - ib - band, W, band);
+        if (ib) { ctx.fillStyle = 'rgba(4,3,14,0.72)'; ctx.fillRect(0, H - ib, W, ib); }
+        let y = H - ib - M * 0.045 - lines.reduce((s, l) => s + l[1] * M * 1.35, 0) + lines[0][1] * M * 0.7;
         for (const [s, k2, col] of lines) { glowText(s, W / 2, y, k2 * M, 600, al, W * 0.7, col, 'rgba(0,0,0,0.7)'); y += k2 * M * 1.35; }
       }
     }
@@ -1134,6 +1157,7 @@ Mission: {0}
       ctx.globalCompositeOperation = 'source-over';
       for (const it of L.ph) drawReveal(it, t, M);
       for (const it of L.cd) drawCountdown(it, t, M);
+      for (const it of L.dc) drawDateCard(it, t);
       ctx.globalAlpha = 1; ctx.shadowBlur = 0;
       S.particles = drawn + lights; S.drones = lights; S.frames++;
       if (!L.bu.length) S.flare = 0;

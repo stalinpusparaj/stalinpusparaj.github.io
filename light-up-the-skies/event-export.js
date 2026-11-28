@@ -6,8 +6,12 @@
  *     "HHMM_<guest>_<n>.jpg" in the event's time zone; guest selfies in "Guests/"; guestbook.html and voice/ (host and
  *     co-hosts); rsvp.csv (RSVP plans); guests.csv, consent.csv, stats.csv; README.txt (retention and consent).
  *     Free plans: the brand mark is burned into every photo (photographer photos already carry it). Parts ≤ 190 MB.
- *  ESExport.bestOf(code, {aspect:'9:16'|'16:9', seconds=60, reduced, onProgress, signal, prefer}) → Blob (MP4, else WebM)
- *     720×1280 or 1280×720, 30 fps, 3 Mbps, silent. A 3 s title, up to 24 photos at 2.2 s (as many as fit the length),
+ *  ESExport.bestOf(code, {aspect:'9:16'|'16:9', seconds=60, reduced, onProgress, signal, prefer, full, music:{kind, file}}) → Blob (MP4, else WebM)
+ *     full (the Wish Reel): every wish, as long as it needs (30 s to 3 min), 1080×1920 or 1920×1080, 5 Mbps, no mark.
+ *     music: 'birthday' | 'tune' | 'file' (+ file) | 'none' (ESExport.music), an AAC track where the browser encodes it.
+ *     720×1280 or 1280×720, 30 fps, 3 Mbps, silent unless music is chosen. A 3 s title; then the guests' wishes, each guest's selfie going up
+ *     in a rocket with their name and wish in light (EFX.reveal, one every 3 s; the guests who wrote a wish first, in
+ *     the order they came; as many as fit: the whole reel on a birthday, else half of it); up to 24 photos at 2.2 s (as many as fit the length),
  *     up to 2 videos (their first 4 s, muted; dimmed and grey if they flash), and a 10 s drone-name finale, all on one
  *     EFX timeline, so bursts are flash-gated (§4.24). Free: the brand mark in the corner and a 3 s end card.
  *     Photos are picked in this order: highlights, this device's favourites, reactions, one per mission, then the rest.
@@ -324,6 +328,111 @@ Get it on Google Play
     return { photos: picked.slice(0, n).sort((a, b) => a.at - b.at), videos: vids };
   }
 
+  // ---------- best-of: music ----------
+  // The sound under a best-of, mixed offline to its exact length (48 kHz stereo AudioBuffer):
+  //   'birthday' the Happy Birthday melody (public domain) on a music box over soft chords, 120 beats a minute, repeated;
+  //   'tune'     a calm celebration arpeggio (C, G, Am, F, two seconds each);
+  //   'file'     the host's own song (a File or Blob from this phone), from its start, looped if short;
+  // all with a 0.6 s fade in and a 2.5 s fade out. Null for 'none' or when the song does not open.
+  const NOTE = (n) => 440 * Math.pow(2, (n - 69) / 12);
+  const HB = [ // [midi, beats]: G G A G C B | G G A G D C | G G G' E C B A | F F E C D C
+    [67, 0.75], [67, 0.25], [69, 1], [67, 1], [72, 1], [71, 2], [67, 0.75], [67, 0.25], [69, 1], [67, 1], [74, 1], [72, 2],
+    [67, 0.75], [67, 0.25], [79, 1], [76, 1], [72, 1], [71, 1], [69, 2], [77, 0.75], [77, 0.25], [76, 1], [72, 1], [74, 1], [72, 3]];
+  const HB_CHORDS = [[48, 1], [48, 3], [43, 3], [43, 3], [48, 3], [48, 3], [41, 3], [48, 2], [43, 1], [48, 3]]; // [root, beats], from the pickup
+  // Each piece is rendered once in a short OfflineAudioContext and laid into the reel as buffers: the tunes as one
+  // loop (a verse of Happy Birthday, 14 s; the celebration tune, 8 s), the trailer's effects in 10 s windows. Making
+  // every note of a 3-minute reel at once cost time growing with the square of its length (a minute on a laptop).
+  // o.signal: checked between pieces (Cancel). o.failed is set when the host's song does not open.
+  const SR = 48000;
+  function voices(ac, dest) {
+    const bell = (t, midi, len, vol) => { // a music-box note: a few partials, quick attack, long fall
+      [[1, 1], [2, 0.32], [3, 0.12], [4.2, 0.05]].forEach(([m, a]) => {
+        const os = ac.createOscillator(), g = ac.createGain();
+        os.type = 'sine'; os.frequency.value = NOTE(midi) * m;
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol * a, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0008, t + Math.max(0.4, len) * 1.6);
+        os.connect(g); g.connect(dest); os.start(t); os.stop(t + Math.max(0.4, len) * 1.6 + 0.05);
+      });
+    };
+    const pad = (t, root, len, minor) => { // a soft chord under the melody
+      [0, minor ? 3 : 4, 7, 12].forEach((iv, k) => {
+        const os = ac.createOscillator(), g = ac.createGain();
+        os.type = 'triangle'; os.frequency.value = NOTE(root + iv + 12);
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(k ? 0.028 : 0.04, t + 0.25); g.gain.setValueAtTime(k ? 0.028 : 0.04, t + len - 0.3); g.gain.linearRampToValueAtTime(0, t + len);
+        os.connect(g); g.connect(dest); os.start(t); os.stop(t + len + 0.02);
+      });
+    };
+    return { bell, pad };
+  }
+  async function piece(sec, build) {
+    const ac = new OfflineAudioContext(2, Math.max(1, Math.ceil(SR * sec)), SR);
+    const out = ac.createGain(); out.connect(ac.destination);
+    build(ac, out);
+    return ac.startRendering();
+  }
+  const BIRTHDAY_LOOP = (HB.reduce((a, n) => a + n[1], 0) + 3) * 0.5; // one verse and a bar's rest, 120 beats a minute
+  function birthdayLoop() {
+    return piece(BIRTHDAY_LOOP + 2, (ac, out) => { // (+2 s: the last notes ring on into the next verse)
+      const { bell, pad } = voices(ac, out), B = 0.5;
+      let t = 0; for (const [m, b] of HB) { bell(t, m, b * B, 0.22); t += b * B; }
+      t = HB[0][1] * B + HB[1][1] * B; // chords start on "birth-"
+      for (const [r, b] of HB_CHORDS.slice(1)) { pad(t, r, b * B); t += b * B; }
+    });
+  }
+  const TUNE_LOOP = 8;
+  function tuneLoop() {
+    return piece(TUNE_LOOP + 1, (ac, out) => {
+      const { bell, pad } = voices(ac, out), P = [[48, 0], [43, 0], [45, 1], [41, 0]], ARP = [0, 7, 12, 16, 19, 16, 12, 7];
+      P.forEach(([r, mi], i) => {
+        const t = i * 2;
+        pad(t, r, 2, mi);
+        ARP.forEach((iv, k) => bell(t + k * 0.25, r + 24 + (mi && iv === 16 ? iv - 1 : iv), 0.25, 0.1));
+      });
+    });
+  }
+  async function music(o = {}) {
+    const kind = o.kind || 'none', seconds = Math.max(1, +o.seconds || 30), cues = (o.cues && o.cues.length && window.ESCine) ? o.cues : null;
+    if ((kind === 'none' && !cues) || typeof OfflineAudioContext !== 'function') return null;
+    const stop = () => { if (o.signal && o.signal.aborted) throw err('CANCELLED', 'Cancelled'); };
+    // the pieces: [buffer, start s, gain, through the music's fades?]
+    const parts = [];
+    if (kind === 'file') {
+      let buf = null;
+      try { const dc = new OfflineAudioContext(2, SR, SR); buf = await dc.decodeAudioData(await (o.file.arrayBuffer ? o.file.arrayBuffer() : new Response(o.file).arrayBuffer())); } catch (e) { buf = null; }
+      if (!buf || !buf.duration) { o.failed = true; if (!cues) return null; } else for (let t = 0; t < seconds; t += buf.duration) parts.push([buf, t, 0.9, true]);
+    } else if (kind === 'birthday') {
+      const loop = await birthdayLoop();
+      for (let t = 0.8; t < seconds; t += BIRTHDAY_LOOP) parts.push([loop, t, 1, true]);
+    } else if (kind === 'tune') {
+      const loop = await tuneLoop();
+      for (let t = 0.3; t < seconds; t += TUNE_LOOP) parts.push([loop, t, 1, true]);
+    }
+    stop();
+    // the trailer's sound effects (event-cine.js), in 10 s windows (each cue lands in its own window, its tail rings 3 s)
+    if (cues) {
+      const WIN = 10000;
+      for (let w0 = 0; w0 < seconds * 1000; w0 += WIN) {
+        const mine = cues.filter((c) => c.t >= w0 && c.t < w0 + WIN).map((c) => Object.assign({}, c, { t: c.t - w0 }));
+        if (!mine.length) continue;
+        const buf = await piece(WIN / 1000 + 3, (ac, out) => ESCine.sfx(ac, out, mine));
+        parts.push([buf, w0 / 1000, kind === 'none' ? 1 : 0.85, false]);
+        stop();
+      }
+    }
+    if (!parts.length) return null;
+    const ac = new OfflineAudioContext(2, Math.ceil(SR * seconds), SR);
+    const master = ac.createGain(); master.gain.value = 0;
+    master.gain.setValueAtTime(0, 0); master.gain.linearRampToValueAtTime(0.85, 0.6);
+    master.gain.setValueAtTime(0.85, Math.max(0.7, seconds - 2.5)); master.gain.linearRampToValueAtTime(0, seconds);
+    const comp = ac.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+    master.connect(comp); comp.connect(ac.destination);
+    for (const [buf, t, gain, faded] of parts) {
+      const src = ac.createBufferSource(), g = ac.createGain();
+      src.buffer = buf; g.gain.value = gain; src.connect(g); g.connect(faded ? master : comp);
+      src.start(t);
+    }
+    try { const r = await ac.startRendering(); stop(); return r; } catch (e) { if (e && e.code === 'CANCELLED') throw e; return null; }
+  }
+
   // ---------- best-of: rendering ----------
   function loadImage(src) { return new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.onerror = () => r(null); i.src = src; }); }
   async function loadVideo(bytes) {
@@ -350,14 +459,35 @@ Get it on Google Play
   async function bestOf(code, o = {}) {
     if (!window.EFX || !window.EM || !EM.mp4) throw err('DENIED', 'event-fx.js and event-mp4.js are needed');
     const ev = await ES.events.get(code);
-    const free = !!(ev.cap && ev.cap.mk);
-    const W = o.aspect === '16:9' ? 1280 : 720, H = o.aspect === '16:9' ? 720 : 1280, FPS = 30;
-    const seconds = Math.max(20, Math.min(90, +o.seconds || (free ? 30 : 60)));
-    const TITLE = 3000, PHOTO = 2200, VIDEO = 4000, FINALE = 10000, END = free ? 3000 : 0;
+    // o.full: the Wish Reel (bought for this event, Premium, or a paid plan): every wish, no mark, Full HD, up to 3 minutes
+    const full = !!o.full, free = !full && !!(ev.cap && ev.cap.mk);
+    const K = full ? 1.5 : 1, W = Math.round((o.aspect === '16:9' ? 1280 : 720) * K), H = Math.round((o.aspect === '16:9' ? 720 : 1280) * K), FPS = 30;
+    // o.style 'cinema': the trailer (event-cine.js): an opening line, lasers, LED lights, camera moves and sound effects
+    const cine = o.style === 'cinema' && !!window.ESCine;
+    const TITLE = cine ? 4500 : 3000, PHOTO = cine ? 1800 : 2200, VIDEO = 4000, FINALE = 10000, END = free ? 3000 : 0, WISH = 3000, REVEAL = 4400;
     progress(o, 0.01);
     const pick = await select(code, { ev, n: 24 });
-    let vids = free ? [] : pick.videos;
-    const room = (ms) => Math.floor((seconds * 1000 - TITLE - FINALE - END - ms) / PHOTO);
+    let vids = ev.cap && ev.cap.mk ? [] : pick.videos;
+    // The wishes: guests shown on the screen, those who wrote one first, in the order they came. Each reveal takes 4.4 s;
+    // the next one's rocket goes up 3 s after the last, while its words fade.
+    const wishMs = (n) => (n > 0 ? (n - 1) * WISH + REVEAL : 0);
+    let wishers = (await listAll('guests', code, [1], GUEST_SEL).catch(() => []))
+      .sort((a, b) => (Number(!!b.wi) - Number(!!a.wi)) || (a.at - b.at));
+    // o.pick: the wishes the host chose, in their order (seat numbers); the others stay out
+    if (Array.isArray(o.pick)) { const at = new Map(o.pick.map((n, i) => [String(n), i])); wishers = wishers.filter((g) => at.has(String(g._id))).sort((a, b) => at.get(String(a._id)) - at.get(String(b._id))); }
+    // The Wish Reel is as long as it needs to be (30 s to 3 minutes); the others have their plan's length.
+    const need = TITLE + wishMs(wishers.length) + Math.min(24, pick.photos.length) * PHOTO + vids.length * VIDEO + FINALE;
+    const seconds = full ? Math.max(30, Math.min(180, Math.ceil(need / 1000))) : Math.max(20, Math.min(90, +o.seconds || (free ? 30 : 60)));
+    const avail = seconds * 1000 - TITLE - FINALE - END;
+    // A birthday is about the wishes: they come first, every one that fits. Other events keep up to half the reel for
+    // the photos and clips they have (no more than those can use). The Wish Reel keeps room for 6 photos and the clips.
+    const media = Math.min(24, pick.photos.length) * PHOTO + vids.length * VIDEO;
+    const wishRoom = !pick.photos.length ? avail
+      : full ? Math.max(0, avail - Math.min(6, pick.photos.length) * PHOTO - vids.length * VIDEO)
+        : ev.tpl === 'birthday' ? avail : Math.max(avail / 2, avail - media);
+    let nW = wishers.length;
+    while (nW && wishMs(nW) > wishRoom) nW--;
+    const room = (ms) => Math.floor((avail - wishMs(nW) - ms) / PHOTO);
     while (vids.length && room(vids.length * VIDEO) < Math.min(6, pick.photos.length)) vids = vids.slice(0, -1);
     const nP = Math.max(0, Math.min(24, pick.photos.length, room(vids.length * VIDEO)));
     // spread the photos we keep across the evening
@@ -365,11 +495,18 @@ Get it on Google Play
     cancelled(o.signal);
     const bytes = await bytesOf(code, photos.map((m) => String(m._id)), 'd');
     const vbytes = vids.length ? await bytesOf(code, vids.map((m) => String(m._id)), 'd') : new Map();
-    const guests = new Map();
-    const seats = [...new Set(photos.map((m) => m.s).filter((s) => s >= 0))];
+    const guests = new Map(wishers.map((g) => [+g._id, g.nm || '']));
+    const seats = [...new Set(photos.map((m) => m.s).filter((s) => s >= 0 && !guests.has(s)))];
     if (seats.length) {
       const docs = await ES.fs.batchGet(seats.map((s) => `events/${code}/guests/${s}`), { mask: ['nm', 'st'], auth: true }).catch(() => []);
       seats.forEach((s, i) => { if (docs[i] && docs[i].st !== 3) guests.set(s, docs[i].nm || ''); });
+    }
+    const faces = [];
+    const sb = nW ? await bytesOf(code, wishers.slice(0, nW).map((g) => String(g._id)), 'im').catch(() => new Map()) : new Map();
+    for (const g of wishers.slice(0, nW)) {
+      const b = sb.get(String(g._id));
+      if (!b) continue;
+      try { faces.push({ g, bmp: await createImageBitmap(new Blob([b], { type: 'image/jpeg' })) }); } catch (e) { /* skip a broken one */ }
     }
     progress(o, 0.08);
     const bitmaps = [];
@@ -393,7 +530,7 @@ Get it on Google Play
     await EFX.ready().catch(() => {});
     if (free && EM.mark.ready) await Promise.race([EM.mark.ready(), new Promise((r) => setTimeout(r, 4000))]).catch(() => {});
     // the timeline
-    const tPhotos = TITLE, tVideos = tPhotos + bitmaps.length * PHOTO, tFinale = tVideos + clips.length * VIDEO, tEnd = tFinale + FINALE;
+    const tPhotos = TITLE + wishMs(faces.length), tVideos = tPhotos + bitmaps.length * PHOTO, tFinale = tVideos + clips.length * VIDEO, tEnd = tFinale + FINALE;
     const total = tEnd + END, frames = Math.round(total * FPS / 1000);
     const canvas = document.createElement('canvas');
     let markBox = null, current = null;
@@ -418,14 +555,28 @@ Get it on Google Play
         g.fillStyle = '#ffe7a3'; g.font = `600 ${Math.round(Math.min(w, h) * 0.03)}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'top';
         g.fillText('play.google.com · Light Up the Skies', w / 2, h / 2 + (box ? box.h / 2 + 20 : 40));
         g.restore();
-      } else if (free) markBox = EM.mark.draw(g, w, h, { kind: 'brand', corner: 'br', scale: Math.min(w, h) / 560 }) || markBox; // §4.23: free MP4s carry the mark
+      } else if (free && !cine) markBox = EM.mark.draw(g, w, h, { kind: 'brand', corner: 'br', scale: Math.min(w, h) / 560 }) || markBox; // §4.23: free MP4s carry the mark
     };
-    const stage = EFX.stage(canvas, { seed: `best-of-${code}`, dpr: 1, tier: 'laptop', reduced: !!o.reduced, role: 'main', width: W, height: H, readback: true, bg: art || '#070b24', overlay });
+    // Wide: the landmark fills the frame, so the wishes' words would sit on its lit front; a soft dark band behind them.
+    let sky = art;
+    if (art && W > H && faces.length) {
+      const c = document.createElement('canvas'); c.width = W; c.height = H;
+      const g = c.getContext('2d');
+      cover(g, art, 0, 0, W, H, art.naturalWidth || art.width, art.naturalHeight || art.height);
+      const band = g.createLinearGradient(0, H * 0.4, 0, H * 0.74);
+      band.addColorStop(0, 'rgba(4,6,20,0)'); band.addColorStop(0.3, 'rgba(4,6,20,0.62)'); band.addColorStop(0.7, 'rgba(4,6,20,0.62)'); band.addColorStop(1, 'rgba(4,6,20,0)');
+      g.fillStyle = band; g.fillRect(0, 0, W, H);
+      sky = c;
+    }
+    const stage = EFX.stage(canvas, { seed: `best-of-${code}`, dpr: 1, tier: 'laptop', reduced: !!o.reduced, role: 'main', width: W, height: H, readback: true, bg: sky || '#070b24', overlay });
     const add = (a) => stage.add(a);
     const titleText = [ev.title, ev.names].filter(Boolean).join('\n');
-    add(EFX.textSparks({ t: 300, text: titleText, x: 0.5, y: H > W ? 0.4 : 0.42, ms: 2800, size: H > W ? 0.085 : 0.1, id: 'title' }));
-    add(EFX.burst({ t: 600, x: 0.28, y: 0.22, kind: 'peony', hue: 42, rocket: true, id: 'b0' }));
-    add(EFX.burst({ t: 1500, x: 0.72, y: 0.2, kind: 'chrysanthemum', hue: 330, rocket: true, id: 'b1' }));
+    const T0 = cine ? 2300 : 0; // the trailer opens on its line in light first (ESCine), then the title in sparks
+    add(EFX.textSparks({ t: T0 + 300, text: titleText, x: 0.5, y: H > W ? 0.4 : 0.42, ms: cine ? 2100 : 2800, size: H > W ? 0.085 : 0.1, id: 'title' }));
+    add(EFX.burst({ t: T0 + 600, x: 0.28, y: 0.22, kind: 'peony', hue: 42, rocket: true, id: 'b0' }));
+    add(EFX.burst({ t: T0 + 1500, x: 0.72, y: 0.2, kind: 'chrysanthemum', hue: 330, rocket: true, id: 'b1' }));
+    // (high in the sky: the name and wish are written under the photo, and must stay above the landmark's lit roofline)
+    faces.forEach((x, i) => add(EFX.reveal({ t: TITLE + i * WISH, photo: x.bmp, name: x.g.nm || '', wish: x.g.wi || '', x: 0.5, y: H > W ? 0.24 : 0.34, id: `w${i}` })));
     bitmaps.forEach((x, i) => {
       const t = tPhotos + i * PHOTO;
       add(EFX.slide({ t, photo: x.bmp, ms: PHOTO, seed: `${code}-${i}`, caption: x.m.cp || '', name: x.m.s >= 0 ? guests.get(x.m.s) || '' : T('Photographer'), mission: mission(x.m.m), id: `s${i}` }));
@@ -433,26 +584,52 @@ Get it on Google Play
     });
     clips.forEach((c, i) => { c.at = tVideos + i * VIDEO; });
     const date = fmtDate(ev.opensAt, ev.tz);
-    add(EFX.finale({ t: tFinale, title: ev.title, names: ev.names || ev.title, date, photos: bitmaps.slice(0, 48).map((x) => x.bmp), end: 'kamuro', drones: true, shells: 0, words: false, id: 'finale' }));
-    let out;
+    add(EFX.finale({ t: tFinale, title: ev.title, names: ev.names || ev.title, date, photos: faces.concat(bitmaps).slice(0, 48).map((x) => x.bmp), end: 'kamuro', drones: true, shells: 0, words: false, id: 'finale' }));
+    // The trailer's show around the sky: one section per part (each gets its laser and LED pattern), the bursts' instants
+    // for the camera shake and the booms, the opening line and a tag on every wish.
+    let plan = null, words = null, outCanvas = null;
+    if (cine) {
+      const th = ESCine.theme(ev.tpl), sections = [{ kind: 'open', at: 0, ms: TITLE }];
+      faces.forEach((x, i) => sections.push({ kind: 'wish', at: TITLE + i * WISH, ms: i === faces.length - 1 ? REVEAL : WISH }));
+      for (let i = 0; i < bitmaps.length; i += 3) sections.push({ kind: 'photo', at: tPhotos + i * PHOTO, ms: Math.min(3, bitmaps.length - i) * PHOTO });
+      clips.forEach((c) => sections.push({ kind: 'video', at: c.at, ms: VIDEO }));
+      sections.push({ kind: 'finale', at: tFinale, ms: FINALE });
+      if (END) sections.push({ kind: 'end', at: tEnd, ms: END });
+      plan = ESCine.plan({ dur: total, sections, booms: stage.stats().bright, theme: th, w: W, h: H, seed: `cine-${code}`, reduced: !!o.reduced });
+      const who = ev.names || ev.title;
+      words = { opener: ESCine.fill(th.opener, who), openerUntil: T0 + 200,
+        tags: faces.map((x, i) => ({ at: TITLE + i * WISH + 1300, ms: 2600, text: th.tag === 'reason' ? ESCine.fill('Reason #{0}', i + 1) : ESCine.fill('Wish {0} of {1}', i + 1, faces.length) })) };
+      outCanvas = document.createElement('canvas'); outCanvas.width = W; outCanvas.height = H;
+    }
+    let out, sound = null;
+    const kind = o.music && o.music.kind ? o.music.kind : 'none';
+    const mo = { kind, file: o.music && o.music.file, seconds: total / 1000, cues: cine ? ESCine.cues(plan) : null, signal: o.signal };
     try {
+      // (inside the try: a Cancel during the sound still frees the stage and the bitmaps below)
+      if (kind !== 'none' || cine) { try { sound = await music(mo); } catch (e) { if (e && e.code === 'CANCELLED') throw e; sound = null; } }
       out = await EM.mp4.render({
-        w: W, h: H, fps: FPS, bitrate: 3e6, frames, canvas, signal: o.signal, prefer: o.prefer,
+        w: W, h: H, fps: FPS, bitrate: full ? 5e6 : 3e6, frames, canvas: outCanvas || canvas, signal: o.signal, prefer: o.prefer, audio: sound,
         onProgress: (f) => progress(o, 0.12 + 0.88 * f),
         draw: async (ctx, i, tMs) => {
           current = clips.find((c) => tMs >= c.at && tMs < c.at + VIDEO) || null;
           if (current) await seek(current.v, Math.min((tMs - current.at) / 1000, Math.max(0, (current.v.duration || 4) - 0.05)));
           stage.render(tMs);
+          if (cine) {
+            ESCine.compose(ctx, canvas, W, H, tMs, plan, words);
+            if (free && tMs < tEnd) markBox = EM.mark.draw(ctx, W, H, { kind: 'brand', corner: 'br', scale: Math.min(W, H) / 560 }) || markBox; // steady, over the camera
+          }
         },
       });
     } finally {
       const st = stage.stats();
-      ESExport.last = { du: Math.round(total), frames, w: W, h: H, photos: bitmaps.length, videos: clips.length, bright: st.bright.slice(), denied: st.denied, markBox, free,
-        mime: out && out.mime, path: out && out.path, finaleAt: tFinale, endAt: tEnd };
+      ESExport.last = { du: Math.round(total), frames, w: W, h: H, photos: bitmaps.length, videos: clips.length, wishes: faces.length, wishesLeft: wishers.length - faces.length, bright: st.bright.slice(), denied: st.denied, markBox, free,
+        mime: out && out.mime, path: out && out.path, finaleAt: tFinale, endAt: tEnd, full, audio: !!(out && out.audio), music: !!sound && kind !== 'none' && !mo.failed,
+        cine, sections: plan ? plan.sections.map((x) => ({ kind: x.kind, at: x.at, ms: x.ms, laser: x.laser, led: x.led })) : null, cues: plan ? ESCine.cues(plan).length : 0 };
       stage.dispose();
-      bitmaps.forEach((x) => { try { x.bmp.close(); } catch (e) { /* closed */ } });
+      faces.concat(bitmaps).forEach((x) => { try { x.bmp.close(); } catch (e) { /* closed */ } });
       clips.forEach((c) => { URL.revokeObjectURL(c.url); c.v.removeAttribute('src'); try { c.v.load(); } catch (e) { /* gone */ } });
       canvas.width = canvas.height = 0;
+      if (outCanvas) outCanvas.width = outCanvas.height = 0;
     }
     return out.blob;
   }
@@ -555,5 +732,5 @@ Get it on Google Play
     return doc.finish();
   }
 
-  window.ESExport = { zip, bestOf, book: bookPdf, csv, select, csvRows, last: null, _dimDraw: dimDraw };
+  window.ESExport = { zip, bestOf, book: bookPdf, csv, select, csvRows, music, last: null, _dimDraw: dimDraw };
 })();

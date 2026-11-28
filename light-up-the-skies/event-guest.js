@@ -205,6 +205,10 @@
     const $ = (id) => document.getElementById(id);
     const LANG = (window.LUTSLang && LUTSLang.lang) || 'en';
     const T = (s) => { try { return window.LUTSLang && LUTSLang.t ? LUTSLang.t(s) : s; } catch (e) { return s; } };
+    // Host-typed text (missions, function names): translated only when it is one of our presets, word for word, and kept
+    // away from the dictionary's patterns ("Sorry, {0}", "Wish {0} of {1}"), which would turn half of a sentence.
+    const exact = (s) => { try { const d = window.LUTS_I18N; return d && Object.prototype.hasOwnProperty.call(d, s) && d[s] ? d[s] : s; } catch (e) { return s; } };
+    const hostOpt = (txt, val) => { const o = new Option(exact(txt), val); o.setAttribute('data-no-i18n', ''); return o; };
     const fill = (s, ...a) => String(s).replace(/\{(\d+)\}/g, (m, i) => (a[+i] === undefined ? m : String(a[+i])));
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     // English text into the DOM (i18n.js translates it as it lands); unchanged text is not rewritten.
@@ -440,7 +444,7 @@
         S.sig.fns = sig;
         const keep = sel.value;
         sel.textContent = '';
-        fns.forEach((f) => sel.add(new Option(f.n, f.id)));
+        fns.forEach((f) => sel.add(hostOpt(f.n, f.id)));
         sel.value = fns.some((f) => f.id === keep) ? keep : currentFn();
       }
       hide($('fnRow'), fns.length < 2);
@@ -750,7 +754,7 @@
       for (const m of ms) {
         const li = document.createElement('li');
         const sp = document.createElement('span');
-        sp.className = 't'; sp.textContent = m.t;
+        sp.className = 't'; sp.textContent = exact(m.t); sp.setAttribute('data-no-i18n', '');
         li.appendChild(sp);
         if (done.has(m.id)) {
           const d = document.createElement('span'); d.className = 'done'; d.textContent = 'Done ✓'; li.appendChild(d);
@@ -958,7 +962,7 @@
       const p = S.pub, ch = S.live && S.live.ch, t = now();
       sel.textContent = '';
       sel.add(new Option('No mission', ''));
-      (p.ms || []).forEach((x) => { if (x && x.id && x.t) sel.add(new Option(x.t, x.id)); });
+      (p.ms || []).forEach((x) => { if (x && x.id && x.t) sel.add(hostOpt(x.t, x.id)); });
       if (ch && ch.id && ch.t && +ch.end > t) sel.add(new Option(fill('Photo challenge: {0}', ch.t), ch.id));
       sel.value = [...sel.options].some((o) => o.value === m) ? m : '';
       hide($('missionPick'), sel.options.length < 2);

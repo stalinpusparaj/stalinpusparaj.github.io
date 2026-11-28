@@ -126,7 +126,7 @@
   let auth = null;
   try { auth = JSON.parse(localStorage.getItem(AUTH_KEY) || 'null'); } catch (e) { auth = null; }
   async function token() {
-    if (auth && auth.exp > Date.now() + 60e3) return auth.id;
+    if (auth && auth.exp > Date.now() + 60e3 && auth.exp < Date.now() + 3660e3) return auth.id; // (longer than an hour: saved while the clock was ahead)
     const signUp = () => fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FIREBASE.apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"returnSecureToken":true}' }).then((x) => x.json());
     let r = auth && auth.refresh
       ? await fetch(`https://securetoken.googleapis.com/v1/token?key=${FIREBASE.apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(auth.refresh)}` }).then((x) => x.json())

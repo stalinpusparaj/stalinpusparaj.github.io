@@ -27,6 +27,84 @@
  * ES.bell.watch() also returns setOpensAt(ms), level() and state(); onChange gets (changed, bell, {first}).
  *
  * STRINGS:
+ * Anniversary
+ * Couple's names
+ * An anniversary wish (optional)
+ * Your favourite photo of the two of them
+ * A memory you share with them
+ * Happy Anniversary, {0}
+ * Proposal
+ * Who is the question for?
+ * A word of love (optional)
+ * A photo that tells your story
+ * Your best memory together
+ * Will you marry me, {0}?
+ * Graduation
+ * Graduate
+ * A message for the graduate (optional)
+ * Graduation day photo
+ * Your proudest moment with them
+ * Congratulations, {0}
+ * Get well soon
+ * Who is it for?
+ * A get-well wish (optional)
+ * A photo that will make them smile
+ * Something to look forward to
+ * Get well soon, {0}
+ * Thank you
+ * Who are you thanking?
+ * Say thank you (optional)
+ * A photo of a time they helped
+ * A big smile for them
+ * Thank you, {0}
+ * Sorry
+ * Say sorry (optional)
+ * A photo of happier days
+ * A promise for tomorrow
+ * Sorry, {0}
+ * Miss you
+ * Who do you miss?
+ * Tell them you miss them (optional)
+ * Where you are right now
+ * A photo of the two of you
+ * We miss you, {0}
+ * Just because
+ * Something nice to say (optional)
+ * A photo that reminds you of them
+ * Your favourite thing about them
+ * We love you, {0}
+ * Christmas
+ * A Christmas wish (optional)
+ * Your Christmas tree
+ * A festive selfie
+ * Merry Christmas, {0}
+ * New Year
+ * A New Year wish (optional)
+ * Your New Year's Eve selfie
+ * A wish for next year
+ * Happy New Year, {0}
+ * Valentine's Day
+ * Your Valentine
+ * A love note (optional)
+ * Where it all began
+ * Happy Valentine's Day, {0}
+ * Mother's Day
+ * Mum's name
+ * A wish for Mum (optional)
+ * A photo with Mum
+ * Something Mum taught you
+ * Happy Mother's Day, {0}
+ * Father's Day
+ * Dad's name
+ * A wish for Dad (optional)
+ * A photo with Dad
+ * Something Dad taught you
+ * Happy Father's Day, {0}
+ * Diwali
+ * A Diwali wish (optional)
+ * Your rangoli
+ * A festive family photo
+ * Happy Diwali, {0}
  * Wedding
  * Birthday
  * Party
@@ -246,7 +324,7 @@
     shaadi: { rd: 12000, eg: 1200, st: 250 }, corp: { rd: 15000, eg: 900, st: 200 } });
   const WORLDS = Object.freeze(['golden-manor', 'mysore-palace', 'gateway-of-india', 'india-gate', 'taj-mahal', 'hawa-mahal',
     'charminar', 'konark-sun-temple', 'golden-temple', 'victoria-memorial', 'red-fort', 'meenakshi-amman-temple',
-    'brihadeeswarar-temple', 'vivekananda-rock-memorial', 'velankanni-basilica', 'cross-by-the-sea']);
+    'brihadeeswarar-temple', 'vivekananda-rock-memorial', 'velankanni-basilica', 'cross-by-the-sea', 'harbour-city']);
   const LANGS = Object.freeze(['en', 'hi', 'bn', 'mr', 'te', 'ta', 'gu', 'kn', 'ml', 'pa']);
   const ms = (pre, list) => list.map((t, i) => ({ id: `${pre}${i + 1}`, t }));
   // §4.2. Every preset was checked against the no-alcohol list (§4.26).
@@ -266,7 +344,39 @@
       fns: ['Day 1', 'Day 2', 'Awards night'],
       missions: ms('c', ['Team photo', 'Selfie with someone from another team', 'Your booth or desk', 'Behind the scenes']),
       finale: { words: ['{title}'], i18n: false }, dp: 'off' },
+    // Occasions (everyday and holidays): a guest's selfie and wish for one person or couple; no functions, no approval.
+    anniversary: { label: 'Anniversary', ico: '💞', group: 'day', approve: false, world: 'taj-mahal', namesLabel: "Couple's names", wishLabel: 'An anniversary wish (optional)',
+      fns: [], missions: ms('oa', ['Your favourite photo of the two of them', 'A memory you share with them']), finale: { words: ['Happy Anniversary, {0}'], i18n: true }, dp: 'optional' },
+    proposal: { label: 'Proposal', ico: '💌', group: 'day', approve: false, world: 'taj-mahal', namesLabel: 'Who is the question for?', wishLabel: 'A word of love (optional)',
+      fns: [], missions: ms('ob', ['A photo that tells your story', 'Your best memory together']), finale: { words: ['Will you marry me, {0}?'], i18n: true }, dp: 'optional' },
+    graduation: { label: 'Graduation', ico: '🎓', group: 'day', approve: false, world: 'victoria-memorial', namesLabel: 'Graduate', wishLabel: 'A message for the graduate (optional)',
+      fns: [], missions: ms('oc', ['Graduation day photo', 'Your proudest moment with them']), finale: { words: ['Congratulations, {0}'], i18n: true }, dp: 'optional' },
+    getwell: { label: 'Get well soon', ico: '💐', group: 'day', approve: false, world: 'cross-by-the-sea', namesLabel: 'Who is it for?', wishLabel: 'A get-well wish (optional)',
+      fns: [], missions: ms('od', ['A photo that will make them smile', 'Something to look forward to']), finale: { words: ['Get well soon, {0}'], i18n: true }, dp: 'optional' },
+    thanks: { label: 'Thank you', ico: '🙏', group: 'day', approve: false, world: 'golden-temple', namesLabel: 'Who are you thanking?', wishLabel: 'Say thank you (optional)',
+      fns: [], missions: ms('oe', ['A photo of a time they helped', 'A big smile for them']), finale: { words: ['Thank you, {0}'], i18n: true }, dp: 'optional' },
+    sorry: { label: 'Sorry', ico: '🫶', group: 'day', approve: false, world: 'vivekananda-rock-memorial', namesLabel: 'Who is it for?', wishLabel: 'Say sorry (optional)',
+      fns: [], missions: ms('of', ['A photo of happier days', 'A promise for tomorrow']), finale: { words: ['Sorry, {0}'], i18n: true }, dp: 'optional' },
+    missyou: { label: 'Miss you', ico: '✈️', group: 'day', approve: false, world: 'harbour-city', namesLabel: 'Who do you miss?', wishLabel: 'Tell them you miss them (optional)',
+      fns: [], missions: ms('og', ['Where you are right now', 'A photo of the two of you']), finale: { words: ['We miss you, {0}'], i18n: true }, dp: 'optional' },
+    justbecause: { label: 'Just because', ico: '💛', group: 'day', approve: false, world: 'hawa-mahal', namesLabel: 'Who is it for?', wishLabel: 'Something nice to say (optional)',
+      fns: [], missions: ms('oh', ['A photo that reminds you of them', 'Your favourite thing about them']), finale: { words: ['We love you, {0}'], i18n: true }, dp: 'optional' },
+    christmas: { label: 'Christmas', ico: '🎄', group: 'hol', approve: false, world: 'velankanni-basilica', namesLabel: 'Who is it for?', wishLabel: 'A Christmas wish (optional)',
+      fns: [], missions: ms('oi', ['Your Christmas tree', 'A festive selfie']), finale: { words: ['Merry Christmas, {0}'], i18n: true }, dp: 'optional' },
+    newyear: { label: 'New Year', ico: '✨', group: 'hol', approve: false, world: 'harbour-city', namesLabel: 'Who is it for?', wishLabel: 'A New Year wish (optional)',
+      fns: [], missions: ms('oj', ["Your New Year's Eve selfie", 'A wish for next year']), finale: { words: ['Happy New Year, {0}'], i18n: true }, dp: 'optional' },
+    valentine: { label: "Valentine's Day", ico: '💘', group: 'hol', approve: false, world: 'taj-mahal', namesLabel: 'Your Valentine', wishLabel: 'A love note (optional)',
+      fns: [], missions: ms('ok', ['A photo of the two of you', 'Where it all began']), finale: { words: ["Happy Valentine's Day, {0}"], i18n: true }, dp: 'optional' },
+    mothersday: { label: "Mother's Day", ico: '🌷', group: 'hol', approve: false, world: 'mysore-palace', namesLabel: "Mum's name", wishLabel: 'A wish for Mum (optional)',
+      fns: [], missions: ms('ol', ['A photo with Mum', 'Something Mum taught you']), finale: { words: ["Happy Mother's Day, {0}"], i18n: true }, dp: 'optional' },
+    fathersday: { label: "Father's Day", ico: '👔', group: 'hol', approve: false, world: 'red-fort', namesLabel: "Dad's name", wishLabel: 'A wish for Dad (optional)',
+      fns: [], missions: ms('om', ['A photo with Dad', 'Something Dad taught you']), finale: { words: ["Happy Father's Day, {0}"], i18n: true }, dp: 'optional' },
+    diwali: { label: 'Diwali', ico: '🪔', group: 'hol', approve: false, world: 'golden-manor', namesLabel: 'Who is it for?', wishLabel: 'A Diwali wish (optional)',
+      fns: [], missions: ms('on', ['Your rangoli', 'A festive family photo']), finale: { words: ['Happy Diwali, {0}'], i18n: true }, dp: 'optional' },
   });
+  // The wizard's groups, in order: what most people celebrate first (§4.2).
+  const TEMPLATE_GROUPS = Object.freeze([['day', ['birthday', 'anniversary', 'wedding', 'proposal', 'graduation', 'getwell', 'thanks', 'sorry', 'missyou', 'justbecause', 'party', 'corporate']],
+    ['hol', ['christmas', 'newyear', 'valentine', 'mothersday', 'fathersday', 'diwali']]]);
   const BELL_KEYS = 'qoaerslpgw';
   const GUEST_BELLS = 'qoaer';
   const STAT_KEYS = { a: 'a', u: 'u', o: 'o', r: 'r', s: 's', d: 'd', v: 'v', arrival: 'a', upload: 'u', open: 'o', react: 'r',
@@ -333,7 +443,8 @@
   let tokenP = null;
   function staffUid() { return (auth && auth.uid) || null; }
   async function token(force) {
-    if (!force && auth && auth.exp > Date.now() + 60e3) return auth.id;
+    // (a token lasts an hour: one that seems valid for longer was saved while the phone's clock was ahead, and has expired)
+    if (!force && auth && auth.exp > Date.now() + 60e3 && auth.exp < Date.now() + 3660e3) return auth.id;
     if (tokenP) return tokenP;
     tokenP = (async () => {
       const key = encodeURIComponent(FB().apiKey || '');
@@ -643,7 +754,7 @@
     const base = CFG(); v = v || {};
     const out = Object.assign({}, base, {
       pause: !!v.pause, play: !!v.play, face: !!v.face, shop: !!(v.shop || base.shop), worker: String(v.worker || base.worker || ''),
-      r2: !!(v.r2 || base.r2), msg: String(v.msg || ''), b: Object.assign({}, base.budgets || {}, v.b || {}),
+      r2: !!(v.r2 || base.r2), msg: String(v.msg || ''), reel: v.reel !== false && base.reel !== false, b: Object.assign({}, base.budgets || {}, v.b || {}),
     });
     cfgLast = out; cfgLastAt = at; gov.pause = out.pause; setGovLevel();
     return out;
@@ -2820,7 +2931,7 @@
     version: 2,
     ESError, err,
     cfg,
-    PLANS, EXPECT, TEMPLATES, WORLDS, LANGS, CODE_RE, CODE_CHARS, caps, rank,
+    PLANS, EXPECT, TEMPLATES, TEMPLATE_GROUPS, WORLDS, LANGS, CODE_RE, CODE_CHARS, caps, rank,
     staff: { token: () => token(), uid: staffUid },
     fs, db, clock, bell, events, pub, live, roles, pair, passes,
     guest, rsvp, report, media, guests: guestsApi, pro, gallery,

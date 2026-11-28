@@ -5,6 +5,8 @@
   const LANGS = [
     ['auto', 'Phone language'], ['en', 'English'], ['hi', 'हिन्दी'], ['bn', 'বাংলা'], ['mr', 'मराठी'], ['te', 'తెలుగు'],
     ['ta', 'தமிழ்'], ['gu', 'ગુજરાતી'], ['kn', 'ಕನ್ನಡ'], ['ml', 'മലയാളം'], ['pa', 'ਪੰਜਾਬੀ'],
+    // The game only for now: Event Sky's pages (their own dictionaries in i18n/event/) don't have these yet.
+    ...(window.LUTS_I18N_DIR ? [] : [['es', 'Español'], ['pt', 'Português'], ['id', 'Bahasa Indonesia'], ['de', 'Deutsch']]),
   ];
   const KEY = window.LUTS_I18N_KEY || 'luts:lang'; // Event Sky pages keep their own choice (luts:es-lang)
   const codes = LANGS.slice(1).map(([c]) => c);

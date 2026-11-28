@@ -20,6 +20,20 @@
  */
 /* STRINGS:
 My events
+Use a Wish Reel you bought earlier
+{0} wishes didn't fit in 3 minutes. Untick some under Choose the wishes.
+1 wish didn't fit in 3 minutes. Untick some under Choose the wishes.
+This phone can't add sound to videos, so this one is silent.
+{0} of {1} wishes chosen
+Get the Wish Reel for {0}
+Wish Reel unlocked for this event ✓
+Included with Premium ✓
+Included with your pass ✓
+The Wish Reel isn't available right now.
+Payment processing: your Wish Reel unlocks automatically.
+{0} wishes didn't fit in the free 30-second video.
+1 wish didn't fit in the free 30-second video.
+That song did not open. Try another one.
 Create an event
 Create your event in the Light Up the Skies app
 Get it on Google Play
@@ -85,6 +99,7 @@ Add a title
 Check-in must close after it opens
 Check-in opens within 200 days
 This plan allows events up to {0} days long. Change the times or pick another plan.
+This plan allows events up to 24 hours long. Change the times or pick another plan.
 Checking your date…
 Your date is available ✓
 Fully booked for new free events today. Try again after 5:30 AM.
@@ -669,19 +684,24 @@ Done
   function passState(detail) {
     if (!detail || typeof detail !== 'object') return;
     P.status = String(detail.status || '');
+    P.unsupported = detail.message === 'store-unsupported'; // (Galaxy, Indus, iOS: no Play billing, so no Wish Reel to sell)
     if (Array.isArray(detail.products)) P.products = detail.products.filter((p) => p && p.id && p.price);
     if (Array.isArray(detail.credits)) P.credits = detail.credits.filter((c) => c && c.tx);
+    reelCredits(detail);
+    if (R.buying) { reelEvent(detail); return; } // a Wish Reel purchase: its own messages, in Downloads (never a pass)
     if (detail.event === 'cancelled') P.msg = 'Purchase cancelled';
     else if (detail.event === 'pending') P.msg = 'Payment processing: your pass arrives automatically.';
     else if (detail.event === 'purchased') P.msg = 'Purchased ✓';
     else if (detail.message === 'store-unsupported') P.msg = ''; // iOS and other stores: codes only, nothing to apologise for
     else if ((P.status === 'unavailable' || P.status === 'error') && !P.products.length) P.msg = 'Passes aren\'t available right now.';
+    renderReel();
     syncCredits(detail.event === 'purchased').then(() => P.listeners.forEach((f) => f(detail))).catch(() => P.listeners.forEach((f) => f(detail)));
   }
   async function syncCredits(fresh) {
     if (!P.credits.length) return;
     await ES.staff.token();
     for (const c of P.credits) {
+      if (isReel(c.product)) continue; // a Wish Reel is no pass: it never goes in the passes ledger (see the Wish Reel below)
       if (!fresh && P.info.has(c.tx) && P.info.get(c.tx).left <= 0) continue;
       let d = null;
       try { d = await ES.passes.get(c.tx); if (!d) d = await ES.passes.record(c.tx, c.product); } catch (e) { d = null; }
@@ -729,8 +749,9 @@ Done
       }
       if (plannerLeft) list.prepend(h('p', { class: 'eh-muted' }, F('Planner credits: {0} left', plannerLeft)));
       // Play products (in the app, when switched on)
-      if (playOn() && P.products.length) {
+      if (playOn() && P.products.some((p) => !isReel(p.id))) {
         for (const p of P.products) {
+          if (isReel(p.id)) continue;
           const plan = p.plan || (p.id === 'es_shaadi_pass' ? 'shaadi' : 'event');
           if (!eligible(plan)) continue;
           const copyKey = p.id.startsWith('es_planner_10') ? 'es_planner_10' : plan;
@@ -760,7 +781,7 @@ Done
         h('b', null, 'Have an activation code?'), h('div', { class: 'eh-row' }, inp, use), msg));
       box.append(list);
       if (P.msg) box.append(h('p', { class: 'eh-live', role: 'status' }, P.msg));
-      if (!playOn() || !P.products.length) box.append(h('p', { class: 'eh-muted' }, 'For companies and planners: ask us for a code.'));
+      if (!playOn() || !P.products.some((p) => !isReel(p.id))) box.append(h('p', { class: 'eh-muted' }, 'For companies and planners: ask us for a code.'));
       else box.append(h('p', { class: 'eh-muted' }, 'For companies: ask us for a code'));
       if (playOn()) box.append(h('p', { class: 'eh-muted eh-small' }, 'Bought a pass on an earlier install? Write to us with the order number and we\'ll move it.'));
       // Only plans whose full-size period is shorter than the gallery (the passes); on Free both are 3 days.
@@ -874,7 +895,7 @@ Done
       if (!W.dateOk) { toast($('wDate').textContent || 'Checking your date…'); return false; }
       const cp = ES.caps(W.sel.plan, W.sel.proof.kind !== 'play') || ES.caps('free', true);
       const t = wizTimes();
-      if (t.closesAt > t.opensAt + cp.wd * DAY) { toast(F('This plan allows events up to {0} days long. Change the times or pick another plan.', cp.wd)); return false; }
+      if (t.closesAt > t.opensAt + cp.wd * DAY) { toast(windowText(cp.wd)); return false; }
     }
     return true;
   }
@@ -903,6 +924,7 @@ Done
       out.textContent = r.ok ? 'Your date is available ✓' : dateRefusal(r.reason, t.opensAt);
     } catch (e) { if (seq === W.checkSeq) { out.className = 'eh-check no'; out.textContent = errText(e); } }
   }
+  const windowText = (wd) => (+wd === 1 ? 'This plan allows events up to 24 hours long. Change the times or pick another plan.' : F('This plan allows events up to {0} days long. Change the times or pick another plan.', wd));
   function dateRefusal(reason, at) {
     if (reason === 'FREE_FULL') return 'Fully booked for new free events today. Try again after 5:30 AM.';
     if (reason === 'PAUSED') return 'Event Sky is paused for a moment. Please try again later.';
@@ -1724,6 +1746,140 @@ Done
     $('dlCsvAn').hidden = !!cp.mk;
     $('dlFull').textContent = e.fu < e.expiresAt ? F('Full-size copies are kept until {0}.', fmtDate(e.fu)) : F('Photos are kept until {0}.', fmtDate(e.expiresAt));
     $('dlRemind').hidden = !isCohost();
+    if (!R.musicFor || R.musicFor !== S.code) { R.musicFor = S.code; R.song = null; R.msg = ''; R.left = 0; $('dlVidNote').hidden = true; $('dlSongName').hidden = true; $('dlMusic').value = e.tpl === 'birthday' ? 'birthday' : 'tune'; }
+    reelLoad();
+    renderReel();
+    loadPick();
+  }
+  // The wishes in the video: every shown guest, ticked; the host unticks the ones to leave out (ESExport.bestOf {pick}).
+  async function loadPick() {
+    const code = S.code, box = $('dlPick');
+    let list = [];
+    try { list = (await ES.guests.changes(code, { st: [1], limit: 300, select: ['nm', 'wi', 'at'] })).items || []; } catch (e) { list = []; }
+    if (code !== S.code) return;
+    list.sort((a, b) => (Number(!!b.wi) - Number(!!a.wi)) || (a.at - b.at));
+    const keep = R.pickFor === code && R.pickOff ? R.pickOff : new Set();
+    R.pickFor = code; R.pickOff = keep;
+    box.textContent = '';
+    const sum = () => {
+      const on = list.filter((g) => !keep.has(String(g._id)));
+      R.pick = keep.size ? on.map((g) => String(g._id)) : null;
+      $('dlPickSum').textContent = keep.size ? F('{0} of {1} wishes chosen', on.length, list.length) : T('Choose the wishes');
+    };
+    for (const g of list) {
+      const cb = h('input', { type: 'checkbox' }); cb.checked = !keep.has(String(g._id));
+      cb.addEventListener('change', () => { if (cb.checked) keep.delete(String(g._id)); else keep.add(String(g._id)); sum(); });
+      box.append(h('label', null, cb, h('span', { 'data-no-i18n': '' }, h('b', null, g.nm || ''), g.wi ? h('small', null, g.wi) : null)));
+    }
+    $('dlPickBox').hidden = !list.length;
+    sum();
+  }
+  // ============================================================================================== Wish Reel ===
+  // The best-of video with every wish, no mark, Full HD and up to 3 minutes (ESExport.bestOf {full}): a Google Play
+  // one-time product, es_wish_reel (about ₹99), bought per event through the passes' channel (premium('es-buy')). It is
+  // no pass: nothing is written to Firestore (everything it unlocks happens on this phone), so the purchase is kept as
+  // luts:es-reels {code: tx} and the store's list of purchases. A purchase still processing (UPI) is remembered as
+  // luts:es-reel-want = code and given to that event when it comes through. Premium (subscription, reviewer flag or a
+  // festival pass, as game.js reads them) and a paid plan include it. RTDB es_cfg.reel === false hides the offer.
+  const REEL_ID = 'es_wish_reel';
+  const isReel = (id) => String(id || '') === REEL_ID || String(id || '').startsWith(REEL_ID + ':');
+  const R = { buying: '', added: false, msg: '', left: 0, song: null, musicFor: '', asked: false };
+  const lsJson = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k) || 'null'); return v == null ? d : v; } catch (e) { return d; } };
+  const lsPut = (k, v) => { try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } };
+  function premiumOn() {
+    try {
+      if (localStorage.getItem('luts:premium') === '1' || localStorage.getItem('luts:reviewer') === '1') return true;
+      const v = localStorage.getItem('luts:pass'), until = { diwali_pass: new Date(2026, 10, 16).getTime(), newyear_pass: new Date(2027, 0, 8).getTime() }[v === '1' ? 'diwali_pass' : v];
+      return !!until && Date.now() < until;
+    } catch (e) { return false; }
+  }
+  const reelBought = (code) => { const tx = lsJson('luts:es-reels', {})[code]; return !!tx; };
+  const reelOn = () => !!S.ev && (premiumOn() || !S.ev.cap.mk || reelBought(S.code));
+  const reelStore = () => !!(window.LUTSNative && window.LUTSNative.platform !== 'ios' && typeof window.LUTSNative.premium === 'function' && !(S.cfg && S.cfg.reel === false));
+  const reelProduct = () => P.products.find((p) => isReel(p.id)) || null;
+  function reelLoad() {
+    if (!reelStore() || R.asked) return;
+    R.asked = true;
+    try {
+      if (window.LUTSNative.lastEventSky) passState(window.LUTSNative.lastEventSky);
+      if (!P.loaded) { P.loaded = true; window.LUTSNative.premium('es-products'); } else window.LUTSNative.premium('es-state');
+    } catch (e) { /* no store: the card says so */ }
+  }
+  // The events waiting for a Wish Reel (luts:es-reel-want): [{code, old:[the reel purchases already known when its
+  // buy began]}]. Several may wait (a UPI payment still processing, then another event); none is dropped while its
+  // payment is pending. A purchase that comes through goes to the oldest event waiting, never one known before the buy
+  // (so a reel bought on an earlier install is not taken for the new one: that one is offered by "Use a Wish Reel you
+  // bought earlier"). A string (the first version) is read as one event.
+  const reelTxs = () => P.credits.filter((c) => c && c.tx && isReel(c.product)).map((c) => c.tx);
+  function wants() {
+    const v = lsJson('luts:es-reel-want', null);
+    if (typeof v === 'string') return [{ code: v, old: [] }];
+    return Array.isArray(v) ? v.filter((w) => w && typeof w.code === 'string') : [];
+  }
+  const putWants = (l) => lsPut('luts:es-reel-want', l.length ? l : null);
+  function spareReels() { const used = new Set(Object.values(lsJson('luts:es-reels', {}))); return P.credits.filter((c) => c && c.tx && isReel(c.product) && !used.has(c.tx)).sort((a, b) => a.at - b.at); }
+  function reelCredits(detail) {
+    let list = wants();
+    if (!list.length || !Array.isArray(detail && detail.credits)) return;
+    const map = lsJson('luts:es-reels', {}), used = new Set(Object.values(map));
+    const fresh = detail.credits.filter((c) => c && c.tx && isReel(c.product) && !used.has(c.tx)).sort((a, b) => a.at - b.at);
+    if (!fresh.length) return;
+    // the event just paid for first (the newest purchase), then the others in the order they asked
+    if (detail.event === 'purchased' && R.buying) list = list.filter((w) => w.code === R.buying).concat(list.filter((w) => w.code !== R.buying));
+    const left = [];
+    for (const w of list) {
+      const old = new Set(w.old || []);
+      const pool = fresh.filter((c) => !used.has(c.tx) && !old.has(c.tx));
+      const c = detail.event === 'purchased' && w.code === R.buying ? pool[pool.length - 1] : pool[0];
+      if (!c) { left.push(w); continue; }
+      map[w.code] = c.tx; used.add(c.tx);
+      if (w.code === S.code) { R.msg = ''; R.left = 0; }
+    }
+    lsPut('luts:es-reels', map); putWants(left);
+  }
+  function reelEvent(detail) {
+    const drop = () => { if (R.added) putWants(wants().filter((w) => w.code !== R.buying)); R.added = false; };
+    if (detail.event === 'cancelled') { drop(); R.buying = ''; R.msg = 'Purchase cancelled'; }
+    else if (detail.event === 'pending') { R.added = false; R.buying = ''; R.msg = 'Payment processing: your Wish Reel unlocks automatically.'; }
+    else if (detail.event === 'purchased') { R.added = false; R.buying = ''; R.msg = ''; }
+    else if (detail.status === 'error' || detail.status === 'unavailable') { drop(); R.buying = ''; R.msg = "The Wish Reel isn't available right now."; }
+    renderReel();
+  }
+  function buyReel() {
+    const p = reelProduct();
+    if (!p || !S.code) { R.msg = "The Wish Reel isn't available right now."; renderReel(); return; }
+    const list = wants(), had = list.some((w) => w.code === S.code);
+    if (!had) { list.push({ code: S.code, old: reelTxs() }); putWants(list); }
+    R.added = !had; R.buying = S.code; R.msg = '';
+    try { window.LUTSNative.premium('es-buy', p.id); } catch (e) { reelEvent({ status: 'error' }); return; }
+    renderReel();
+  }
+  // A reel bought earlier (on another install, or before this phone forgot which event it was for), given to this event.
+  function useSpareReel() {
+    const c = spareReels()[0];
+    if (!c || !S.code) return;
+    const map = lsJson('luts:es-reels', {}); map[S.code] = c.tx; lsPut('luts:es-reels', map);
+    putWants(wants().filter((w) => w.code !== S.code));
+    R.msg = ''; R.left = 0; renderReel();
+  }
+  function renderReel() {
+    const box = $('dlReel');
+    if (!box || !S.ev) return;
+    const on = reelOn(), p = reelProduct(), btn = $('dlReelBuy'), use = $('dlReelUse'), msg = $('dlReelMsg');
+    const waiting = wants().some((w) => w.code === S.code), spare = !on && !waiting && spareReels().length > 0;
+    box.hidden = !on && (!reelStore() || P.unsupported);
+    $('dlVidFree').hidden = on || !S.ev.cap.mk;
+    let line = R.msg;
+    if (on) {
+      line = premiumOn() ? 'Included with Premium ✓' : !S.ev.cap.mk ? 'Included with your pass ✓' : 'Wish Reel unlocked for this event ✓';
+      if (R.left) line = T(line) + ' ' + (R.left === 1 ? T("1 wish didn't fit in 3 minutes. Untick some under Choose the wishes.") : F(T("{0} wishes didn't fit in 3 minutes. Untick some under Choose the wishes."), R.left));
+    } else if (!line && waiting) line = 'Payment processing: your Wish Reel unlocks automatically.';
+    else if (!line && R.left) line = R.left === 1 ? '1 wish didn\'t fit in the free 30-second video.' : F("{0} wishes didn't fit in the free 30-second video.", R.left);
+    else if (!line && P.status && P.status !== 'loading' && !p && !spare) line = "The Wish Reel isn't available right now.";
+    msg.textContent = line || '';
+    use.hidden = !spare;
+    btn.hidden = on || !p || spare;
+    if (p) { btn.textContent = F('Get the Wish Reel for {0}', p.price); btn.disabled = !!R.buying; }
   }
   function progress(on, text) {
     $('dlProg').hidden = !on;
@@ -1784,8 +1940,19 @@ Done
     });
   }
   async function exportVideo(aspect) {
+    const kind = $('dlMusic').value;
+    if (kind === 'file' && !R.song) { $('dlSong').click(); return; }
     await runExport('video', async ({ signal, onProgress }) => {
-      const blob = await ESExport.bestOf(S.code, { aspect, seconds: S.ev.cap.mk ? 30 : 60, reduced: $('dlCalm').checked, onProgress, signal });
+      const full = reelOn();
+      const blob = await ESExport.bestOf(S.code, { aspect, seconds: S.ev.cap.mk ? 30 : 60, reduced: $('dlCalm').checked, onProgress, signal, full,
+        music: { kind, file: kind === 'file' ? R.song : null }, style: $('dlStyle').value, pick: R.pick });
+      const last = ESExport.last || {};
+      if (kind === 'file' && !last.music) toast('That song did not open. Try another one.', { ms: 5000 });
+      // music or the trailer's sound was asked for, but this phone could not put a sound track in the file
+      const note = $('dlVidNote'); note.hidden = !((kind !== 'none' || last.cine) && !last.audio);
+      if (!note.hidden) note.textContent = T("This phone can't add sound to videos, so this one is silent.");
+      R.left = +last.wishesLeft || 0;
+      renderReel();
       const ext = /webm/.test(blob.type) ? 'webm' : 'mp4';
       await saveFile(blob, `event-sky-${S.code}-best-of-${aspect === '9:16' ? 'vertical' : 'wide'}.${ext}`, true, ES.caption('video', { title: S.ev.title, names: S.ev.names, url: S.galleryUrl }));
     });
@@ -2049,7 +2216,7 @@ Done
       renderSettings();
       $('sMsg').textContent = 'Saved ✓';
     } catch (x) {
-      $('sMsg').textContent = /window/.test(x.message || '') ? F('This plan allows events up to {0} days long. Change the times or pick another plan.', e.cap.wd) : errText(x);
+      $('sMsg').textContent = /window/.test(x.message || '') ? windowText(e.cap.wd) : errText(x);
     }
   }
   async function deleteEvent() {
@@ -2212,6 +2379,15 @@ Done
     // downloads
     $('dlZip').addEventListener('click', () => exportZip());
     $('dlVid916').addEventListener('click', () => exportVideo('9:16'));
+    $('dlReelBuy').addEventListener('click', buyReel);
+    $('dlReelUse').addEventListener('click', useSpareReel);
+    $('dlMusic').addEventListener('change', () => { if ($('dlMusic').value === 'file') $('dlSong').click(); });
+    $('dlSong').addEventListener('change', () => {
+      const f = $('dlSong').files && $('dlSong').files[0];
+      if (f) { R.song = f; $('dlSongName').textContent = `♪ ${f.name}`; $('dlSongName').hidden = false; $('dlMusic').value = 'file'; }
+      else if (!R.song) $('dlMusic').value = S.ev && S.ev.tpl === 'birthday' ? 'birthday' : 'tune';
+      $('dlSong').value = '';
+    });
     $('dlVid169').addEventListener('click', () => exportVideo('16:9'));
     $('dlBook1').addEventListener('click', () => exportBook(1));
     $('dlBook4').addEventListener('click', () => exportBook(4));

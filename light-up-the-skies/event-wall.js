@@ -332,11 +332,28 @@ Something went wrong. Try again.
   let stage = null, raf = 0, lastTs = 0, markSprite = null;
   const ACTS = new Map(); // act id -> {sig, keys:[item keys], t, end, type, burstAt?, item?, bmps:[names]}
   function tier() { return S.tv ? 'tv' : undefined; }
+  // On a phone held upright the QR card, the retention line and the mark take the bottom of the screen: a slide's "Photo by"
+  // line is written above them (measured at most once a second; on a wide screen they sit at the sides, so nothing).
+  let footAt = 0, footPx = 0;
+  function footInset() {
+    const now = Date.now();
+    if (now - footAt < 1000) return footPx;
+    footAt = now; footPx = 0;
+    if (innerWidth >= innerHeight) return 0;
+    let top = innerHeight;
+    for (const el of document.querySelectorAll('.w-qr, #wKeep')) {
+      const r = el.getBoundingClientRect();
+      if (r.height > 0 && getComputedStyle(el).visibility !== 'hidden' && +getComputedStyle(el).opacity !== 0 && r.bottom > innerHeight * 0.6) top = Math.min(top, r.top);
+    }
+    if (markSprite && markSprite.y > innerHeight * 0.6) top = Math.min(top, markSprite.y); // the free plan's mark, above the QR
+    footPx = Math.max(0, innerHeight - top + 6);
+    return footPx;
+  }
   function makeStage() {
     const canvas = $('wSky');
     stage = window.EFX.stage(canvas, {
       seed: S.seed + (S.role === 'slides' ? ':slides' : ''), tier: tier(), role: S.role, dpr: S.tv ? 1 : Math.min(2, window.devicePixelRatio || 1),
-      overlay: (ctx, w, h) => drawMark(ctx, w, h),
+      overlay: (ctx, w, h) => drawMark(ctx, w, h), insetBottom: footInset,
     });
     ACTS.clear(); LANES.slot.clear(); LANES.ss.clear();
     S.planV = -1;
@@ -698,6 +715,15 @@ Something went wrong. Try again.
     const pb = S.pub || {}, n = (S.live.fin && S.live.fin.n) || pb.n || '';
     if (pb.tp === 'wedding') return 'Shubh Vivah'; // no-i18n (§4.2)
     if (pb.tp === 'birthday') return n ? fill('Happy Birthday {0}', n) : (pb.t || '');
+    // an occasion: its own line with the name ("Merry Christmas, Amma"), translated (event-sky.js TEMPLATES)
+    const T0 = window.ES && ES.TEMPLATES && ES.TEMPLATES[pb.tp], w = T0 && T0.finale && T0.finale.i18n && T0.finale.words[0];
+    if (w && n) { // (EFX writes up to two lines of 32 letters: a long greeting breaks at the space nearest its middle)
+      const g = fill(w, n);
+      if (Array.from(g).length <= 32) return g;
+      let at = -1;
+      for (let i = g.indexOf(' '); i >= 0; i = g.indexOf(' ', i + 1)) if (at < 0 || Math.abs(i - g.length / 2) < Math.abs(at - g.length / 2)) at = i;
+      return at > 0 ? `${g.slice(0, at)}\n${g.slice(at + 1)}` : g;
+    }
     return pb.t || '';
   }
   function finaleNames() { const pb = S.pub || {}; return String((S.live.fin && S.live.fin.n) || pb.n || ''); }

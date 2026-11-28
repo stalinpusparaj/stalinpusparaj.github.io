@@ -27,10 +27,10 @@ html.es-wall-html { height: 100%; background: #03040d; }
 #wVid.dim { filter: brightness(.5) saturate(0); }
 
 /* ---------- header and counter ---------- */
-.w-head { position: fixed; top: 0; left: 0; right: 0; padding: var(--w-pad) 12vw 0; text-align: center; pointer-events: none; }
+.w-head { position: fixed; top: 0; left: 0; right: 0; padding: calc(var(--w-pad) + env(safe-area-inset-top, 0px)) 12vw 0; text-align: center; pointer-events: none; }
 .w-head h1 { margin: 0; font-family: Cinzel, "Noto Sans Devanagari", serif; font-weight: 800; font-size: clamp(20px, 5.2vmin, 64px); line-height: 1.15; color: var(--w-gold); text-shadow: 0 0 18px rgba(245, 196, 81, .6), 0 2px 4px rgba(0, 0, 0, .8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .w-head p { margin: .2em 0 0; font-size: clamp(14px, 2.8vmin, 34px); color: var(--w-gold2); text-shadow: 0 1px 4px rgba(0, 0, 0, .9); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.w-count { position: fixed; top: var(--w-pad); left: var(--w-pad); margin: 0; padding: .35em .9em; border-radius: 999px; background: var(--w-glass); border: 1px solid var(--w-line); color: var(--w-gold2); font-size: clamp(12px, 2vmin, 24px); font-variant-numeric: tabular-nums; pointer-events: none; }
+.w-count { position: fixed; top: calc(var(--w-pad) + env(safe-area-inset-top, 0px)); left: var(--w-pad); margin: 0; padding: .35em .9em; border-radius: 999px; background: var(--w-glass); border: 1px solid var(--w-line); color: var(--w-gold2); font-size: clamp(12px, 2vmin, 24px); font-variant-numeric: tabular-nums; pointer-events: none; }
 .w-count:empty { display: none; }
 
 /* ---------- announcement ticker (banner) ---------- */
@@ -45,15 +45,15 @@ html.es-wall-html { height: 100%; background: #03040d; }
 .w-qr { position: fixed; z-index: 3; display: flex; flex-direction: column; align-items: center; gap: .3vh; padding: 1vh; border-radius: 1.6vh; background: var(--w-glass); border: 1px solid var(--w-line); box-shadow: 0 0 24px rgba(0, 0, 0, .5); transition: opacity .4s ease; max-width: 46vw; }
 .w-qr canvas { display: block; height: var(--w-qr); width: var(--w-qr); max-width: 40vw; max-height: 40vw; image-rendering: pixelated; border-radius: .8vh; background: #fff; }
 .w-qr.s { --w-qr: 12vh; } .w-qr.m { --w-qr: 18vh; } .w-qr.l { --w-qr: 26vh; }
-.w-qr.br { right: var(--w-pad); bottom: var(--w-pad); } .w-qr.bl { left: var(--w-pad); bottom: var(--w-pad); }
-.w-qr.tr { right: var(--w-pad); top: var(--w-pad); } .w-qr.tl { left: var(--w-pad); top: var(--w-pad); }
+.w-qr.br { right: var(--w-pad); bottom: calc(var(--w-pad) + env(safe-area-inset-bottom, 0px)); } .w-qr.bl { left: var(--w-pad); bottom: calc(var(--w-pad) + env(safe-area-inset-bottom, 0px)); }
+.w-qr.tr { right: var(--w-pad); top: calc(var(--w-pad) + env(safe-area-inset-top, 0px)); } .w-qr.tl { left: var(--w-pad); top: calc(var(--w-pad) + env(safe-area-inset-top, 0px)); }
 .w-scan { margin: 0; color: var(--w-gold2); font-size: clamp(11px, calc(var(--w-qr) * .09), 26px); font-weight: 600; text-align: center; max-width: calc(var(--w-qr) * 1.4); }
 .w-code { margin: 0; color: #fff; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-weight: 700; letter-spacing: .12em; font-size: clamp(14px, calc(var(--w-qr) * .16), 44px); }
 /* Before the event opens the QR is the whole point of the screen */
 .es-wall.pre .w-qr { --w-qr: 34vh; left: 50%; right: auto; top: 52%; bottom: auto; transform: translate(-50%, -50%); }
 
 /* ---------- retention line, status, toasts ---------- */
-.w-keep { position: fixed; left: var(--w-pad); bottom: var(--w-pad); margin: 0; max-width: min(54vw, 760px); color: rgba(244, 241, 232, .78); font-size: clamp(10px, 1.45vmin, 17px); line-height: 1.35; text-shadow: 0 1px 3px rgba(0, 0, 0, .9); pointer-events: none; }
+.w-keep { position: fixed; left: var(--w-pad); bottom: calc(var(--w-pad) + env(safe-area-inset-bottom, 0px)); margin: 0; max-width: min(54vw, 760px); color: rgba(244, 241, 232, .78); font-size: clamp(10px, 1.45vmin, 17px); line-height: 1.35; text-shadow: 0 1px 3px rgba(0, 0, 0, .9); pointer-events: none; }
 .w-qr.bl ~ .w-keep { left: auto; right: var(--w-pad); text-align: right; }
 .w-status { position: fixed; left: 50%; bottom: calc(var(--w-pad) * 3.2); transform: translateX(-50%); margin: 0; padding: .5em 1.2em; border-radius: 999px; background: rgba(7, 11, 36, .86); border: 1px solid var(--w-line); color: var(--w-gold2); font-size: clamp(13px, 2.3vmin, 28px); white-space: nowrap; max-width: 92vw; overflow: hidden; text-overflow: ellipsis; }
 .w-toast { position: fixed; left: 50%; top: 18vh; transform: translateX(-50%); z-index: 6; margin: 0; padding: .55em 1.3em; border-radius: 999px; background: rgba(7, 11, 36, .9); border: 1px solid var(--w-gold); color: var(--w-gold2); font-size: clamp(14px, 2.6vmin, 30px); max-width: 90vw; text-align: center; }
@@ -93,7 +93,8 @@ html.es-wall-html { height: 100%; background: #03040d; }
   .w-bar .w-btn { padding: 0 10px; font-size: 14px; }
   .w-qr { padding: 6px; }
   .w-qr canvas { max-width: 30vw; max-height: 30vw; }
-  .w-keep { max-width: 60vw; }
+  .w-keep { max-width: calc(100vw - var(--w-qr) - 6 * var(--w-pad)); }
+  .w-code { white-space: nowrap; letter-spacing: .06em; font-size: clamp(12px, 4.4vw, 22px); }
   .es-wall.pre .w-qr { --w-qr: 30vh; }
   .es-wall.pre .w-qr canvas { max-width: 62vw; max-height: 62vw; }
 }

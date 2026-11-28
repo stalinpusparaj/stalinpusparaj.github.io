@@ -213,3 +213,21 @@ html.tv :focus, html.es-tv :focus { outline: 4px solid var(--eh-gold2); outline-
 html.tv .eh-deck-card, html.es-tv .eh-deck-card { width: min(720px, 100%); }
 html.tv .eh-cards, html.es-tv .eh-cards { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
 @media (prefers-reduced-motion: reduce) { .eh-deck-card { transition: none; } }
+
+/* The Wish Reel inside the best-of card (Downloads) */
+.eh-reel { margin-top: 14px; padding: 12px 14px; border-radius: 14px; border: 1px solid rgba(255, 210, 120, .45); background: linear-gradient(160deg, rgba(255, 196, 90, .12), rgba(120, 60, 200, .10)); }
+.eh-reel h4 { margin: 0 0 4px; color: var(--eh-gold2); font-size: 1.05em; }
+.eh-reel .eh-live:empty { display: none; }
+
+/* Choosing the wishes for the video (Downloads) */
+.eh-pick { margin: 4px 0 12px; border: 1px solid var(--eh-line, rgba(255,255,255,.18)); border-radius: 12px; padding: 8px 12px; }
+.eh-pick summary { cursor: pointer; font-weight: 600; color: var(--eh-gold2); padding: 4px 0; }
+.eh-pick label { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid rgba(255,255,255,.08); }
+.eh-pick label:first-of-type { border-top: 0; }
+.eh-pick input { margin-top: 3px; width: 20px; height: 20px; flex: none; }
+.eh-pick b { display: block; }
+.eh-pick small { opacity: .8; }
+
+/* The occasions in the wizard, in two groups */
+.eh-tpl-group { grid-column: 1 / -1; margin: 14px 0 2px; color: var(--eh-gold2); font-size: .95em; letter-spacing: .04em; }
+.eh-tpl-group:first-child { margin-top: 0; }
