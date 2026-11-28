@@ -24,6 +24,8 @@
    EFX.stage(canvas, {seed, dpr, tier:'tv'|'phone'|'laptop', reduced, role:'main'|'slides'|'mirror',
                       width?, height? (CSS px; else the canvas's client size, else its width/height),
                       bg? (a colour, or an image drawn to cover; default transparent), overlay?(ctx, w, h, t),
+                      underlay?(ctx, w, h, t) (over slides, mosaic and dimming; under bursts, reveals and words),
+                      camera?(t) → {z, dx, dy} (the sky zoomed and moved; the overlay stays still),
                       insetBottom? (CSS px, or a function returning them: the screen's own text at the bottom; slide
                       captions are written above it),
                       readback? (a CPU canvas, for exports and tests)}) → Stage
@@ -38,7 +40,8 @@
    EFX.burst({t, x, y, kind, hue, size, bright=true, rocket?:true|{x0, ms}}) → act   (t: the burst; a rocket climbs to it)
    EFX.rocket({t, x0, x1, y1, ms=1200}) → act
    EFX.textSparks({t, text, x, y, font, ms=3000, size=0.12, hue?}) → act       (names in sparks; '\n' makes 2 lines)
-   EFX.reveal({t, photo, name, wish, slot:{x,y,r}, caption?, mission?, upload?, x?, y?}) → act
+   EFX.reveal({t, photo, name, wish, slot:{x,y,r}, caption?, mission?, upload?, x?, y?, salute?}) → act
+     (salute: two more rockets burst high on either side as the name and wish appear)
      0–1.2 s rocket; 1.2 s burst (bright, gated: the whole reveal moves with it); 1.2–1.9 s the photo grows;
      1.9–3.8 s the name and wish in light (an upload: its caption, "Photo by {0}", "Mission: {0}"); 3.8–4.4 s it flies
      to its slot in the mosaic (with no slot it fades).
@@ -232,7 +235,8 @@ Mission: {0}
       mission: clean(o.mission, 80), slot: slotOf(o.slot), x: clamp(num(o.x, 0.5), 0.15, 0.85), y: clamp(num(o.y, 0.36), 0.2, 0.7),
       kind: KINDS.includes(o.kind) ? o.kind : null, hue: hueOf(o.hue) };
     a.upload = o.upload != null ? !!o.upload : !!(a.caption || a.mission);
-    a.id = o.id != null ? String(o.id) : idOf('reveal', [t, a.name, a.wish, a.caption, a.mission, a.upload, a.x, a.y, a.slot && a.slot.x, a.slot && a.slot.y, a.slot && a.slot.r, a.kind, a.hue]);
+    a.salute = !!o.salute; // two more rockets burst either side as the name and wish appear (a guest's arrival)
+    a.id = o.id != null ? String(o.id) : idOf('reveal', [t, a.name, a.wish, a.caption, a.mission, a.upload, a.x, a.y, a.slot && a.slot.x, a.slot && a.slot.y, a.slot && a.slot.r, a.kind, a.hue, a.salute]);
     return a;
   }
   function slide(o = {}) {
@@ -291,14 +295,19 @@ Mission: {0}
       const rnd = mulberry32(hash(s.seed, `${a.id}:plan`));
       const kind = a.kind || ['peony', 'chrysanthemum', 'ring', 'heart'][(rnd() * 4) | 0];
       const hue = a.hue != null ? a.hue : HUES[(rnd() * HUES.length) | 0], x0 = clamp(a.x + (rnd() - 0.5) * 0.2, 0.05, 0.95);
-      return {
-        units: [unit('reveal', REVEAL.rise)],
-        items: [
-          item('rk', 0, REVEAL.rise + 700, 0, { x0, x1: a.x, y1: a.y, ms: REVEAL.rise, key: `${a.id}:r` }),
-          item('bu', REVEAL.rise, LIFE_OF[kind], 0, { x: a.x, y: a.y, kind, hue, size: 1.5, key: `${a.id}:b`, want: true }),
-          item('ph', 0, REVEAL.done, 0, { a, key: `${a.id}:p` }),
-        ],
-      };
+      const units = [unit('reveal', REVEAL.rise)], items = [
+        item('rk', 0, REVEAL.rise + 700, 0, { x0, x1: a.x, y1: a.y, ms: REVEAL.rise, key: `${a.id}:r` }),
+        item('bu', REVEAL.rise, LIFE_OF[kind], 0, { x: a.x, y: a.y, kind, hue, size: 1.5, key: `${a.id}:b`, want: true }),
+        item('ph', 0, REVEAL.done, 0, { a, key: `${a.id}:p` }),
+      ];
+      if (a.salute) { // high on either side, 0.8 s apart (each its own unit, so the flash gate spaces them)
+        [[0.16, 900, 'chrysanthemum'], [0.84, 1700, 'peony']].forEach(([sx, d, k2], i) => {
+          const ui = units.push(unit('salute', REVEAL.rise + d)) - 1, h2 = HUES[(rnd() * HUES.length) | 0];
+          items.push(item('rk', REVEAL.rise + d - 1100, 1600, ui, { x0: sx, x1: sx, y1: 0.18, ms: 1100, key: `${a.id}:sr${i}` }));
+          items.push(item('bu', REVEAL.rise + d, LIFE_OF[k2], ui, { x: sx, y: 0.18, kind: k2, hue: h2, size: 1.15, key: `${a.id}:sb${i}`, want: true }));
+        });
+      }
+      return { units, items };
     },
     slide(a, s) {
       const rnd = mulberry32(hash(s.seed, `slide:${a.seed != null ? a.seed : a.id}`));
@@ -608,6 +617,12 @@ Mission: {0}
     const env = { seed, tier, reduced, role };
     let W = 1, H = 1, sx = 1, sy = 1, bg = opts.bg == null ? null : opts.bg, disposed = false;
     const overlay = typeof opts.overlay === 'function' ? opts.overlay : null;
+    // underlay(ctx, w, h, t): over the slides, the mosaic and the sky's dimming, under the bursts, reveals and words
+    // (the live screen's light show)
+    const underlay = typeof opts.underlay === 'function' ? opts.underlay : null;
+    // camera(t) → {z, dx, dy}: the whole sky drawn zoomed by z about its centre and moved by (dx, dy) CSS px (a trailer's
+    // push-in and shake); the overlay is drawn after it, still
+    const camera = typeof opts.camera === 'function' ? opts.camera : null;
     // CSS px at the bottom that the screen's own text covers (a QR card, the retention line): slide captions stay above it
     const insetB = typeof opts.insetBottom === 'function' ? opts.insetBottom : () => num(opts.insetBottom, 0);
     const entries = new Map(), loops = new Set();
@@ -1122,6 +1137,10 @@ Mission: {0}
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.shadowBlur = 0;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.setTransform(sx, 0, 0, sy, 0, 0);
+      if (camera) {
+        let c = null; try { c = camera(t); } catch (e) { c = null; }
+        if (c && Number.isFinite(c.z) && c.z > 0) { const z = c.z, dx = +c.dx || 0, dy = +c.dy || 0; ctx.setTransform(sx * z, 0, 0, sy * z, sx * (W / 2 + dx - (W / 2) * z), sy * (H / 2 + dy - (H / 2) * z)); }
+      }
       ctx.imageSmoothingEnabled = true;
       drawBg();
       for (const k in L) L[k].length = 0;
@@ -1147,6 +1166,7 @@ Mission: {0}
       for (const it of L.sl) drawSlide(it, t, M);
       for (const it of L.mo) drawMosaic(it, t, M);
       drawDim(t);
+      if (underlay) { ctx.save(); try { underlay(ctx, W, H, t); } catch (e) { /* the caller's: never stops a frame */ } ctx.restore(); }
       for (const it of L.ht) drawHeart(it, t, M);
       ctx.globalCompositeOperation = 'lighter';
       drawFlares(t, M);
@@ -1161,7 +1181,7 @@ Mission: {0}
       ctx.globalAlpha = 1; ctx.shadowBlur = 0;
       S.particles = drawn + lights; S.drones = lights; S.frames++;
       if (!L.bu.length) S.flare = 0;
-      if (overlay) { ctx.save(); try { overlay(ctx, W, H, t); } catch (e) { /* the caller's overlay never stops a frame */ } ctx.restore(); }
+      if (overlay) { ctx.save(); ctx.setTransform(sx, 0, 0, sy, 0, 0); try { overlay(ctx, W, H, t); } catch (e) { /* the caller's overlay never stops a frame */ } ctx.restore(); }
     }
 
     function when(act) {

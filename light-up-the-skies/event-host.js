@@ -479,7 +479,7 @@ Done
     'A contact for photo removal is required on paid plans', 'The opening time is fixed once the event has opened', 'Logo too large',
     'Write the announcement first', 'Name the challenge first', 'Event Sky is paused for a moment', 'Event Sky is full right now',
     'Could not reserve an event code. Try again.', 'Fully booked for new free events today', 'Fully booked for new passes today', 'No connection',
-    'Sign-in needs a connection']);
+    'Sign-in needs a connection', 'You have made 3 events today. Try again tomorrow, or use an activation code.']);
   function errText(e) {
     const c = e && e.code, m = String((e && e.message) || '');
     if (ES_COPY.has(m)) return m;
@@ -928,6 +928,7 @@ Done
   function dateRefusal(reason, at) {
     if (reason === 'FREE_FULL') return 'Fully booked for new free events today. Try again after 5:30 AM.';
     if (reason === 'PAUSED') return 'Event Sky is paused for a moment. Please try again later.';
+    if (reason === 'DAY_MAX') return 'You have made 3 events today. Try again tomorrow, or use an activation code.';
     return F('Our free cloud is fully booked on {0}. Pick another date or a smaller plan.', fmtDate(at));
   }
   function enterPrivacy() {

@@ -885,4 +885,13 @@ window.LUTS_I18N = {
   "{0} wishes didn't fit in 3 minutes. Untick some under Choose the wishes.": "{0} ਸ਼ੁਭਕਾਮਨਾਵਾਂ 3 ਮਿੰਟਾਂ ਵਿੱਚ ਨਹੀਂ ਆਈਆਂ। \"ਸ਼ੁਭਕਾਮਨਾਵਾਂ ਚੁਣੋ\" ਵਿੱਚ ਕੁਝ ਹਟਾ ਦਿਓ।",
   "1 wish didn't fit in 3 minutes. Untick some under Choose the wishes.": "1 ਸ਼ੁਭਕਾਮਨਾ 3 ਮਿੰਟਾਂ ਵਿੱਚ ਨਹੀਂ ਆਈ। \"ਸ਼ੁਭਕਾਮਨਾਵਾਂ ਚੁਣੋ\" ਵਿੱਚ ਕੁਝ ਹਟਾ ਦਿਓ।",
   "This phone can't add sound to videos, so this one is silent.": "ਇਹ ਫ਼ੋਨ ਵੀਡੀਓ ਵਿੱਚ ਆਵਾਜ਼ ਨਹੀਂ ਜੋੜ ਸਕਦਾ, ਇਸ ਲਈ ਇਹ ਵੀਡੀਓ ਬਿਨਾਂ ਆਵਾਜ਼ ਹੈ।",
+  "You have made 3 events today. Try again tomorrow, or use an activation code.": "ਅੱਜ ਤੁਸੀਂ 3 ਇਵੈਂਟ ਬਣਾ ਚੁੱਕੇ ਹੋ। ਕੱਲ੍ਹ ਫਿਰ ਕੋਸ਼ਿਸ਼ ਕਰੋ, ਜਾਂ ਐਕਟੀਵੇਸ਼ਨ ਕੋਡ ਵਰਤੋ।",
+  "A song from this device": "ਇਸ ਡਿਵਾਈਸ ਤੋਂ ਕੋਈ ਗੀਤ",
+  "Music off": "ਸੰਗੀਤ ਬੰਦ",
+  "Music on": "ਸੰਗੀਤ ਚਾਲੂ",
+  "Music on or off": "ਸੰਗੀਤ ਚਾਲੂ ਜਾਂ ਬੰਦ",
+  "Music on or off (U)": "ਸੰਗੀਤ ਚਾਲੂ ਜਾਂ ਬੰਦ (U)",
+  "Now playing": "ਹੁਣ ਚੱਲ ਰਿਹਾ ਹੈ",
+  "Song": "ਗੀਤ",
+  "🔊 Tap for music": "🔊 ਸੰਗੀਤ ਲਈ ਟੈਪ ਕਰੋ",
 };

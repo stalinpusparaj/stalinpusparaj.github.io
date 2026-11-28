@@ -28,6 +28,10 @@
 
 STRINGS:
 Event Sky – big screen
+Music on
+Music off
+Now playing
+That song did not open. Try another one.
 Show the screen controls
 QR code to join the event
 Scan to join the sky
@@ -349,11 +353,35 @@ Something went wrong. Try again.
     footPx = Math.max(0, innerHeight - top + 6);
     return footPx;
   }
+  // The light show under the sky (event-cine.js ESCine.live): lasers, LED lights, light leaks and glitter in the
+  // occasion's colours, brighter while a guest's wish is on screen and in the finale. Still with reduced motion.
+  let light = null, lightFor = '';
+  function lightShow(ctx, w, h, t) {
+    if (!window.ESCine || S.role === 'slides') return;
+    const tp = (S.pub && S.pub.tp) || 'party', key = `${tp}|${S.seed}|${w}x${h}`;
+    if (key !== lightFor) {
+      lightFor = key;
+      let reduced = false; try { reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { reduced = false; }
+      light = window.ESCine.plan({ theme: window.ESCine.theme(tp), seed: `live:${S.seed}`, w, h, reduced });
+    }
+    let boost = 0, finale = false, hole = null;
+    for (const a of ACTS.values()) {
+      // a slide's photo (EFX: fitted into 94% x 88% of the screen, centred): the light show goes round it
+      if (a.type === 'slide' && t >= a.t && t < a.end && a.item) {
+        const iw = +a.item.w || 4, ih = +a.item.h || 3, k = Math.min((w * 0.94) / iw, (h * 0.88) / ih) * 1.08, pw = iw * k, ph = ih * k;
+        hole = { x: (w - pw) / 2, y: (h - ph) / 2, w: pw, h: ph };
+      }
+      if (a.type === 'rv' && a.item && a.item.kind === 'g') { const x = t - a.t - 1000, d = (a.end || a.t + REV_DONE) - a.t - 1000; if (x > 0 && x < d) boost = Math.max(boost, Math.min(1, x / 400, (d - x) / 400)); }
+      else if (a.type === 'finale' && t >= a.t && t < a.t + 20000) finale = true;
+    }
+    window.ESCine.live(ctx, w, h, t, light, { boost, finale, hole });
+  }
   function makeStage() {
     const canvas = $('wSky');
     stage = window.EFX.stage(canvas, {
       seed: S.seed + (S.role === 'slides' ? ':slides' : ''), tier: tier(), role: S.role, dpr: S.tv ? 1 : Math.min(2, window.devicePixelRatio || 1),
       overlay: (ctx, w, h) => drawMark(ctx, w, h), insetBottom: footInset,
+      underlay: (ctx, w, h, t) => lightShow(ctx, w, h, t),
     });
     ACTS.clear(); LANES.slot.clear(); LANES.ss.clear();
     S.planV = -1;
@@ -374,7 +402,7 @@ Something went wrong. Try again.
   }
   // Lanes: one act per slot (an entrance, a slide or an ambient burst) and one per slideshow step. When the plan
   // changes what a slot shows (an item erased, an announcement now, another mode), the old act is dropped.
-  const LANES = { slot: new Map(), ss: new Map() };
+  const LANES = { slot: new Map(), ss: new Map(), amb: new Map() };
   function lane(name, idx, act, info) {
     const m = LANES[name], old = m.get(idx);
     if (old && (!act || old !== act.id)) dropAct(old);
@@ -438,7 +466,13 @@ Something went wrong. Try again.
     if (S.paused || Date.now() < S.quotaUntil) return 'slide'; // the cached slideshow (quotaUntil is device time)
     return MODES.includes(S.wall.md) ? S.wall.md : 'mix';
   }
-  function finAt() { return Math.max((S.live.fin && +S.live.fin.at) || 0, S.localFin || 0); }
+  // The finale starts 5 s after the host's tap; a quiet screen polls every 20 s or so and may hear of it late. Heard
+  // while it should already be playing (but within its length), it starts 1.2 s after this screen heard, from the top.
+  function finAt() {
+    const f = (S.live.fin && +S.live.fin.at) || 0, seen = S.finSeen && S.finSeen.at === f ? S.finSeen.seen : 0;
+    const t = f && seen > f + 300 && seen < f + FINALE_MS ? seen + 1200 : f;
+    return Math.max(t, S.localFin || 0);
+  }
   function buildPlan() {
     const t0 = t0Of(), rev = revAt(), seed = S.seed;
     const items = [...S.items.values()].filter((it) => it.st === 1 && !reportHidden(it));
@@ -644,7 +678,7 @@ Something went wrong. Try again.
             if (i >= 0) { const g = window.EFX.grid(mem.length, { aspect: aspect(), box: BOX, gap: 0.08 }); slotPos = g[i] || null; }
           }
           const up = e.kind !== 'g';
-          lane('slot', s, window.EFX.reveal({ id: `rv:${e.key}:${s}`, t: a, photo: ph, name: up ? nameOf(e.s) : e.nm, wish: up ? '' : e.wi, caption: up ? e.cp : '', mission: up ? missionOf(e.m) : '', upload: up, slot: slotPos }),
+          lane('slot', s, window.EFX.reveal({ id: `rv:${e.key}:${s}`, t: a, photo: ph, name: up ? nameOf(e.s) : e.nm, wish: up ? '' : e.wi, caption: up ? e.cp : '', mission: up ? missionOf(e.m) : '', upload: up, slot: slotPos, salute: !up }),
             { sig: `${!!ph}|${slotPos ? `${slotPos.x.toFixed(4)},${slotPos.y.toFixed(4)}` : '-'}|${nameOf(e.s)}|${lang()}`, keys: [e.key], t: a, end: a + REV_DONE, type: 'rv', item: e });
         } else if (mode === 'mix' && !pre) {
           const it = pick(p, 'sl', s, a, a - L);
@@ -652,13 +686,15 @@ Something went wrong. Try again.
           const ph = photoOf(it, need);
           lane('slot', s, window.EFX.slide({ id: `sl:${s}:${it.key}`, t: a, photo: ph, ms: L, seed: `sl:${s}`, caption: it.cp, name: nameOf(it.s), mission: missionOf(it.m) }),
             { sig: `${!!ph}|${lang()}`, keys: [it.key], t: a, end: a + L, type: 'slide', item: it });
+          // fireworks keep going over the slideshow: a burst high in the sky, above the photo, most slides
+          for (const side of [0, 1]) { const sky = slideSkyAct(p, s, a, side); lane('amb', `${s}:${side}`, sky, sky ? { sig: 'a', keys: [], t: a, end: a + 6000, type: 'burst' } : undefined); }
         } else if (mode === 'reveal' || pre) {
           const amb = ambientAct(p, s, a);
           if (amb) lane('slot', s, amb, { sig: 'a', keys: [], t: a, end: a + 6000, type: 'burst' }); else lane('slot', s, null);
         } else lane('slot', s, null);
       }
     } else {
-      laneClear('slot', T);
+      laneClear('slot', T); laneClear('amb', T);
       if (mode === 'slide') {
         const sl = clamp(+S.wall.sl || 6000, 3000, 15000), k = Math.floor((T - p.t0) / sl);
         for (let i = k - 1; i <= k + 2; i++) {
@@ -699,6 +735,12 @@ Something went wrong. Try again.
     return addAct(window.EFX.mosaic({ id, t, items: tiles, ms: o.ms, develop: !!o.develop }),
       { sig, keys: list.map((it) => it.key), t, end: o.end, type: 'mosaic', main: !!o.main, group: o.group });
   }
+  // two a slide, one in each half of the sky, at different moments (bright ones: the flash gate spaces them)
+  function slideSkyAct(p, s, a, side) {
+    const h = hash(p.seed, `sky${s}:${side}`);
+    if (h % 5 === 4) return null;
+    return window.EFX.burst({ id: `sky:${s}:${side}`, t: a + 500 + side * 2200 + (h >>> 8) % 1400, x: (side ? 0.56 : 0.1) + ((h >>> 4) % 34) / 100, y: 0.09 + ((h >>> 12) % 8) / 100, kind: KINDS[(h >>> 16) % KINDS.length], hue: HUES[(h >>> 20) % HUES.length], size: 0.85, bright: true, rocket: true });
+  }
   function ambientAct(p, s, a) {
     const h = hash(p.seed, `amb${s}`);
     if (h % 4 > 1) return null;
@@ -738,6 +780,8 @@ Something went wrong. Try again.
     }
     S.chimeCheck = T;
     videoLayer(T);
+    renderFaces(T);
+    if (S.role === 'main' && MU.on && !MU.src && !MU.busy) musicStart(); else musicTick();
     // banners from live.ann / pub.an (style 'b'): a gold ticker for 20 s
     const banner = p.sp.filter((s) => s.type === 'banner' && s.t <= T && T < s.end).pop();
     showBanner(banner);
@@ -944,6 +988,108 @@ Something went wrong. Try again.
   }
   function cycleCorner() { const i = QP.indexOf(S.wall.qp); setWall({ qp: QP[(i + 1) % QP.length], qh: false }); }
   function toggleQr() { const qh = !S.wall.qh; setWall({ qh }, qh ? 'QR code hidden' : 'QR code shown'); return !qh; }
+  // ---------- background music (the main screen only, so mirrored screens don't play it twice) ----------
+  // The occasion's tune (event-cine.js: Happy Birthday for a birthday, else the celebration tune) loops by default; the
+  // Song button plays a song from this device instead (kept until the page reloads). Louder in the finale. A browser
+  // allows sound only after a tap: until then a "Tap for music" chip shows. The choice is kept per event on this device.
+  const MU = { on: true, file: null, name: '', src: null, gain: null, loopBuf: null, loopKind: '', busy: false, asked: false };
+  const muKey = () => `luts:es-wall-music:${S.code}`;
+  function musicPref() { try { const v = JSON.parse(localStorage.getItem(muKey()) || 'null'); if (v && typeof v.on === 'boolean') MU.on = v.on; } catch (e) { /* defaults */ } }
+  function musicSave() { try { localStorage.setItem(muKey(), JSON.stringify({ on: MU.on })); } catch (e) { /* storage full */ } }
+  const musicLevel = () => (finAt() && now() >= finAt() && now() < finAt() + FINALE_MS ? 0.55 : 0.3);
+  function musicButtons() { const b = $('wBtnMusic'); if (b) b.setAttribute('aria-pressed', String(MU.on)); }
+  async function musicStart() {
+    if (S.role !== 'main' || !MU.on || MU.src || MU.busy || !S.running) return;
+    const ac = audioCtx();
+    if (!ac) return;
+    if (ac.state !== 'running') { $('wMusicHint').hidden = false; return; }
+    $('wMusicHint').hidden = true;
+    MU.busy = true;
+    try {
+      let buf = null;
+      if (MU.file) {
+        try { buf = await ac.decodeAudioData(await MU.file.arrayBuffer()); } catch (e) { MU.file = null; MU.name = ''; toast('That song did not open. Try another one.'); }
+      }
+      if (!buf && window.ESCine && ESCine.loop) {
+        const kind = (S.pub && S.pub.tp) === 'birthday' ? 'birthday' : 'tune';
+        if (MU.loopKind !== kind || !MU.loopBuf) { const l = await ESCine.loop(kind); MU.loopBuf = l && l.buffer; MU.loopKind = kind; }
+        buf = MU.loopBuf;
+      }
+      if (!buf || !MU.on || MU.src) return;
+      const src = ac.createBufferSource(), g = ac.createGain();
+      src.buffer = buf; src.loop = true;
+      g.gain.setValueAtTime(0, ac.currentTime); g.gain.linearRampToValueAtTime(musicLevel(), ac.currentTime + 1.5);
+      src.connect(g); g.connect(ac.destination); src.start();
+      MU.src = src; MU.gain = g;
+    } catch (e) { warn('music', e); } finally { MU.busy = false; }
+  }
+  function musicStop() {
+    const s = MU.src, g = MU.gain;
+    MU.src = null; MU.gain = null;
+    if (!s) return;
+    try { g.gain.setTargetAtTime(0, audio.currentTime, 0.25); } catch (e) { /* closed */ }
+    setTimeout(() => { try { s.stop(); s.disconnect(); } catch (e) { /* stopped */ } }, 1400);
+  }
+  function toggleMusic() {
+    MU.on = !MU.on; musicSave(); musicButtons();
+    if (MU.on) { musicStart(); toast('Music on'); } else { musicStop(); $('wMusicHint').hidden = true; toast('Music off'); }
+  }
+  function pickSong(f) {
+    if (!f) return;
+    MU.file = f; MU.name = f.name.replace(/\.[^.]+$/, ''); MU.on = true; musicSave(); musicButtons();
+    musicStop(); setTimeout(() => { musicStart(); }, 300);
+    toast(`${tr('Now playing')}: ${MU.name}`);
+  }
+  function musicTick() {
+    if (!MU.gain || !audio) return;
+    try { MU.gain.gain.setTargetAtTime(musicLevel(), audio.currentTime, 0.6); } catch (e) { /* closed */ }
+  }
+
+  // ---------- the guests' faces along the top ----------
+  // Everyone who checked in, oldest first, as round photos with their names, drifting right to left in a seamless loop
+  // (two copies of the row, the track moving by one copy); still with reduced motion, or when they all fit. The newest
+  // glows for a few seconds. Hidden in the finale, which writes in that part of the sky.
+  let facesSig = '';
+  function renderFaces(T) {
+    const box = $('wFaces'), track = $('wFacesTrack');
+    if (!box) return;
+    const fin = finAt(), inFinale = fin && T >= fin - 500 && T < fin + FINALE_MS;
+    const list = [...S.items.values()].filter((it) => it.kind === 'g' && it.st === 1 && !reportHidden(it) && it.mt0 <= T).sort((a, b) => a.mt0 - b.mt0);
+    const ready = list.map((it) => { const b = bitmapNow(`t:${it.key}`); if (!b) wantBitmap(it.key, 't'); return b; });
+    const newest = list.length ? list[list.length - 1] : null, glow = newest && T - newest.mt0 < 8000 ? newest.key : '';
+    box.classList.toggle('away', !!inFinale);
+    const sig = `${list.map((it, i) => `${it.key}:${!!ready[i]}:${it.nm || ''}`).join('|')}|${glow}`;
+    if (sig === facesSig) return;
+    facesSig = sig;
+    box.hidden = !list.length || S.role === 'slides';
+    if (box.hidden) return;
+    const chip = (it, b, copy) => {
+      const d = document.createElement('span'); d.className = `w-face${it.key === glow ? ' new' : ''}`;
+      const Z = 256, c = document.createElement('canvas'); c.width = c.height = Z; // (sharp up to 190 CSS px on a 1.35x screen)
+      const g = c.getContext('2d');
+      g.beginPath(); g.arc(Z / 2, Z / 2, Z / 2 - 2, 0, Math.PI * 2); g.closePath(); g.save(); g.clip();
+      if (b) { const s = Math.max(Z / (b.width || Z), Z / (b.height || Z)), w = (b.width || Z) * s, h = (b.height || Z) * s; g.drawImage(b, (Z - w) / 2, (Z - h) / 2, w, h); }
+      else { g.fillStyle = '#2a1f4d'; g.fillRect(0, 0, Z, Z); g.fillStyle = '#ffe2a6'; g.font = `700 ${Z * 0.46}px system-ui, sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(Array.from(String(it.nm || '?'))[0].toUpperCase(), Z / 2, Z * 0.54); }
+      g.restore();
+      const n = document.createElement('span'); n.className = 'w-face-name'; n.textContent = String(it.nm || '');
+      d.append(c, n);
+      if (copy) d.setAttribute('aria-hidden', 'true');
+      return d;
+    };
+    track.textContent = '';
+    list.forEach((it, i) => track.append(chip(it, ready[i], false)));
+    // scroll only when the row is wider than the screen: then a second copy makes the loop seamless
+    requestAnimationFrame(() => {
+      const wide = track.scrollWidth > box.clientWidth * 0.92;
+      let reduce = false; try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { reduce = false; }
+      box.classList.toggle('moving', wide && !reduce);
+      if (wide && !reduce) {
+        list.forEach((it, i) => track.append(chip(it, ready[i], true)));
+        track.style.setProperty('--w-faces-dur', `${Math.max(18, Math.round(track.scrollWidth / 2 / 45))}s`); // about 45 px a second
+      }
+    });
+  }
+
   function toggleSound() { const snd = !S.wall.snd; if (snd) audioCtx(); setWall({ snd }, snd ? 'Arrival sound on' : 'Arrival sound off'); return snd; }
   const canLive = () => S.staffRole === 'h' || S.staffRole === 'c';
   async function finale(fromKey) {
@@ -1109,8 +1255,9 @@ Something went wrong. Try again.
     l = l || {};
     const ch = l.ch;
     if (ch && ch.id && ch.win && S.winSeen[ch.id] === undefined) S.winSeen[ch.id] = (S.live.ch && S.live.ch.id === ch.id) ? now() : (+ch.end || now()) - 60e3;
+    if (l.fin && +l.fin.at && !(S.finSeen && S.finSeen.at === +l.fin.at)) S.finSeen = { at: +l.fin.at, seen: now() };
     S.live = l; if (l.wall) applyWall(l.wall);
-    bump(); post({ t: 'live', live: l, winSeen: S.winSeen }); saveSoon();
+    bump(); post({ t: 'live', live: l, winSeen: S.winSeen, finSeen: S.finSeen }); saveSoon();
     autoWinner();
   }
   // No winner picked by the hosts within 2 minutes: the most reactions wins, the earliest photo breaks a tie.
@@ -1220,7 +1367,7 @@ Something went wrong. Try again.
       case 'items': for (const it of m.items || []) { const prev = S.items.get(it.key); S.items.set(it.key, Object.assign({}, it)); if (it.coll === 'guests' && it.nm) S.names.set(it.s, it.nm); if (!S.firstSeen.has(it.key)) S.firstSeen.set(it.key, now()); if (prev && prev.mt !== it.mt) { dropBitmaps(it.key); clearCell(it.key); recent.delete(it.key); } } bump(); break;
       case 'gone': for (const k of m.keys || []) removeItem(k, now()); break;
       case 'pub': S.pub = m.pub; renderPub(); bump(); checkEnded(); break;
-      case 'live': S.live = m.live || {}; if (m.winSeen) S.winSeen = m.winSeen; if (S.live.wall) applyWall(S.live.wall); bump(); break;
+      case 'live': S.live = m.live || {}; if (m.winSeen) S.winSeen = m.winSeen; if (m.finSeen) S.finSeen = m.finSeen; if (S.live.wall) applyWall(S.live.wall); bump(); break;
       case 'wall': applyWall(m.wall); break;
       case 'bell': S.bell = m.bell || {}; renderCount(); break;
       case 'reports': S.reports = new Map(m.reports || []); bump(); hideReported(); break;
@@ -1259,7 +1406,7 @@ Something went wrong. Try again.
     if (P.get('pair') === '1') { pairing(); return; }
     const code = ES.events.normCode(P.get('e') || '');
     if (!ES.CODE_RE.test(code)) { codeEntry(''); return; }
-    S.code = code; S.seed = code;
+    S.code = code; S.seed = code; musicPref(); musicButtons();
     const j = P.get('j');
     if (j) {
       stripParam('j');
@@ -1531,6 +1678,7 @@ Something went wrong. Try again.
       case 'm': case 'M': nextMode(1); break;
       case 'f': case 'F': finale(true).catch((x) => warn('finale', x)); break;
       case 's': case 'S': toggleSound(); break;
+      case 'u': case 'U': toggleMusic(); break;
       case 'ArrowLeft': if (onButton) return; dpad('left'); break;
       case 'ArrowRight': if (onButton) return; dpad('right'); break;
       case 'ArrowUp': if (onButton) return; dpad('up'); break;
@@ -1556,6 +1704,13 @@ Something went wrong. Try again.
     $('wBtnQr').addEventListener('click', () => { toggleQr(); showBar(); });
     $('wBtnSize').addEventListener('click', () => { cycleSize(0); showBar(); });
     $('wBtnSound').addEventListener('click', () => { toggleSound(); showBar(); });
+    $('wBtnMusic').addEventListener('click', () => { toggleMusic(); showBar(); });
+    $('wBtnSong').addEventListener('click', () => { $('wSongIn').click(); showBar(); });
+    $('wSongIn').addEventListener('change', () => { const f = $('wSongIn').files && $('wSongIn').files[0]; pickSong(f); $('wSongIn').value = ''; });
+    $('wMusicHint').addEventListener('click', () => { audioCtx(); setTimeout(() => { musicStart(); }, 50); });
+    // the first tap or key anywhere lets the browser play sound: start the music then
+    const unlock = () => { const ac = audioCtx(); if (ac && MU.on && S.role === 'main') setTimeout(() => { musicStart(); }, 50); };
+    window.addEventListener('pointerdown', unlock, { passive: true }); window.addEventListener('keydown', unlock);
     $('wBtnFull').addEventListener('click', () => {
       try { if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(noop); } catch (e) { /* not allowed */ }
       showBar();
@@ -1590,7 +1745,7 @@ Something went wrong. Try again.
         cached: S.paused || Date.now() < S.quotaUntil, offline: S.offline, paused: S.paused, quotaUntil: S.quotaUntil, sound: S.sound, chimes: S.chimes.slice(),
         bitmaps: BM.size, cells: ATLAS.cells.size, acts: ACTS.size, frames: S.frames, lastFrameAt: S.lastFrameAt, watchdog: S.watchdogFires,
         softReloads: S.softReloads, softBy: Object.assign({}, S.softBy), hardReloads: S.hardReloads, syncs: S.syncs, held: p ? p.items.filter((it) => it._disp && it._eff > T).length : 0,
-        items: [...S.items.keys()], mark: !!markSprite, ended: S.ended, packer: packer && packer.state ? packer.state() : null, audio: audio ? audio.state : 'none',
+        items: [...S.items.keys()], mark: !!markSprite, ended: S.ended, packer: packer && packer.state ? packer.state() : null, audio: audio ? audio.state : 'none', music: { on: MU.on, playing: !!MU.src, song: MU.name, hint: !$('wMusicHint').hidden }, faces: $('wFacesTrack') ? $('wFacesTrack').children.length : 0,
       };
     },
     get bursts() { return stage ? stage.stats().bright : []; },

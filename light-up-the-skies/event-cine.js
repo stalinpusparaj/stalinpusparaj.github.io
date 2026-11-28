@@ -20,6 +20,9 @@
  *   ESCine.fill(english, …values) the translated line with its holes filled
  *   ESCine.cues(plan) → [{t, kind}]   the sound cues of a plan
  *   ESCine.sfx(ctx, dest, cues)       schedules them on an (Offline)AudioContext
+ *   ESCine.live(g, w, h, t, plan, {boost, finale}) the live screen's light show (under the acts; see live() below)
+ *   ESCine.music({kind:'birthday'|'tune'|'file'|'none', file?, seconds, cues?, signal?}) → AudioBuffer|null   a reel's sound
+ *   ESCine.loop(kind) → {buffer, period}|null   one loop of a tune (the live screen's background music)
  */
 /* STRINGS:
 A story for {0}
@@ -84,7 +87,7 @@ Reason #{0}
     const flakes = Array.from({ length: 70 }, () => ({ x: rnd(), y: rnd(), s: 0.4 + rnd() * 1.2, v: 0.03 + rnd() * 0.06, w: rnd() * TAU, h: th.glitter[Math.floor(rnd() * th.glitter.length)] }));
     const bulbs = 44;
     const tw = Array.from({ length: bulbs }, () => rnd() * TAU);
-    return { dur: o.dur || 0, w: o.w, h: o.h, sections, booms, theme: th, flakes, bulbs, tw, reduced: !!o.reduced };
+    return { dur: o.dur || 0, w: o.w, h: o.h, sections, booms, theme: th, flakes, bulbs, tw, reduced: !!o.reduced, seed: String(o.seed || 'cine') };
   }
   const sectionAt = (p, t) => p.sections.find((s) => t >= s.at && t < s.at + s.ms) || null;
 
@@ -117,7 +120,7 @@ Reason #{0}
   }
   function lasers(g, w, h, t, s, p) {
     if (!s || !s.laser) return;
-    const a = t - s.at, al = 0.55 * sm(a / 500) * (1 - sm((a - s.ms + 500) / 500));
+    const a = t - s.at, al = 0.55 * (s.level == null ? 1 : s.level) * sm(a / 500) * (1 - sm((a - s.ms + 500) / 500));
     if (al <= 0.01) return;
     const M = Math.min(w, h), L = Math.hypot(w, h), u = p && p.reduced ? 0 : a / 1000, wd = Math.max(1.5, M * 0.004); // (calm: beams hold still, only fade)
     g.save(); g.globalCompositeOperation = 'lighter';
@@ -154,7 +157,7 @@ Reason #{0}
   }
   function leds(g, w, h, t, s, p) {
     if (!s || !s.led) return;
-    const a = t - s.at, al = sm(a / 400) * (1 - sm((a - s.ms + 400) / 400));
+    const a = t - s.at, al = (s.level == null ? 1 : 0.55 + 0.45 * s.level) * sm(a / 400) * (1 - sm((a - s.ms + 400) / 400));
     if (al <= 0.01) return;
     const n = s.led === 'heart' ? 36 : p.bulbs, r = Math.max(2, Math.min(w, h) * 0.007), u = p.reduced ? 0 : a / 1000; // (calm: bulbs hold still)
     g.save(); g.globalCompositeOperation = 'lighter';
@@ -221,6 +224,52 @@ Reason #{0}
     gr.addColorStop(0, 'rgba(255,255,255,0)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.95)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
     g.globalCompositeOperation = 'source-atop'; g.shadowBlur = 0; g.fillStyle = gr; g.fillText(text, x, y);
     g.restore();
+  }
+  // The same show drawn inside the EFX stage, with no second canvas (the trailer, ESExport.bestOf): cameraAt() for the
+  // stage's camera, under() as its underlay (behind the bursts, the selfies and the words), over() in its overlay.
+  // (Copying the stage's canvas into a second one each frame went wrong in some Android WebViews: a white glare.)
+  function cameraAt(t, p, w, h) {
+    if (p.reduced) return { z: 1.02, dx: 0, dy: 0 };
+    const fin = p.sections.find((s) => s.kind === 'finale');
+    let z = 1.02 + 0.03 * clamp(t / Math.max(1, p.dur), 0, 1);
+    if (fin && t > fin.at) z += 0.025 * sm((t - fin.at) / 3000);
+    let dx = 0, dy = 0;
+    for (const b of p.booms) {
+      const a = t - b;
+      if (a < 0) break;
+      if (a > 600) continue;
+      const k = (1 - a / 600) * Math.min(w, h) * 0.008;
+      dx += Math.sin(a * 0.06 + b) * k; dy += Math.cos(a * 0.075 + b * 1.3) * k;
+    }
+    return { z, dx, dy };
+  }
+  function under(g, w, h, t, p) {
+    const s = sectionAt(p, t);
+    leaks(g, w, h, t, p); lasers(g, w, h, t, s, p); leds(g, w, h, t, s, p); glitter(g, w, h, t, p);
+  }
+  function over(g, w, h, t, p, words) {
+    words = words || {};
+    vignette(g, w, h, t, p);
+    const open = p.sections.find((x) => x.kind === 'open');
+    const until = words.openerUntil || (open ? open.at + open.ms : 0);
+    if (open && words.opener && t < until) {
+      g.save(); g.globalAlpha = 1 - sm((t - until + 700) / 700);
+      sweepText(g, words.opener, w / 2, h * 0.2, Math.min(w, h) * 0.075, open.at + 400, t, w, `hsl(${p.theme.hues[0]},100%,60%)`);
+      g.restore();
+    }
+    for (const tg of words.tags || []) {
+      const a = t - tg.at;
+      if (a < 0 || a > tg.ms) continue;
+      const al = sm(a / 300) * (1 - sm((a - tg.ms + 400) / 400));
+      g.save(); g.globalAlpha = al;
+      const px = Math.min(w, h) * 0.04;
+      g.font = `600 ${px}px Cinzel, Georgia, serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      const tw = g.measureText(tg.text).width + px * 1.6, y = h * (h > w ? 0.1 : 0.12);
+      g.fillStyle = 'rgba(10,6,30,0.55)'; g.strokeStyle = `hsla(${p.theme.hues[0]},100%,70%,0.9)`; g.lineWidth = Math.max(1, px * 0.06);
+      const r = px * 0.9; g.beginPath(); g.moveTo(w / 2 - tw / 2 + r, y - r); g.arcTo(w / 2 + tw / 2, y - r, w / 2 + tw / 2, y + r, r); g.arcTo(w / 2 + tw / 2, y + r, w / 2 - tw / 2, y + r, r); g.arcTo(w / 2 - tw / 2, y + r, w / 2 - tw / 2, y - r, r); g.arcTo(w / 2 - tw / 2, y - r, w / 2 + tw / 2, y - r, r); g.closePath(); g.fill(); g.stroke();
+      g.fillStyle = '#ffe9b8'; g.fillText(tg.text, w / 2, y + px * 0.04);
+      g.restore();
+    }
   }
   function compose(g, src, w, h, t, p, words) {
     words = words || {};
@@ -325,5 +374,150 @@ Reason #{0}
     }
   }
 
-  window.ESCine = Object.freeze({ theme, plan, compose, cues, sfx, fill, THEMES: Object.keys(THEMES) });
+  // ---------- music (the best-of's sound and the live screen's background music) ----------
+  // The sound under a best-of, mixed offline to its exact length (48 kHz stereo AudioBuffer):
+  //   'birthday' the Happy Birthday melody (public domain) on a music box over soft chords, 120 beats a minute, repeated;
+  //   'tune'     a calm celebration arpeggio (C, G, Am, F, two seconds each);
+  //   'file'     the host's own song (a File or Blob from this phone), from its start, looped if short;
+  // all with a 0.6 s fade in and a 2.5 s fade out. Null for 'none' or when the song does not open.
+  const NOTE = (n) => 440 * Math.pow(2, (n - 69) / 12);
+  const HB = [ // [midi, beats]: G G A G C B | G G A G D C | G G G' E C B A | F F E C D C
+    [67, 0.75], [67, 0.25], [69, 1], [67, 1], [72, 1], [71, 2], [67, 0.75], [67, 0.25], [69, 1], [67, 1], [74, 1], [72, 2],
+    [67, 0.75], [67, 0.25], [79, 1], [76, 1], [72, 1], [71, 1], [69, 2], [77, 0.75], [77, 0.25], [76, 1], [72, 1], [74, 1], [72, 3]];
+  const HB_CHORDS = [[48, 1], [48, 3], [43, 3], [43, 3], [48, 3], [48, 3], [41, 3], [48, 2], [43, 1], [48, 3]]; // [root, beats], from the pickup
+  // Each piece is rendered once in a short OfflineAudioContext and laid into the reel as buffers: the tunes as one
+  // loop (a verse of Happy Birthday, 14 s; the celebration tune, 8 s), the trailer's effects in 10 s windows. Making
+  // every note of a 3-minute reel at once cost time growing with the square of its length (a minute on a laptop).
+  // o.signal: checked between pieces (Cancel). o.failed is set when the host's song does not open.
+  const SR = 48000;
+  function voices(ac, dest) {
+    const bell = (t, midi, len, vol) => { // a music-box note: a few partials, quick attack, long fall
+      [[1, 1], [2, 0.32], [3, 0.12], [4.2, 0.05]].forEach(([m, a]) => {
+        const os = ac.createOscillator(), g = ac.createGain();
+        os.type = 'sine'; os.frequency.value = NOTE(midi) * m;
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol * a, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0008, t + Math.max(0.4, len) * 1.6);
+        os.connect(g); g.connect(dest); os.start(t); os.stop(t + Math.max(0.4, len) * 1.6 + 0.05);
+      });
+    };
+    const pad = (t, root, len, minor) => { // a soft chord under the melody
+      [0, minor ? 3 : 4, 7, 12].forEach((iv, k) => {
+        const os = ac.createOscillator(), g = ac.createGain();
+        os.type = 'triangle'; os.frequency.value = NOTE(root + iv + 12);
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(k ? 0.028 : 0.04, t + 0.25); g.gain.setValueAtTime(k ? 0.028 : 0.04, t + len - 0.3); g.gain.linearRampToValueAtTime(0, t + len);
+        os.connect(g); g.connect(dest); os.start(t); os.stop(t + len + 0.02);
+      });
+    };
+    return { bell, pad };
+  }
+  async function piece(sec, build) {
+    const ac = new OfflineAudioContext(2, Math.max(1, Math.ceil(SR * sec)), SR);
+    const out = ac.createGain(); out.connect(ac.destination);
+    build(ac, out);
+    return ac.startRendering();
+  }
+  const BIRTHDAY_LOOP = (HB.reduce((a, n) => a + n[1], 0) + 3) * 0.5; // one verse and a bar's rest, 120 beats a minute
+  function birthdayLoop() {
+    return piece(BIRTHDAY_LOOP + 2, (ac, out) => { // (+2 s: the last notes ring on into the next verse)
+      const { bell, pad } = voices(ac, out), B = 0.5;
+      let t = 0; for (const [m, b] of HB) { bell(t, m, b * B, 0.22); t += b * B; }
+      t = HB[0][1] * B + HB[1][1] * B; // chords start on "birth-"
+      for (const [r, b] of HB_CHORDS.slice(1)) { pad(t, r, b * B); t += b * B; }
+    });
+  }
+  const TUNE_LOOP = 8;
+  function tuneLoop() {
+    return piece(TUNE_LOOP + 1, (ac, out) => {
+      const { bell, pad } = voices(ac, out), P = [[48, 0], [43, 0], [45, 1], [41, 0]], ARP = [0, 7, 12, 16, 19, 16, 12, 7];
+      P.forEach(([r, mi], i) => {
+        const t = i * 2;
+        pad(t, r, 2, mi);
+        ARP.forEach((iv, k) => bell(t + k * 0.25, r + 24 + (mi && iv === 16 ? iv - 1 : iv), 0.25, 0.1));
+      });
+    });
+  }
+  async function music(o = {}) {
+    const kind = o.kind || 'none', seconds = Math.max(1, +o.seconds || 30), cues = (o.cues && o.cues.length) ? o.cues : null;
+    if ((kind === 'none' && !cues) || typeof OfflineAudioContext !== 'function') return null;
+    const stop = () => { if (o.signal && o.signal.aborted) { const e = new Error('Cancelled'); e.name = 'ESError'; e.code = 'CANCELLED'; throw e; } };
+    // the pieces: [buffer, start s, gain, through the music's fades?]
+    const parts = [];
+    if (kind === 'file') {
+      let buf = null;
+      try { const dc = new OfflineAudioContext(2, SR, SR); buf = await dc.decodeAudioData(await (o.file.arrayBuffer ? o.file.arrayBuffer() : new Response(o.file).arrayBuffer())); } catch (e) { buf = null; }
+      if (!buf || !buf.duration) { o.failed = true; if (!cues) return null; } else for (let t = 0; t < seconds; t += buf.duration) parts.push([buf, t, 0.9, true]);
+    } else if (kind === 'birthday') {
+      const loop = await birthdayLoop();
+      for (let t = 0.8; t < seconds; t += BIRTHDAY_LOOP) parts.push([loop, t, 1, true]);
+    } else if (kind === 'tune') {
+      const loop = await tuneLoop();
+      for (let t = 0.3; t < seconds; t += TUNE_LOOP) parts.push([loop, t, 1, true]);
+    }
+    stop();
+    // the trailer's sound effects (event-cine.js), in 10 s windows (each cue lands in its own window, its tail rings 3 s)
+    if (cues) {
+      const WIN = 10000;
+      for (let w0 = 0; w0 < seconds * 1000; w0 += WIN) {
+        const mine = cues.filter((c) => c.t >= w0 && c.t < w0 + WIN).map((c) => Object.assign({}, c, { t: c.t - w0 }));
+        if (!mine.length) continue;
+        const buf = await piece(WIN / 1000 + 3, (ac, out) => sfx(ac, out, mine));
+        parts.push([buf, w0 / 1000, kind === 'none' ? 1 : 0.85, false]);
+        stop();
+      }
+    }
+    if (!parts.length) return null;
+    const ac = new OfflineAudioContext(2, Math.ceil(SR * seconds), SR);
+    const master = ac.createGain(); master.gain.value = 0;
+    master.gain.setValueAtTime(0, 0); master.gain.linearRampToValueAtTime(0.85, 0.6);
+    master.gain.setValueAtTime(0.85, Math.max(0.7, seconds - 2.5)); master.gain.linearRampToValueAtTime(0, seconds);
+    const comp = ac.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+    master.connect(comp); comp.connect(ac.destination);
+    for (const [buf, t, gain, faded] of parts) {
+      const src = ac.createBufferSource(), g = ac.createGain();
+      src.buffer = buf; g.gain.value = gain; src.connect(g); g.connect(faded ? master : comp);
+      src.start(t);
+    }
+    try { const r = await ac.startRendering(); stop(); return r; } catch (e) { if (e && e.code === 'CANCELLED') throw e; return null; }
+  }
+
+  // One loop of a tune, for the live screen to play over and over: {buffer, period (s)}. Null where audio can't be made.
+  // The ringing tail past the loop's end is folded back onto its start, so it plays round with no seam or click.
+  async function loop(kind) {
+    if (typeof OfflineAudioContext !== 'function') return null;
+    try {
+      const period = kind === 'birthday' ? BIRTHDAY_LOOP : TUNE_LOOP, raw = kind === 'birthday' ? await birthdayLoop() : await tuneLoop();
+      const n = Math.round(period * SR), out = new AudioBuffer({ length: n, numberOfChannels: 2, sampleRate: SR });
+      for (let c = 0; c < 2; c++) {
+        const src = raw.getChannelData(Math.min(c, raw.numberOfChannels - 1)), dst = out.getChannelData(c);
+        dst.set(src.subarray(0, n));
+        for (let i = n; i < src.length; i++) dst[i - n] += src[i];
+      }
+      return { buffer: out, period };
+    } catch (e) { return null; }
+  }
+
+  // ---------- the live screen (event-wall.js) ----------
+  // The same light show under the sky's acts (EFX stage underlay), so photos and words stay on top. A new laser and
+  // LED pattern every 12 s, picked from the event's seed and the time, so every screen of the event shows the same;
+  // brighter while a guest's wish is on screen (o.boost, 0..1) and in the finale (o.finale: tunnel lasers, a wave).
+  const LIVE_PERIOD = 12000;
+  function live(g, w, h, t, p, o = {}) {
+    if (!p) return;
+    // o.hole {x, y, w, h}: a photo on screen (a slide): the light show goes round it, never over it
+    if (o.hole) { g.save(); g.beginPath(); g.rect(0, 0, w, h); g.rect(o.hole.x, o.hole.y, o.hole.w, o.hole.h); g.clip('evenodd'); }
+    const k = Math.floor(t / LIVE_PERIOD), r = rng(`${p.seed}:${k}`), th = p.theme, boost = clamp(+o.boost || 0, 0, 1), fin = !!o.finale;
+    const love = th.led === 'heart';
+    const s = {
+      at: k * LIVE_PERIOD, ms: LIVE_PERIOD, hue: th.hues[(k + Math.floor(r() * 4)) % th.hues.length],
+      laser: fin ? 'tunnel' : LASERS[(k + Math.floor(r() * 4)) % 4],
+      led: fin ? 'wave' : love && boost > 0.5 ? 'heart' : ['chase', 'wave', 'twinkle'][(k + Math.floor(r() * 3)) % 3],
+      level: fin ? 1.25 : 0.75 + 0.5 * boost,
+    };
+    leaks(g, w, h, t, p);
+    lasers(g, w, h, t, s, p);
+    leds(g, w, h, t, s, p);
+    glitter(g, w, h, t, p);
+    if (o.hole) g.restore();
+  }
+
+  window.ESCine = Object.freeze({ theme, plan, compose, cameraAt, under, over, cues, sfx, fill, live, music, loop, THEMES: Object.keys(THEMES) });
 })();

@@ -107,3 +107,24 @@ html.tv .w-card .w-pin { font-size: clamp(36px, 8vmin, 120px); }
 .w-card .w-pin-qr[hidden] { display: none; }
 .w-pair-ask p { font-size: 1.3em; margin: 12px 0; }
 html.tv .w-btn:focus, html.tv .w-btn.tv-focus { outline: 4px solid #fff; outline-offset: 4px; }
+
+/* The guests' faces along the top, under the title: a glass strip, faded at both ends, drifting right to left */
+.w-faces { margin: 1.6vmin -12vw 0; height: clamp(124px, 23vmin, 270px); overflow: hidden; pointer-events: none; transition: opacity .6s ease;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
+.w-faces.away { opacity: 0; }
+.w-faces-track { display: flex; gap: clamp(10px, 2.2vmin, 26px); justify-content: center; align-items: flex-start; width: max-content; min-width: 100%; padding: .4vmin 2vmin; box-sizing: border-box; }
+.w-faces.moving .w-faces-track { justify-content: flex-start; animation: w-faces-run var(--w-faces-dur, 30s) linear infinite; }
+@keyframes w-faces-run { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.w-face { display: flex; flex-direction: column; align-items: center; gap: .8vmin; flex: none; width: clamp(104px, 19.5vmin, 230px); }
+.w-face canvas { width: clamp(84px, 16vmin, 190px); height: clamp(84px, 16vmin, 190px); border-radius: 50%;
+  box-shadow: 0 0 0 3px rgba(255, 214, 140, .95), 0 0 18px rgba(255, 170, 60, .6); background: #1b1438; }
+.w-face-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #ffe9c4; font-size: clamp(14px, 2.8vmin, 32px); font-weight: 700; text-shadow: 0 1px 3px rgba(0, 0, 0, .9); }
+/* a wide screen (a TV): the photos fill most of its height, so the faces are a little smaller there */
+@media (orientation: landscape) { .w-faces { height: clamp(104px, 18.5vmin, 220px); } .w-face { width: clamp(90px, 15.5vmin, 186px); } .w-face canvas { width: clamp(72px, 12.5vmin, 150px); height: clamp(72px, 12.5vmin, 150px); } }
+.w-face.new canvas { animation: w-face-glow 1.6s ease-in-out infinite; }
+@keyframes w-face-glow { 0%, 100% { box-shadow: 0 0 0 3px rgba(255, 214, 140, .95), 0 0 18px rgba(255, 170, 60, .6); } 50% { box-shadow: 0 0 0 4px #fff3c9, 0 0 32px rgba(255, 196, 90, .95); } }
+@media (prefers-reduced-motion: reduce) { .w-faces.moving .w-faces-track { animation: none; } .w-face.new canvas { animation: none; } }
+/* "Tap for music": until the browser lets the page play sound */
+.w-music-hint { position: fixed; z-index: 6; top: calc(var(--w-pad) + env(safe-area-inset-top, 0px)); right: var(--w-pad); padding: .5em 1em; border-radius: 999px;
+  background: var(--w-glass); border: 1px solid var(--w-line); color: var(--w-gold2); font: 600 clamp(12px, 1.8vmin, 20px)/1.2 system-ui, sans-serif; cursor: pointer; }
+@media (max-width: 520px), (max-height: 420px) { .w-faces { margin-left: -64px; margin-right: -64px; } }

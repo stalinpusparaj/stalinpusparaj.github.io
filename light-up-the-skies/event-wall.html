@@ -22,7 +22,10 @@
 <header class="w-head" id="wHead" hidden>
   <h1 id="wTitle" data-no-i18n></h1>
   <p id="wNames" data-no-i18n></p>
+  <div id="wFaces" class="w-faces" aria-hidden="true" hidden><div id="wFacesTrack" class="w-faces-track" data-no-i18n></div></div>
 </header>
+<button id="wMusicHint" class="w-music-hint" type="button" hidden>🔊 Tap for music</button>
+<input id="wSongIn" type="file" accept="audio/*" hidden>
 <p id="wCount" class="w-count" aria-live="polite"></p>
 <p id="wOpens" class="w-opens" role="timer" hidden></p>
 <p id="wSpecial" class="w-special" role="status" hidden></p>
@@ -43,6 +46,8 @@
   <button class="w-btn" id="wBtnQr" type="button" aria-label="Show or hide the QR code (H)">QR</button>
   <button class="w-btn" id="wBtnSize" type="button" aria-label="QR size (Q)">QR size</button>
   <button class="w-btn" id="wBtnSound" type="button" aria-label="Arrival sound (S)" aria-pressed="false">Sound</button>
+  <button class="w-btn" id="wBtnMusic" type="button" aria-label="Music on or off (U)" aria-pressed="true">Music</button>
+  <button class="w-btn" id="wBtnSong" type="button" aria-label="A song from this device">Song</button>
   <button class="w-btn" id="wBtnFull" type="button" aria-label="Full screen">Full screen</button>
   <button class="w-btn" id="wBtnHelp" type="button" aria-label="Help (?)">Help</button>
 </nav>
@@ -57,6 +62,7 @@
       <tr><th>M</th><td>Next mode</td></tr>
       <tr><th>F</th><td>Grand finale (hosts)</td></tr>
       <tr><th>S</th><td>Arrival sound</td></tr>
+      <tr><th>U</th><td>Music on or off</td></tr>
       <tr><th>?</th><td>This help</td></tr>
     </table>
     <p class="small">TV remote: OK shows or hides the QR, left and right change the mode, up and down change the QR size.</p>
@@ -99,6 +105,7 @@
 <script src="tv.js"></script>
 <script src="drone-show.js"></script>
 <script src="event-fx.js"></script>
+<script src="event-cine.js"></script>
 <script src="event-media.js"></script>
 <script src="event-packer.js"></script>
 </body>

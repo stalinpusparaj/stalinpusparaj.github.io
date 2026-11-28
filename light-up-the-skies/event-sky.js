@@ -27,6 +27,7 @@
  * ES.bell.watch() also returns setOpensAt(ms), level() and state(); onChange gets (changed, bell, {first}).
  *
  * STRINGS:
+ * You have made 3 events today. Try again tomorrow, or use an activation code.
  * Anniversary
  * Couple's names
  * An anniversary wish (optional)
@@ -1036,6 +1037,8 @@
     const plan = PLANS[o.plan] ? o.plan : 'free';
     const now = clock.now();
     if (plan === 'free' && lsGet('luts:es-free-full') === utcDay(now)) return { ok: false, reason: 'FREE_FULL' };
+    // this account's 3 free events a day (es_day_u): said at the date check, not only when the event is made
+    if (plan === 'free') { const mine = lsGet(DAYU_KEY, null); if (mine && mine.u === staffUid() && mine.d === utcDay(now) && mine.n >= DAYU_MAX) return { ok: false, reason: 'DAY_MAX' }; }
     const need = reservation(plan, o.guests);
     const opensAt = +o.opensAt || now, closesAt = +o.closesAt || opensAt + HOUR;
     let all;
@@ -1389,6 +1392,7 @@
       if (bad) throw err('DENIED', 0, `Event settings out of range: ${bad}`);
       if (plan !== 'free' && !doc.ct) throw err('DENIED', 0, 'A contact for photo removal is required on paid plans');
       const check = await dateCheck({ plan, guests: o.guestsExpected || cap.lim, opensAt, closesAt });
+      if (check.reason === 'DAY_MAX') throw err('FULL', 0, 'You have made 3 events today. Try again tomorrow, or use an activation code.');
       if (!check.ok) throw err(check.reason === 'PAUSED' ? 'PAUSED' : check.reason === 'FREE_FULL' ? 'FULL' : 'BOOKED', 0, check.reason);
       const pubDoc = pubFromEvent(doc, gk); // size checks before anything is written
       if (pv === 'none' || (pv === 'play' && !vf)) dayCapCheck(uid);
